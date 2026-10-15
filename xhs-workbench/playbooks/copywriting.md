@@ -8,7 +8,7 @@
 notes/<笔记id>/
 ├── meta.json      标题、话题、状态、封面规格
 ├── content.md     正文（纯文本，可含 emoji，不要用 Markdown 标题/加粗语法）
-├── images/        配图
+├── images/        配图和实况图的动态视频（.mov / .mp4）
 └── cover.png      封面（由工作台根据 meta.json 的 cover 自动生成）
 ```
 
@@ -23,6 +23,11 @@ notes/<笔记id>/
   "topicId": "t_xxx",
   "status": "draft | ready | published",
   "visibility": "public | private（仅自己可见，默认 public）",
+  "coverMode": "template | first（template：用 cover.png 模板封面；first：用第一张配图当封面）",
+  "media": [
+    { "file": "IMG_1234.HEIC", "video": "IMG_1234.MOV" },
+    { "file": "step2.jpg" }
+  ],
   "cover": { "...": "封面规格，见 cover.md" },
   "coverOptions": [],
   "createdAt": "…",
@@ -33,6 +38,8 @@ notes/<笔记id>/
 - 修改 meta.json 时保留其他字段，只改需要的；更新 `updatedAt`。
 - 新建笔记：`id` 用 `n_` + 任意字母数字，建好目录和两个文件，`status` 为 `draft`。
 - `tags` 不带 `#`。
+- `media` 是配图的发布顺序：每项一张静态图（`file`），带 `video` 的是**实况图**（静态图 + 同一时刻的动态视频）。用户通常在工作台里排序和配对，你一般不用改；需要改时只填 `images/` 里实际存在的文件名。
+- 图片总数（模板封面 + 配图）不超过 18 张。
 
 ## 写作步骤
 

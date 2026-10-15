@@ -5,6 +5,7 @@
 | 模块 | 手册 | 状态 |
 |---|---|---|
 | 知识库 | [knowledge.md](knowledge.md) | ✅ 可用 |
+| 浏览器与账号核对（所有网页操作的前置步骤） | [browser.md](browser.md) | ✅ 可用 |
 | 竞品对标 | [benchmark.md](benchmark.md) | ✅ 可用 |
 | 选题热点 | [topics.md](topics.md) | ✅ 可用 |
 | 文案 | [copywriting.md](copywriting.md) | ✅ 可用 |

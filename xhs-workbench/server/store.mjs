@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { P, ACCOUNT_SUBDIRS, accountDir } from './paths.mjs';
+import { P, WORKSPACE, ACCOUNT_SUBDIRS, accountDir } from './paths.mjs';
+import { search } from './search.mjs';
 
 // ---------- 通用工具 ----------
 
@@ -45,12 +46,78 @@ export function httpError(status, message) {
   return err;
 }
 
-// 删除一律移入 .trash，不做永久删除
-export function moveToTrash(file, group) {
+// ---------- 回收站 ----------
+// 删除一律移入 .trash，不做永久删除；index.json 记录原位置，供界面一键恢复
+
+const trashIndexFile = () => path.join(P.trash, 'index.json');
+const rel = (abs) => path.relative(WORKSPACE, abs).split(path.sep).join('/');
+
+function recordTrash(entry) {
+  const index = readJson(trashIndexFile(), { items: [] });
+  index.items.unshift({ id: newId('tr_'), deletedAt: new Date().toISOString(), ...entry });
+  writeJson(trashIndexFile(), index);
+}
+
+/** 把文件或目录移入回收站。meta: { label, account } */
+export function moveToTrash(file, group, meta = {}) {
   const dest = path.join(P.trash, group, `${Date.now()}-${path.basename(file)}`);
   ensureDir(path.dirname(dest));
   fs.renameSync(file, dest);
+  recordTrash({ kind: 'path', group, label: meta.label || path.basename(file), account: meta.account || null, original: rel(file), stored: path.relative(P.trash, dest).split(path.sep).join('/') });
   return dest;
+}
+
+/** 列表文件（{items: []}）中被删除的条目，整条存进回收站 */
+const GROUP_LABEL = { topics: '选题', schedule: '发布排期', benchmarks: '对标账号' };
+
+export function trashListItem(listFile, item, group, meta = {}) {
+  recordTrash({ kind: 'item', group, label: meta.label || `${GROUP_LABEL[group] || group}：${item.title || item.name || item.id}`, account: meta.account || null, listFile: rel(listFile), item });
+}
+
+export function listTrash() {
+  return readJson(trashIndexFile(), { items: [] }).items.map((e) => ({
+    ...e,
+    item: undefined,
+    restorable: e.kind === 'item' || fs.existsSync(path.join(P.trash, e.stored || '')),
+  }));
+}
+
+function freePath(target) {
+  if (!fs.existsSync(target)) return target;
+  const ext = fs.statSync(target).isDirectory() ? '' : path.extname(target);
+  const base = target.slice(0, target.length - ext.length);
+  for (let i = 1; ; i++) {
+    const candidate = `${base}-恢复${i > 1 ? i : ''}${ext}`;
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+}
+
+/** 恢复到原位置；原位置已被占用时加「-恢复」后缀 */
+export function restoreTrash(id) {
+  const index = readJson(trashIndexFile(), { items: [] });
+  const entry = index.items.find((e) => e.id === id);
+  if (!entry) throw httpError(404, '回收站里没有这一项');
+  let restoredTo;
+  if (entry.kind === 'path') {
+    const from = safeJoin(P.trash, entry.stored);
+    if (!fs.existsSync(from)) throw httpError(410, '文件已不在回收站里');
+    const to = freePath(safeJoin(WORKSPACE, entry.original));
+    ensureDir(path.dirname(to));
+    fs.renameSync(from, to);
+    restoredTo = rel(to);
+  } else {
+    const file = safeJoin(WORKSPACE, entry.listFile);
+    const data = readJson(file, { items: [] });
+    const items = Array.isArray(data.items) ? data.items : [];
+    const item = { ...entry.item };
+    if (items.some((x) => x.id === item.id)) item.id = newId(String(item.id).split('_')[0] + '_');
+    items.unshift(item);
+    writeJson(file, { ...data, items });
+    restoredTo = entry.listFile;
+  }
+  index.items = index.items.filter((e) => e.id !== id);
+  writeJson(trashIndexFile(), index);
+  return { restoredTo, entry: { ...entry, item: undefined } };
 }
 
 // ---------- 数据目录初始化 ----------
@@ -226,22 +293,18 @@ export function writeKnowledge(rel, content) {
 export function trashKnowledge(rel) {
   const abs = knowledgeFile(rel);
   if (!fs.existsSync(abs)) throw httpError(404, '文档不存在');
-  return moveToTrash(abs, 'knowledge');
+  return moveToTrash(abs, 'knowledge', { label: `知识库：${rel}` });
 }
 
-export function searchKnowledge(q) {
-  const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
-  const results = [];
-  for (const abs of walkMarkdown(P.knowledge)) {
-    const { _text, ...info } = docInfo(abs);
-    const lower = _text.toLowerCase();
-    if (!words.every((w) => lower.includes(w) || info.title.toLowerCase().includes(w))) continue;
-    const idx = lower.indexOf(words[0]);
-    const start = Math.max(0, idx - 30);
-    results.push({ ...info, snippet: _text.slice(start, start + 120).replace(/\s+/g, ' ') });
-  }
-  return results;
+/** 知识库检索（BM25，见 search.mjs）；返回的 snippet 里用 \u0001 / \u0002 标出命中位置 */
+export function searchKnowledge(q, limit = 20) {
+  const all = walkMarkdown(P.knowledge).map(docInfo);
+  const byPath = new Map(all.map((d) => [d.path, d]));
+  const docs = all.map((d) => ({ id: d.path, title: d.title, tags: d.tags, body: parseFrontmatter(d._text).body }));
+  return search(docs, q, limit).map((r) => {
+    const { _text, ...info } = byPath.get(r.id);
+    return { ...info, score: Math.round(r.score * 100) / 100, snippet: r.snippet };
+  });
 }
 
 // ---------- 对话记录 ----------
@@ -273,7 +336,7 @@ export function saveChat(session) {
 
 export function trashChat(id) {
   const file = chatFile(id);
-  if (fs.existsSync(file)) moveToTrash(file, 'chats');
+  if (fs.existsSync(file)) moveToTrash(file, 'chats', { label: `对话：${readJson(file, {}).title || id}` });
 }
 
 // ---------- 配置 ----------

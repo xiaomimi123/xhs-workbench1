@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 打包技能包：node tools/package.mjs [--allow-dirty]
+// 打包技能包：node tools/package.mjs [--allow-dirty] [--skip-tests]
 // 用 git archive 从已提交的内容生成 dist/xhs-workbench-v<版本>.zip，保证包里只有仓库里的文件。
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKILL = 'xhs-workbench';
 const allowDirty = process.argv.includes('--allow-dirty');
+const skipTests = process.argv.includes('--skip-tests');
 
 function fail(msg) {
   console.error(`打包失败：${msg}`);
@@ -43,7 +44,17 @@ for (const f of jsFiles) {
   }
 }
 
-// 5. 生成 zip
+// 5. 自动化测试（tests/，node:test）
+if (!skipTests) {
+  try {
+    execFileSync(process.execPath, ['--test', 'tests/'], { cwd: ROOT, stdio: 'pipe' });
+  } catch (err) {
+    fail(`自动化测试未通过：\n${String(err.stdout || '').split('\n').filter((l) => /^not ok|error:|expected|actual/.test(l)).join('\n')}`);
+  }
+  console.log('自动化测试：全部通过');
+}
+
+// 6. 生成 zip
 const dist = path.join(ROOT, 'dist');
 fs.mkdirSync(dist, { recursive: true });
 const out = path.join(dist, `${SKILL}-v${version}.zip`);

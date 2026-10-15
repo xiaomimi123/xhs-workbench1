@@ -10,6 +10,10 @@
 //   node scripts/workbench.mjs stop                          停止工作台
 //   node scripts/workbench.mjs browser-setup [--engine playwright|chrome] [--yes]
 //                                                            让 CLI 模式的 agent 能控制浏览器（自动发布 / 抓评论 / 抓数据需要）
+//   node scripts/workbench.mjs autostart on|off|status            登录电脑后自动运行工作台
+//   node scripts/workbench.mjs backup                            立即备份数据
+//   node scripts/workbench.mjs restore <备份文件> --yes           从备份恢复（当前数据先移入回收站）
+//   node scripts/workbench.mjs kb-search "<问题或关键词>"        按相关度检索知识库
 //   node scripts/workbench.mjs lint --account <账号id> --note <笔记id>
 //                                                            检查笔记字数与违禁词
 //   node scripts/workbench.mjs inbox-next [--wait 110]       收件箱模式：领取下一条任务
@@ -22,6 +26,7 @@ import { P, SKILL_DIR, WORKSPACE } from '../server/paths.mjs';
 import { ensureWorkspace, readJson, saveBridgeConfig, getBridgeConfig } from '../server/store.mjs';
 import { ADAPTERS } from '../server/adapters.mjs';
 import { detectAdapters, pingAdapter } from '../server/bridge.mjs';
+import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const flags = parseFlags(rest);
@@ -142,7 +147,13 @@ const commands = {
 
     const prev = getBridgeConfig() || {};
     if (chosen) {
-      saveBridgeConfig({ ...prev, mode: 'cli', adapter: chosen, testedAt: new Date().toISOString(), results });
+      // 之前为同一个 agent 开启过浏览器控制的，保留
+      let adapter = chosen;
+      if (prev.browser && prev.adapter && prev.adapter.id === chosen.id && (prev.browser === 'chrome' || prev.adapter.playwrightMcp)) {
+        adapter = applyBrowser(chosen, prev.browser, prev.adapter.playwrightMcp);
+        console.log('已保留之前的浏览器控制设置。');
+      }
+      saveBridgeConfig({ ...prev, mode: 'cli', adapter, browser: adapter === chosen ? null : prev.browser, testedAt: new Date().toISOString(), results });
       console.log(`\n已选用 CLI 模式：${chosen.name}`);
       console.log(`RESULT: cli ${chosen.id}`);
     } else {
@@ -232,43 +243,20 @@ const commands = {
       return;
     }
 
-    // 先去掉旧的浏览器配置，再按选择的方式加上
-    const args = [...cfg.adapter.args];
-    const drop = (flag, withValue) => {
-      const i = args.indexOf(flag);
-      if (i >= 0) args.splice(i, withValue ? 2 : 1);
-    };
-    drop('--mcp-config', true);
-    drop('--chrome', false);
-    let i = args.indexOf('--allowedTools');
-    if (i < 0) {
-      args.push('--allowedTools', 'WebSearch,WebFetch');
-      i = args.indexOf('--allowedTools');
-    }
-    const tools = args[i + 1].split(',').filter((t) => t && !t.startsWith('mcp__playwright') && !t.startsWith('mcp__claude-in-chrome'));
-
     const plan = [];
-    let mcpFile = null;
-    let mcpConfig = null;
+    let pkg = null;
     if (engine === 'playwright') {
       const v = spawnSync('npm', ['view', '@playwright/mcp', 'version'], { encoding: 'utf8', shell: process.platform === 'win32' });
       const version = v.status === 0 ? v.stdout.trim() : '';
       if (!/^\d+\.\d+\.\d+/.test(version)) fail('无法查询 @playwright/mcp 版本，请确认已安装 Node.js 并能访问 npm');
-      mcpFile = path.join(P.config, 'mcp.json');
-      const profile = path.join(WORKSPACE, 'browser-profile');
-      // 截图、页面快照等临时文件放进 run/，不要散落在数据目录根部（里面可能有账号数据）
-      const outputDir = path.join(P.run, 'browser-output');
-      mcpConfig = { mcpServers: { playwright: { command: 'npx', args: ['-y', `@playwright/mcp@${version}`, '--user-data-dir', profile, '--output-dir', outputDir] } } };
-      args.push('--mcp-config', mcpFile);
-      tools.push('mcp__playwright');
-      plan.push(`写入 ${mcpFile}：使用 Playwright MCP ${version}，浏览器资料保存在 ${profile}（独立于你日常的浏览器，第一次需要在它打开的窗口里登录小红书）`);
+      pkg = `@playwright/mcp@${version}`;
+      plan.push(`使用 Playwright MCP ${version}：每个账号一份独立的浏览器资料（${path.join(WORKSPACE, 'browser-profiles', '<账号id>')}），登录状态互不影响；每个账号第一次使用时需要在 agent 打开的窗口里登录`);
     } else {
-      args.push('--chrome');
-      tools.push('mcp__claude-in-chrome');
-      plan.push('启用 Claude in Chrome：直接使用你日常 Chrome 里的登录状态（需要已安装 Claude 浏览器扩展）');
+      plan.push('启用 Claude in Chrome：直接使用你日常 Chrome 里的登录状态（需要已安装 Claude 浏览器扩展）。注意：这种方式所有账号共用一个浏览器，多账号时请用 Playwright');
     }
-    args[args.indexOf('--allowedTools') + 1] = tools.join(',');
-    plan.push(`允许 agent 在无界面模式下使用浏览器工具（${tools.join(', ')}）`);
+    const adapter = applyBrowser(cfg.adapter, engine, pkg);
+    const tools = adapter.args[adapter.args.indexOf('--allowedTools') + 1];
+    plan.push(`允许 agent 在无界面模式下使用浏览器工具（${tools.split(',').join(', ')}）`);
 
     console.log('将进行以下修改：');
     plan.forEach((p) => console.log(`- ${p}`));
@@ -276,8 +264,6 @@ const commands = {
       console.log('\n这会让工作台调用的 agent 无需逐次确认就能操作浏览器。请先向用户说明并征得同意，然后加 --yes 重新运行。');
       return;
     }
-    if (mcpFile) fs.writeFileSync(mcpFile, JSON.stringify(mcpConfig, null, 2));
-    const adapter = { ...cfg.adapter, args };
     process.stdout.write('测试连接 … ');
     const r = await pingAdapter(adapter, 300_000);
     if (!r.ok) {
@@ -285,8 +271,50 @@ const commands = {
       fail('浏览器配置未生效，原配置保持不变');
     }
     saveBridgeConfig({ ...cfg, adapter, browser: engine, testedAt: new Date().toISOString() });
+    const migrated = migrateLegacyProfile();
+    if (migrated) console.log(`已把旧的浏览器登录资料迁移到账号 ${migrated} 名下。`);
     console.log(`通过（${(r.ms / 1000).toFixed(1)} 秒）`);
     console.log(`RESULT: browser ${engine}`);
+  },
+
+  async autostart() {
+    const { autostartStatus, setAutostart } = await import('../server/system.mjs');
+    const action = flags._[0] || 'status';
+    if (action === 'on' || action === 'off') {
+      const st = setAutostart(action === 'on');
+      console.log(st.enabled ? `已开启开机自启（${st.file}）。电脑登录后会在后台自动运行工作台。` : '已关闭开机自启（正在运行的工作台不受影响）。');
+    } else {
+      const st = autostartStatus();
+      console.log(st.enabled ? `开机自启：已开启（${st.file}）` : '开机自启：未开启');
+    }
+  },
+
+  async backup() {
+    ensureWorkspace();
+    const { createBackup } = await import('../server/backup.mjs');
+    const b = createBackup();
+    console.log(`备份完成：${path.join(WORKSPACE, 'backups', b.name)}（${b.files} 个文件，${(b.size / 1024 / 1024).toFixed(1)} MB）`);
+  },
+
+  async restore() {
+    const src = flags._[0];
+    if (!src) fail('用法：restore <备份文件名或 zip 路径> --yes');
+    if (!flags.yes) {
+      console.log('恢复会先把当前的配置、账号数据、知识库和对话整体移入回收站（可撤销），再写入备份内容；本机的 agent 连接配置保留。确认后加 --yes 运行。');
+      return;
+    }
+    const { restoreBackup } = await import('../server/backup.mjs');
+    const r = restoreBackup(fs.existsSync(src) ? path.resolve(src) : src);
+    console.log(`已从 ${r.from} 恢复 ${r.restored} 个文件。正在运行的工作台请刷新页面。`);
+  },
+
+  async 'kb-search'() {
+    const q = flags._.join(' ');
+    if (!q) fail('用法：kb-search "<问题或关键词>"');
+    const { searchKnowledge } = await import('../server/store.mjs');
+    const results = searchKnowledge(q, 8);
+    if (!results.length) return console.log('知识库里没有找到相关内容。');
+    for (const r of results) console.log(`[${r.score}] knowledge/${r.path}  ${r.title}\n    ${r.snippet.replace(/[\u0001\u0002]/g, '')}`);
   },
 
   async lint() {

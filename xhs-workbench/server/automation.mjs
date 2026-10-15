@@ -130,7 +130,7 @@ export function updateSchedule(acc, input) {
 }
 
 export function deleteSchedule(acc, id) {
-  removeItem(scheduleFile(acc), 's_', id, 'schedule');
+  removeItem(scheduleFile(acc), 's_', id, 'schedule', { account: acc });
 }
 
 // ---------- 评论私信 ----------
@@ -326,3 +326,18 @@ export class Scheduler {
   }
 }
 
+
+/** 防休眠「自动」模式：未来 3 小时内有排期，或开启了定时检查评论 / 每日抓数据 */
+export function needsAwake() {
+  const soon = Date.now() + 3 * 3600_000;
+  for (const a of listAccounts()) {
+    try {
+      if (listSchedule(a.id).some((s) => (s.status === 'scheduled' && new Date(s.publishAt).getTime() <= soon) || s.status === 'running')) return true;
+      const cfg = getAutomation(a.id);
+      if (cfg.engage.checkEveryHours > 0 || cfg.analytics.dailyAt) return true;
+    } catch {
+      /* 账号目录异常时跳过 */
+    }
+  }
+  return false;
+}

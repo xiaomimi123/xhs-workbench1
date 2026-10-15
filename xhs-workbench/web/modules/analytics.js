@@ -221,6 +221,7 @@ function draw(main) {
       <div class="spacer"></div>
       <button class="btn" data-act="toggle-settings">⚙️ 设置</button>
       <button class="btn" data-act="fetch">让 agent 抓取数据</button>
+      ${d.notes.length ? `<a class="btn" href="/api/analytics/export?${acc()}&t=${encodeURIComponent(S.token)}">导出 CSV</a>` : ''}
       <button class="btn primary" data-act="report" ${hasData ? '' : 'disabled'}>让 agent 写复盘</button>
     </div>
     ${V.showSettings ? settingsHtml() : ''}

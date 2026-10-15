@@ -1,6 +1,6 @@
 # 小红书自动化运营工作台 · 整体架构设计
 
-> 状态：M1–M3 已实现（v0.3.0）。模块设计细节见 [m2-content-production.md](m2-content-production.md)、[m3-operations.md](m3-operations.md)。
+> 状态：M1–M3 及 v0.4 增强已实现（v0.4.0）。模块设计细节见 [m2-content-production.md](m2-content-production.md)、[m3-operations.md](m3-operations.md)、[v0.4-enhancements.md](v0.4-enhancements.md)。
 
 ## 1. 目标与定位
 
@@ -109,7 +109,7 @@ xhs-workbench/                 ← 分发的 skill 包
 ├── playbooks/                 ← 各模块操作手册（agent 读）
 │   ├── README.md（索引 + 账号安全规则）  knowledge.md
 │   ├── benchmark.md  topics.md  copywriting.md  cover.md
-│   └── publish.md  engage.md  analytics.md
+│   └── browser.md  publish.md  engage.md  analytics.md
 ├── server/                    ← 零依赖 Node 本地服务
 │   ├── server.mjs   HTTP 接口、SSE 推送、会话管理
 │   ├── bridge.mjs   桥接层（CLI 运行器、收件箱队列、连接自检）
@@ -118,18 +118,24 @@ xhs-workbench/                 ← 分发的 skill 包
 │   ├── store.mjs    数据层（账号、知识库、对话、配置）
 │   ├── content.mjs  M2 内容数据（对标、选题、笔记、封面）
 │   ├── automation.mjs M3 排期、评论私信、数据、自动化设置、提醒与定时调度器
+│   ├── browser.mjs  按账号隔离的浏览器配置
+│   ├── system.mjs   开机自启、防休眠
+│   ├── backup.mjs   备份与恢复
+│   ├── search.mjs   知识库检索（BM25）
+│   └── zip.mjs      零依赖 ZIP 读写
 │   └── paths.mjs    路径定义
 ├── web/                       ← 工作台前端（纯静态，无需构建）
 │   ├── index.html  app.js（导航、对话、知识库、账号、设置）  core.js（公共状态与接口）
 │   ├── md.js（离线 Markdown 渲染）  lint.js（字数与违禁词）  covers.js（封面 Canvas 模板）  styles.css
-│   └── modules/  benchmark.js  topics.js  copywriting.js  cover.js  schedule.js  engage.js  analytics.js
+│   └── modules/  benchmark.js  topics.js  copywriting.js  media.js  cover.js  schedule.js  engage.js  analytics.js  system.js
 ├── scripts/workbench.mjs      ← 统一命令入口
 └── templates/knowledge/       ← 知识库初始模板
 
 ~/XHS-Workbench/               ← 运行时用户数据（不随 skill 分发，可用 XHS_WORKSPACE 修改）
 ├── config/        bridge.json  settings.json  accounts.json
 ├── accounts/<id>/ benchmarks/ topics/ notes/ engage/ analytics/ schedule.json automation.json
-├── browser-profile/  Playwright MCP 的浏览器资料（启用后）
+├── browser-profiles/<id>/  每个账号的 Playwright 浏览器资料（启用后）
+├── backups/       自动 / 手动备份
 ├── knowledge/     知识库（所有账号共享）
 ├── chats/         网页对话记录
 ├── logs/          运行日志

@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SKILL_DIR, WORKSPACE } from './paths.mjs';
 import { getBridgeConfig } from './store.mjs';
+import { mcpConfigFor } from './browser.mjs';
 
 const IS_WIN = process.platform === 'win32';
 const INBOX_ONLINE_MS = 45_000;
@@ -62,6 +63,8 @@ function winQuote(arg) {
 export function runCli(adapter, prompt, opts = {}) {
   const { agentSessionId, timeoutMs = 30 * 60_000, onText = () => {}, onTool = () => {}, onSession = () => {} } = opts;
   const vars = { prompt, workspace: WORKSPACE, skillDir: SKILL_DIR, agentSessionId: agentSessionId || '' };
+  // 每个账号用自己的浏览器资料（登录状态隔离）
+  if ((adapter.args || []).includes('{mcpConfig}')) vars.mcpConfig = mcpConfigFor(opts.accountId, adapter.playwrightMcp);
   let args = (adapter.args || []).map((a) => fill(a, vars));
   if (agentSessionId && adapter.resumeArgs) args = args.concat(adapter.resumeArgs.map((a) => fill(a, vars)));
   const command = adapter.command || adapter.bins[0];
@@ -186,7 +189,8 @@ function summarizeToolInput(input) {
 export class Bridge extends EventEmitter {
   constructor() {
     super();
-    this.running = new Map(); // CLI 模式：taskId -> { cancel }
+    this.running = new Map(); // CLI 模式：taskId -> { cancel, accountId }
+    this.cliQueue = []; // CLI 模式：同一账号的浏览器资料不能同时被两个任务打开，排队执行
     this.tasks = new Map(); // 收件箱模式：taskId -> task
     this.waiters = [];
     this.lastPoll = 0;
@@ -207,7 +211,7 @@ export class Bridge extends EventEmitter {
       browser: cfg ? cfg.browser || null : null,
       inboxOnline: Date.now() - this.lastPoll < INBOX_ONLINE_MS,
       lastPollAt: this.lastPoll ? new Date(this.lastPoll).toISOString() : null,
-      pending: inboxTasks.filter((t) => t.state === 'pending').length,
+      pending: inboxTasks.filter((t) => t.state === 'pending').length + this.cliQueue.length,
       running: this.running.size + inboxTasks.filter((t) => t.state === 'claimed').length,
     };
   }
@@ -221,6 +225,12 @@ export class Bridge extends EventEmitter {
   }
 
   cancel(taskId) {
+    const queued = this.cliQueue.findIndex((t) => t.id === taskId);
+    if (queued >= 0) {
+      this.cliQueue.splice(queued, 1);
+      this.emit('error', { taskId, message: '已取消' });
+      return true;
+    }
     const run = this.running.get(taskId);
     if (run) {
       run.cancel();
@@ -235,19 +245,40 @@ export class Bridge extends EventEmitter {
     return false;
   }
 
+  #accountBusy(accountId) {
+    return [...this.running.values()].some((r) => r.accountId === accountId);
+  }
+
   #runCliTask(cfg, task) {
+    // 启用了按账号隔离的浏览器时，同一账号的任务排队
+    const exclusive = (cfg.adapter.args || []).includes('{mcpConfig}');
+    if (exclusive && this.#accountBusy(task.accountId)) {
+      this.cliQueue.push(task);
+      return;
+    }
+    this.emit('claimed', { taskId: task.id });
     const run = runCli(cfg.adapter, task.prompt, {
+      accountId: task.accountId,
       agentSessionId: task.agentSessionId,
       timeoutMs: cfg.timeoutMs,
       onText: (text) => this.emit('delta', { taskId: task.id, text }),
       onTool: (name, detail) => this.emit('tool', { taskId: task.id, name, detail }),
       onSession: (agentSessionId) => this.emit('session', { taskId: task.id, agentSessionId }),
     });
-    this.running.set(task.id, run);
+    this.running.set(task.id, { ...run, accountId: task.accountId });
     run.promise
       .then((res) => this.emit('done', { taskId: task.id, ...res }))
       .catch((err) => this.emit('error', { taskId: task.id, message: err.message }))
-      .finally(() => this.running.delete(task.id));
+      .finally(() => {
+        this.running.delete(task.id);
+        const i = this.cliQueue.findIndex((t) => !this.#accountBusy(t.accountId));
+        if (i >= 0) {
+          const [next] = this.cliQueue.splice(i, 1);
+          const cur = this.config();
+          if (cur && cur.mode === 'cli') this.#runCliTask(cur, next);
+          else this.emit('error', { taskId: next.id, message: '连接模式已变更，请重新发送' });
+        }
+      });
   }
 
   // ----- 收件箱模式 -----

@@ -7,6 +7,7 @@ import * as cover from './modules/cover.js';
 import * as schedule from './modules/schedule.js';
 import * as engage from './modules/engage.js';
 import * as analytics from './modules/analytics.js';
+import { renderSystem } from './modules/system.js';
 
 // ---------- 模块定义 ----------
 
@@ -70,8 +71,13 @@ function connectEvents() {
       case 'alert':
         onAlert(ev);
         break;
+      case 'restored':
+        toast('数据已恢复，正在刷新…');
+        setTimeout(() => location.reload(), 800);
+        break;
       case 'content.changed':
         if (['schedule', 'engage'].includes(ev.area)) refreshAlerts();
+        if (ev.area === 'browser') refreshAccounts();
         if (ev.account !== S.accountId) break;
         cover.autoRender(ev);
         for (const m of MODULES) if (m.module && m.id === S.view && m.module.onContent) m.module.onContent(ev);
@@ -268,7 +274,7 @@ function viewKnowledge() {
     </div>
     <div class="kb">
       <div class="card kb-side">
-        <input type="search" id="kb-search" placeholder="搜索知识库…" value="${esc(S.kb.query)}">
+        <input type="search" id="kb-search" placeholder="搜索知识库，例如：怎么写标题" value="${esc(S.kb.query)}">
         <div class="kb-tree" id="kb-tree"></div>
       </div>
       <div class="card kb-main" id="kb-main"></div>
@@ -284,8 +290,9 @@ function renderKbTree() {
   if (S.kb.query) {
     const r = S.kb.results || [];
     tree.innerHTML = r.length
-      ? r.map((d) => `<button class="kb-doc${d.path === cur ? ' active' : ''}" data-doc="${esc(d.path)}">${esc(d.title)}<span class="snippet">${esc(d.snippet)}</span></button>`).join('')
+      ? r.map((d) => `<button class="kb-doc${d.path === cur ? ' active' : ''}" data-doc="${esc(d.path)}">${esc(d.title)}<span class="snippet">${highlight(d.snippet)}</span></button>`).join('')
       : '<div class="empty">没有找到</div>';
+    tree.insertAdjacentHTML('beforeend', `<button class="btn small ask-kb" data-ask-kb>🤖 问 agent：「${esc(S.kb.query)}」</button>`);
     return;
   }
   const byFolder = new Map([['', []], ...S.kb.folders.map((f) => [f, []])]);
@@ -300,6 +307,11 @@ function renderKbTree() {
     if (folder && !docs.length) html += '<div class="kb-doc muted" style="cursor:default">（空）</div>';
   }
   tree.innerHTML = html || '<div class="empty">知识库是空的</div>';
+}
+
+// 搜索结果片段：\u0001…\u0002 之间是命中的词
+function highlight(snip) {
+  return esc(snip).replace(/\u0001/g, '<mark>').replace(/\u0002/g, '</mark>');
 }
 
 function renderKbDoc() {
@@ -422,7 +434,9 @@ function viewAccounts() {
         <dt>定位</dt><dd>${esc(a.positioning) || '<span class="muted">未填写</span>'}</dd>
         <dt>目标人群</dt><dd>${esc(a.audience) || '<span class="muted">未填写</span>'}</dd>
         <dt>内容风格</dt><dd>${esc(a.style) || '<span class="muted">未填写</span>'}</dd>
+        <dt>浏览器登录</dt><dd>${browserLine(a)}</dd>
       </dl>
+      <div class="row" style="margin-top:10px"><button class="btn small" data-login-account="${esc(a.id)}">${a.browser && a.browser.loggedIn ? '检查登录状态' : '在浏览器里登录这个账号'}</button></div>
     </div>`).join('');
 
   const a = editing === 'new' ? {} : S.accounts.accounts.find((x) => x.id === editing);
@@ -451,6 +465,19 @@ function viewAccounts() {
     </div>
     ${form}
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">${list}</div>`;
+}
+
+function browserLine(a) {
+  const b = a.browser;
+  if (!b) return '<span class="muted">还没有登录过</span>';
+  const who = [b.nickname, b.xhsId && `小红书号 ${esc(b.xhsId)}`].filter(Boolean).map(esc).join(' · ');
+  const mismatch = a.xhsId && b.xhsId && a.xhsId !== b.xhsId;
+  return `${b.loggedIn ? '✅ 已登录' : '⚠️ 未登录'}${who ? `：${who}` : ''}${b.checkedAt ? `<span class="muted">（${fmtTime(b.checkedAt)} 检查）</span>` : ''}${mismatch ? `<div class="error-line">登录的小红书号和账号信息里填的（${esc(a.xhsId)}）不一致，自动操作会被拦下</div>` : ''}`;
+}
+
+function loginAccount(id) {
+  if (id !== S.accountId) switchAccount(id);
+  sendMessage('请按 playbooks/browser.md 打开小红书创作者中心，检查这个账号的浏览器登录状态；没登录就停在登录页等我本人登录（每 15 秒检查一次，最多等 5 分钟）。完成后更新登录状态文件，不要做任何其他操作。');
 }
 
 async function saveAccountForm(form) {
@@ -534,6 +561,7 @@ function viewSettings() {
           <code>打开小红书工作台，并进入值守模式</code>
         </div>` : ''}
     </div>
+    <div id="system-panels"></div>
     <div class="card" style="max-width:760px;margin-top:16px">
       <h3 style="margin-top:0">目录</h3>
       <dl class="kv">
@@ -542,6 +570,7 @@ function viewSettings() {
         <dt>版本</dt><dd>${esc(info.version)}</dd>
       </dl>
     </div>`;
+  renderSystem($('#system-panels'));
 }
 
 // ---------- 对话 ----------
@@ -590,7 +619,9 @@ function msgHtml(m) {
   const more = (m.tools || []).length > 6 ? `<div class="tool">… 共使用工具 ${m.tools.length} 次</div>` : '';
   const working = m.status === 'pending' || m.status === 'running';
   let status = '';
-  if (m.status === 'pending') status = S.bridge && S.bridge.mode === 'inbox' && !S.bridge.inboxOnline ? '等待 agent 领取任务…' : '已发送，等待 agent 领取…';
+  if (m.status === 'pending') {
+    status = S.bridge && S.bridge.mode === 'cli' ? '排队中：这个账号的上一个任务完成后开始' : S.bridge && !S.bridge.inboxOnline ? '等待 agent 领取任务…' : '已发送，等待 agent 领取…';
+  }
   else if (m.status === 'running' && !m.text) status = 'agent 正在处理…';
   return `<div class="msg assistant" data-msg="${m.id}"><div class="bubble">
       ${tools || more ? `<div class="tools">${more}${tools}</div>` : ''}
@@ -699,14 +730,18 @@ function usePrompt(text) {
 function bindEvents() {
   document.addEventListener('click', async (e) => {
     if (e.target.id === 'overlay') return ($('#overlay').hidden = true);
-    const t = e.target.closest('[data-nav],[data-prompt],[data-doc],[data-use-account],[data-edit-account],[data-default-account],[data-use-adapter],[data-alert],[data-close-overlay],button');
+    const t = e.target.closest('[data-nav],[data-prompt],[data-doc],[data-use-account],[data-login-account],[data-ask-kb],[data-edit-account],[data-default-account],[data-use-adapter],[data-alert],[data-close-overlay],button');
     if (!t) return;
     if (t.dataset.alert) return openAlert(Number(t.dataset.alert));
+    if (t.dataset.askKb !== undefined) {
+      return sendMessage(`请在知识库（knowledge/ 目录）里查找和「${S.kb.query}」相关的内容并回答我的问题，按意思找、不要只按字面匹配，回答时列出引用的文档路径。可以先用 \`node ${S.info.skillDir}/scripts/workbench.mjs kb-search "${S.kb.query}"\` 找候选文档（不能执行命令时直接搜索文件）。`);
+    }
     if (t.dataset.closeOverlay !== undefined) return ($('#overlay').hidden = true);
     if (t.dataset.nav) return go(t.dataset.nav);
     if (t.dataset.prompt) return usePrompt(t.dataset.prompt);
     if (t.dataset.doc) return openDoc(t.dataset.doc);
     if (t.dataset.useAccount) return switchAccount(t.dataset.useAccount);
+    if (t.dataset.loginAccount) return loginAccount(t.dataset.loginAccount);
     if (t.dataset.editAccount) {
       S.editingAccount = t.dataset.editAccount;
       return viewAccounts();

@@ -12,17 +12,21 @@
 | M1 | 技能包骨架、安装自检、Agent 桥接层、对话面板、知识库、多账号 | ✅ 已完成 |
 | M2 | 竞品对标拆解、选题热点、文案、封面配图 | ✅ 已完成 |
 | M3 | 定时发布、评论私信、数据复盘 | ✅ 已完成（已在测试账号上验证抓数据、抓评论、回复评论、定时自动发布） |
+| v0.4 | 多账号分别登录、实况图与多图编辑、开机自启与防休眠、备份与回收站、知识库智能检索、自动化测试 | ✅ 已完成 |
 
 ## 目录结构
 
 ```
 .
 ├── README.md
-├── tools/package.mjs          打包脚本（生成 dist/xhs-workbench-v<版本>.zip）
+├── package.json               开发脚本（npm test / npm run package，无依赖）
+├── tests/                     自动化测试（node:test，含假 agent）
+├── tools/package.mjs          打包脚本（先跑测试，再生成 dist/xhs-workbench-v<版本>.zip）
 ├── docs/
 │   ├── architecture.md        整体架构设计
 │   ├── m2-content-production.md  M2 内容生产模块设计
-│   └── m3-operations.md       M3 运营自动化设计
+│   ├── m3-operations.md       M3 运营自动化设计
+│   └── v0.4-enhancements.md   v0.4 增强功能设计
 └── xhs-workbench/             ← 分发的技能包（整个文件夹交给用户）
     ├── SKILL.md               agent 入口：安装、自检、启动、值守流程
     ├── README.md              给用户的安装与使用指南
@@ -42,6 +46,14 @@
 1. 解压，把 `xhs-workbench/` 放进 agent 的 skills 目录（如 Claude Code 的 `~/.claude/skills/`），或放在任意位置。
 2. 对 agent 说：**打开小红书工作台**（不支持 skill 的 agent：说"阅读 xhs-workbench/SKILL.md 并照做"）。
 3. agent 会自动检查 Node.js、初始化数据、测试连接并在浏览器中打开工作台。
+
+## 测试
+
+```bash
+npm test
+```
+
+零依赖（Node 内置 `node:test`），约 1 秒跑完。用 `tests/fixtures/fake-agent.mjs` 模拟各种 agent 输出，不会调用真实 AI。
 
 ## 打包发布
 
@@ -70,7 +82,7 @@ node xhs-workbench/scripts/workbench.mjs bridge-test --prefer claude-code
 node xhs-workbench/scripts/workbench.mjs start --open
 ```
 
-全部命令：`setup`、`bridge-test`、`browser-setup`、`start`、`open`、`status`、`stop`、`lint`、`inbox-next`、`inbox-reply`（不带参数运行可查看说明）。
+全部命令：`setup`、`bridge-test`、`browser-setup`、`start`、`open`、`status`、`stop`、`autostart`、`backup`、`restore`、`kb-search`、`lint`、`inbox-next`、`inbox-reply`（不带参数运行可查看说明）。
 
 ### 环境变量
 
@@ -106,3 +118,12 @@ node xhs-workbench/scripts/workbench.mjs start --open
 - **浏览器控制**：`browser-setup` 为 CLI 模式的 Claude Code 接入 Playwright MCP 或 Claude in Chrome（需用户同意）
 
 > 定时任务需要电脑开机且工作台保持运行。
+
+### v0.4 增强（详见 [docs/v0.4-enhancements.md](docs/v0.4-enhancements.md)）
+
+- **多账号分别登录**：每个账号独立的浏览器资料，同账号任务排队，操作前核对小红书号
+- **实况图与多图编辑**：配图排序、裁剪、实况图配对、素材打包下载
+- **开机自启与防休眠**：macOS / Windows / Linux；单实例锁防止重复发布
+- **备份与回收站**：每日自动备份、一键恢复；删除内容可还原；数据导出 CSV
+- **知识库智能检索**：BM25 相关度排序 + 「问 agent」
+- **自动化测试**：`npm test`，打包前自动运行

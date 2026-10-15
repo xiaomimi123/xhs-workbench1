@@ -1,6 +1,6 @@
 // 发布排期：安排发布时间 → 到点提醒手动发布（附发布助手）或交给 agent 自动发布
 import { esc } from '../md.js';
-import { S, $, api, acc, fileUrl, toast, fmtTime, ask, opt, accDirRel } from '../core.js';
+import { S, $, api, acc, toast, fmtTime, ask, opt, accDirRel } from '../core.js';
 
 export const CREATOR_URL = 'https://creator.xiaohongshu.com/publish/publish';
 
@@ -109,7 +109,8 @@ function helperHtml(s) {
         <div class="row" style="margin-top:6px">
           <button class="btn small" data-copy="title" data-note="${esc(s.noteId)}">复制标题</button>
           <button class="btn small" data-copy="body" data-note="${esc(s.noteId)}">复制正文 + 话题</button>
-          ${n && n.hasCover ? `<a class="btn small" href="${fileUrl(`notes/${s.noteId}/cover.png`, n.coverHash)}" download="${esc(s.title)}-封面.png">下载封面</a>` : '<span class="muted">（这篇还没有封面）</span>'}
+          <a class="btn small" href="/api/notes/bundle?${acc(`id=${encodeURIComponent(s.noteId)}`)}&t=${encodeURIComponent(S.token)}">下载全部素材（封面 + 配图 + 实况视频）</a>
+          ${n && !n.hasCover ? '<span class="muted">（这篇还没有模板封面）</span>' : ''}
         </div>
       </div>
       <div><strong>② 去发布</strong>

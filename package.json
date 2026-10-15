@@ -1,0 +1,10 @@
+{
+  "name": "xhs-workbench-dev",
+  "private": true,
+  "type": "module",
+  "description": "小红书运营工作台的开发仓库（分发的技能包在 xhs-workbench/，无第三方依赖）",
+  "scripts": {
+    "test": "node --test tests/",
+    "package": "node tools/package.mjs"
+  }
+}

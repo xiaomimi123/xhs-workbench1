@@ -1,6 +1,6 @@
 ---
 name: xhs-workbench
-description: 小红书自动化运营工作台。在本地启动一个 Web 工作台，用户在网页里和你（本地 agent）对话，完成选题、文案、封面、发布、评论私信、数据复盘、竞品对标和知识库沉淀等小红书运营工作。当用户说"打开小红书工作台""关闭小红书工作台""小红书运营""xhs workbench""进入值守模式""运行连接自检""开启浏览器控制"，或要处理小红书账号运营相关任务时使用。
+description: 小红书自动化运营工作台。在本地启动一个 Web 工作台，用户在网页里和你（本地 agent）对话，完成选题、文案、封面、发布、评论私信、数据复盘、竞品对标和知识库沉淀等小红书运营工作。当用户说"打开小红书工作台""关闭小红书工作台""小红书运营""xhs workbench""进入值守模式""运行连接自检""开启浏览器控制""开机自动运行工作台""备份小红书工作台"，或要处理小红书账号运营相关任务时使用。
 ---
 
 # 小红书运营工作台（xhs-workbench）
@@ -77,6 +77,7 @@ WB bridge-test --prefer <你自己的 id>
 M3 的自动发布、检查评论私信、抓取数据都需要 agent 能操作浏览器。用户想用这些自动功能时：
 
 - **收件箱模式**：你在自己的会话里用自带的浏览器 / 电脑控制能力完成即可。
+- **多账号**：Playwright 方式下每个账号有独立的浏览器资料，各自登录一次即可；任何网页操作前都按 `playbooks/browser.md` 核对登录的小红书号。
 - **CLI 模式（Claude Code）**：运行 `WB browser-setup`，按输出向用户说明会做什么修改，用户同意后运行 `WB browser-setup --yes`（或 `--engine chrome --yes` 使用用户日常的 Chrome）。详见 `adapters/claude-code.md`。
 - 用户不想开放浏览器控制：工作台的「到点提醒 + 手动发布助手」、截图导入等方式依然可用。
 
@@ -100,7 +101,10 @@ M3 的自动发布、检查评论私信、抓取数据都需要 agent 能操作�
 | `WB stop` | 停止工作台（用户说"关闭小红书工作台"时执行） |
 | `WB start --open` | 启动（已运行时直接打开） |
 | `WB lint --account <账号id> --note <笔记id>` | 检查笔记字数与违禁词 |
-| `WB browser-setup [--engine chrome] [--yes]` | 为 CLI 模式的 agent 开启浏览器控制 |
+| `WB browser-setup [--engine chrome] [--yes]` | 为 CLI 模式的 agent 开启浏览器控制（Playwright 方式下每个账号一份独立浏览器） |
+| `WB autostart on\|off\|status` | 开机自启（用户说"开机自动运行工作台"时执行，先征得同意） |
+| `WB backup` / `WB restore <备份> --yes` | 备份数据 / 从备份恢复（恢复前先征得同意） |
+| `WB kb-search "<问题>"` | 按相关度检索知识库 |
 
 运行日志：`~/XHS-Workbench/logs/server.log`。
 

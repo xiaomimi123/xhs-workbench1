@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { P, accountDir } from './paths.mjs';
-import { readJson, writeJson, ensureDir, newId, httpError, moveToTrash, safeJoin, listAccounts } from './store.mjs';
+import { readJson, writeJson, ensureDir, newId, httpError, moveToTrash, trashListItem, safeJoin, listAccounts } from './store.mjs';
 
 export function accRoot(accountId) {
   if (!listAccounts().some((a) => a.id === accountId)) throw httpError(404, '账号不存在');
@@ -47,16 +47,14 @@ export function upsertItem(file, prefix, input, allowed) {
   return item;
 }
 
-export function removeItem(file, prefix, id, trashGroup) {
+export function removeItem(file, prefix, id, trashGroup, meta = {}) {
   const items = readItems(file, prefix);
   const idx = items.findIndex((x) => x.id === id);
   if (idx < 0) throw httpError(404, '条目不存在');
   const [removed] = items.splice(idx, 1);
-  // 被删条目追加到回收站日志，便于找回
-  const trashFile = path.join(P.trash, `${trashGroup}.jsonl`);
-  ensureDir(path.dirname(trashFile));
-  fs.appendFileSync(trashFile, JSON.stringify({ ...removed, deletedAt: now() }) + '\n');
+  trashListItem(file, removed, trashGroup, meta); // 整条存进回收站，可恢复
   writeJson(file, { items });
+  return removed;
 }
 
 export function listFiles(dir, exts) {
@@ -68,12 +66,17 @@ export function listFiles(dir, exts) {
 }
 
 export const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+// 笔记配图：静态图（含 iPhone 的 HEIC）+ 实况图的动态视频
+export const STILL_EXTS = [...IMAGE_EXTS, '.heic'];
+export const VIDEO_EXTS = ['.mov', '.mp4'];
+export const MAX_IMAGES = 18; // 小红书图文笔记的图片上限（含封面，以平台提示为准）
 
 // 保存前端上传的文件（base64）
 export function saveUpload(dir, filename, dataBase64, exts = IMAGE_EXTS) {
   const ext = path.extname(filename || '').toLowerCase();
   if (!exts.includes(ext)) throw httpError(400, `只支持 ${exts.map((e) => e.slice(1)).join(' / ')} 文件`);
-  const base = path.basename(filename, ext).replace(/[^\w一-龥-]+/g, '_').slice(0, 40) || 'image';
+  // 扩展名可能是大写（如 IMG_1234.HEIC），按长度去掉而不是按字符串匹配
+  const base = path.basename(filename).slice(0, -ext.length).replace(/[^\w一-龥-]+/g, '_').slice(0, 40) || 'image';
   ensureDir(dir);
   let name = `${base}${ext}`;
   for (let i = 2; fs.existsSync(path.join(dir, name)); i++) name = `${base}-${i}${ext}`;
@@ -142,9 +145,9 @@ export function uploadBenchmarkShot(accountId, id, filename, dataBase64) {
 
 export function deleteBenchmark(accountId, id) {
   checkId(id);
-  removeItem(benchIndex(accountId), 'b_', id, 'benchmarks');
+  const b = removeItem(benchIndex(accountId), 'b_', id, 'benchmarks', { account: accountId });
   const dir = path.join(accRoot(accountId), 'benchmarks', id);
-  if (fs.existsSync(dir)) moveToTrash(dir, 'benchmarks');
+  if (fs.existsSync(dir)) moveToTrash(dir, 'benchmarks', { account: accountId, label: `对标拆解资料：${b.name}` });
 }
 
 // ---------- 选题 ----------
@@ -165,12 +168,12 @@ export function saveTopic(accountId, input) {
 }
 
 export function deleteTopic(accountId, id) {
-  removeItem(topicsFile(accountId), 't_', checkId(id), 'topics');
+  removeItem(topicsFile(accountId), 't_', checkId(id), 'topics', { account: accountId });
 }
 
 // ---------- 笔记（文案 + 封面） ----------
 
-const NOTE_FIELDS = ['title', 'titleOptions', 'tags', 'topicId', 'status', 'cover', 'coverOptions', 'publishedUrl', 'publishedAt', 'visibility'];
+const NOTE_FIELDS = ['title', 'titleOptions', 'tags', 'topicId', 'status', 'cover', 'coverOptions', 'publishedUrl', 'publishedAt', 'visibility', 'coverMode'];
 
 function noteDir(accountId, id) {
   return path.join(accRoot(accountId), 'notes', checkId(id));
@@ -226,7 +229,108 @@ export function noteDetail(accountId, id) {
   } catch {
     /* 还没有正文 */
   }
-  return { ...meta, content, images: listFiles(path.join(dir, 'images'), IMAGE_EXTS) };
+  const media = normalizeMedia(dir, meta.media);
+  return {
+    ...meta,
+    content,
+    coverMode: meta.coverMode === 'first' ? 'first' : 'template',
+    media,
+    images: media.map((m) => m.file),
+    looseVideos: looseVideos(dir, media),
+  };
+}
+
+/**
+ * 配图顺序与实况图配对：meta.media = [{ file, video? }]
+ * - 去掉已不存在的文件；images/ 里新出现的静态图追加到末尾
+ * - 同名的静态图和视频（如 IMG_1234.HEIC + IMG_1234.MOV）自动配成实况图
+ */
+function normalizeMedia(dir, saved) {
+  const imgDir = path.join(dir, 'images');
+  const stills = listFiles(imgDir, STILL_EXTS);
+  const videos = listFiles(imgDir, VIDEO_EXTS);
+  const out = [];
+  const seen = new Set();
+  for (const m of Array.isArray(saved) ? saved : []) {
+    if (!m || !stills.includes(m.file) || seen.has(m.file)) continue;
+    seen.add(m.file);
+    out.push({ file: m.file, ...(m.video && videos.includes(m.video) ? { video: m.video } : {}) });
+  }
+  for (const f of stills) if (!seen.has(f)) out.push({ file: f });
+  const used = new Set(out.map((m) => m.video).filter(Boolean));
+  for (const m of out) {
+    if (m.video) continue;
+    const base = path.basename(m.file, path.extname(m.file)).toLowerCase();
+    const twin = videos.find((v) => !used.has(v) && path.basename(v, path.extname(v)).toLowerCase() === base);
+    if (twin) {
+      m.video = twin;
+      used.add(twin);
+    }
+  }
+  return out;
+}
+
+function looseVideos(dir, media) {
+  const used = new Set(media.map((m) => m.video).filter(Boolean));
+  return listFiles(path.join(dir, 'images'), VIDEO_EXTS).filter((v) => !used.has(v));
+}
+
+/** 保存配图顺序 / 实况图配对 */
+export function saveMedia(accountId, id, media) {
+  const dir = noteDir(accountId, id);
+  const meta = readJson(path.join(dir, 'meta.json'), null);
+  if (!meta) throw httpError(404, '笔记不存在');
+  if (!Array.isArray(media)) throw httpError(400, 'media 应为数组');
+  meta.media = normalizeMedia(dir, media.map((m) => ({ file: String(m.file || ''), video: m.video ? String(m.video) : undefined })));
+  meta.updatedAt = now();
+  writeJson(path.join(dir, 'meta.json'), meta);
+  return noteDetail(accountId, id);
+}
+
+/** 删除一张配图（连同配对的视频）→ 回收站 */
+export function deleteMedia(accountId, id, file) {
+  const dir = noteDir(accountId, id);
+  const detail = noteDetail(accountId, id);
+  const item = detail.media.find((m) => m.file === file) || (detail.looseVideos.includes(file) ? { file } : null);
+  if (!item) throw httpError(404, '配图不存在');
+  for (const f of [item.file, item.video].filter(Boolean)) {
+    moveToTrash(safeJoin(path.join(dir, 'images'), f), 'notes', { account: accountId, label: `配图：${detail.title || id} / ${f}` });
+  }
+  return saveMedia(accountId, id, detail.media.filter((m) => m.file !== file));
+}
+
+/** 裁剪：裁剪后的图另存为新文件替换原位置，原图进回收站（可恢复） */
+export function cropMedia(accountId, id, file, dataBase64) {
+  const dir = noteDir(accountId, id);
+  const detail = noteDetail(accountId, id);
+  const idx = detail.media.findIndex((m) => m.file === file);
+  if (idx < 0) throw httpError(404, '配图不存在');
+  if (detail.media[idx].video) throw httpError(400, '实况图裁剪后静态图会和动态视频对不上，不支持裁剪');
+  const base = path.basename(file, path.extname(file)).replace(/-crop\d*$/, '');
+  const name = saveUpload(path.join(dir, 'images'), `${base}-crop.jpg`, dataBase64);
+  moveToTrash(safeJoin(path.join(dir, 'images'), file), 'notes', { account: accountId, label: `裁剪前的原图：${detail.title || id} / ${file}` });
+  const media = detail.media.map((m, i) => (i === idx ? { file: name } : m));
+  return saveMedia(accountId, id, media);
+}
+
+/** 笔记素材打包：封面 + 按顺序编号的配图 / 实况视频 + 文案，方便手动发布 */
+export function noteBundle(accountId, id) {
+  const dir = noteDir(accountId, id);
+  const n = noteDetail(accountId, id);
+  const entries = [];
+  const pad = (i) => String(i).padStart(2, '0');
+  let i = 1;
+  if (n.coverMode !== 'first' && fs.existsSync(path.join(dir, 'cover.png'))) entries.push({ name: `${pad(i++)}-封面.png`, file: path.join(dir, 'cover.png') });
+  for (const m of n.media) {
+    const k = pad(i++);
+    entries.push({ name: `${k}${path.extname(m.file)}`, file: path.join(dir, 'images', m.file) });
+    if (m.video) entries.push({ name: `${k}-实况${path.extname(m.video)}`, file: path.join(dir, 'images', m.video) });
+  }
+  const text = `${n.title || ''}\n\n${(n.content || '').trim()}\n\n${(n.tags || []).map((t) => `#${t}`).join(' ')}\n`;
+  return {
+    title: n.title || id,
+    entries: [...entries.map((e) => ({ name: e.name, data: fs.readFileSync(e.file) })), { name: '文案.txt', data: Buffer.from(text) }],
+  };
 }
 
 export function saveNote(accountId, input) {
@@ -264,11 +368,12 @@ export function saveCoverImage(accountId, id, dataBase64, hash) {
 export function uploadNoteImage(accountId, id, filename, dataBase64) {
   const dir = noteDir(accountId, id);
   if (!fs.existsSync(path.join(dir, 'meta.json'))) throw httpError(404, '笔记不存在');
-  return saveUpload(path.join(dir, 'images'), filename, dataBase64);
+  return saveUpload(path.join(dir, 'images'), filename, dataBase64, [...STILL_EXTS, ...VIDEO_EXTS]);
 }
 
 export function deleteNote(accountId, id) {
   const dir = noteDir(accountId, id);
   if (!fs.existsSync(dir)) throw httpError(404, '笔记不存在');
-  moveToTrash(dir, 'notes');
+  const meta = readJson(path.join(dir, 'meta.json'), {});
+  moveToTrash(dir, 'notes', { account: accountId, label: `笔记：${meta.title || id}` });
 }

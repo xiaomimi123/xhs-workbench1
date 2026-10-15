@@ -2,6 +2,7 @@
 import { esc } from '../md.js';
 import { S, $, api, acc, fileUrl, toast, fmtTime, ask, go, opt, accDirRel } from '../core.js';
 import { lint, LIMITS } from '../lint.js';
+import { mediaHtml, bindMedia } from './media.js';
 
 export const NOTE_STATUSES = [
   ['draft', '草稿'],
@@ -92,12 +93,17 @@ function lintHtml(data) {
 
 function previewHtml(data) {
   const n = V.note;
-  const cover = n.hasCover
-    ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">`
-    : '<div class="phone-cover placeholder">还没有封面</div>';
+  const first = n.media && n.media[0] && /\.(png|jpe?g|webp|gif)$/i.test(n.media[0].file) ? n.media[0].file : null;
+  const total = (n.media ? n.media.length : 0) + (n.coverMode !== 'first' && n.hasCover ? 1 : 0);
+  const cover = n.coverMode === 'first' && first
+    ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/images/${first}`, n.updatedAt)}" alt="">`
+    : n.hasCover
+      ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">`
+      : '<div class="phone-cover placeholder">还没有封面</div>';
   return `<div class="phone">
     ${cover}
     <div class="phone-body">
+      ${total > 1 ? `<div class="phone-dots">${'<span></span>'.repeat(Math.min(total, 18))}</div>` : ''}
       <div class="phone-title">${esc(data.title || '（无标题）')}</div>
       <div class="phone-text">${esc(data.content)}</div>
       <div class="phone-tags">${data.tags.map((t) => `#${esc(t)}`).join(' ')}</div>
@@ -143,7 +149,8 @@ function draw(main) {
           <button class="btn small ghost danger" data-act="delete">删除</button>
         </div>
       </div>
-      ${V.preview ? '' : `<div class="card lint-box" id="lint-box">${lintHtml(data)}</div>`}`;
+      ${V.preview ? '' : `<div class="card lint-box" id="lint-box">${lintHtml(data)}</div>`}
+      ${V.preview ? '' : mediaHtml(n)}`;
   }
 
   main.innerHTML = `
@@ -161,6 +168,18 @@ function draw(main) {
     </div>`;
   drawList();
   bind(main);
+  if (n && !V.preview) bindMedia($('#media-box', main), n, onMediaChange);
+}
+
+// 配图变化只重绘配图区，不覆盖编辑器里还没保存的文字
+function onMediaChange(fresh) {
+  if (!V.note || fresh.id !== V.note.id) return;
+  for (const k of ['media', 'images', 'looseVideos', 'coverMode', 'hasCover', 'coverHash', 'updatedAt']) V.note[k] = fresh[k];
+  const box = $('#media-box');
+  if (!box) return;
+  box.outerHTML = mediaHtml(V.note);
+  bindMedia($('#media-box'), V.note, onMediaChange);
+  loadList().then(drawList);
 }
 
 async function save(silent) {

@@ -10,12 +10,37 @@ import { ADAPTERS, findAdapter } from './adapters.mjs';
 import { buildPrompt } from './prompt.mjs';
 import * as content from './content.mjs';
 import * as ops from './automation.mjs';
+import { browserStatus } from './browser.mjs';
+import { createZip } from './zip.mjs';
+import * as system from './system.mjs';
+import * as backup from './backup.mjs';
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 const PORT_RANGE = [17890, 17910];
 
 store.ensureWorkspace();
+await ensureSingleInstance();
 const token = loadOrCreateToken();
+
+// 同一个数据目录只允许一个工作台在运行，否则两个调度器会重复发布
+async function ensureSingleInstance() {
+  const other = store.readJson(P.serverInfo, null);
+  if (!other || other.pid === process.pid) return;
+  try {
+    process.kill(other.pid, 0);
+  } catch {
+    return; // 进程已不在
+  }
+  try {
+    const res = await fetch(`http://127.0.0.1:${other.port}/api/health`, { signal: AbortSignal.timeout(1500) });
+    if (res.ok && (await res.json()).name === 'xhs-workbench') {
+      console.log(`工作台已在运行（pid ${other.pid}，端口 ${other.port}），本次启动退出。`);
+      process.exit(0);
+    }
+  } catch {
+    /* 端口没响应，视为旧记录 */
+  }
+}
 const bridge = new Bridge();
 
 function loadOrCreateToken() {
@@ -41,40 +66,46 @@ setInterval(() => {
   for (const res of sseClients) res.write(': ping\n\n');
 }, 25_000).unref();
 
-// 数据目录被 agent 改动时通知前端刷新
-function watch(dir, type) {
-  let timer = null;
+// 数据目录被 agent 改动时通知前端刷新。恢复备份会整体替换目录，之后需重新建立监听
+let watchers = [];
+function watch(dir, onChange) {
   try {
-    fs.watch(dir, { recursive: true }, () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => broadcast({ type }), 300);
-    });
+    watchers.push(fs.watch(dir, { recursive: true }, onChange));
   } catch {
     /* 个别平台不支持递归监听，前端仍可手动刷新 */
   }
 }
-watch(P.knowledge, 'knowledge.changed');
-watch(P.config, 'config.changed');
+function debounced(fn, ms = 300) {
+  let timer = null;
+  return () => {
+    clearTimeout(timer);
+    timer = setTimeout(fn, ms);
+  };
+}
 
 // 账号业务数据：按「账号 + 模块」合并通知，前端只刷新相关面板
 const contentChanges = new Map();
-let contentTimer = null;
-try {
-  fs.watch(P.accountsDir, { recursive: true }, (_evt, filename) => {
+const flushContent = debounced(() => {
+  for (const ev of contentChanges.values()) broadcast({ type: 'content.changed', ...ev });
+  contentChanges.clear();
+});
+
+function startWatchers() {
+  for (const w of watchers) w.close();
+  watchers = [];
+  store.ensureWorkspace();
+  watch(P.knowledge, debounced(() => broadcast({ type: 'knowledge.changed' })));
+  watch(P.config, debounced(() => broadcast({ type: 'config.changed' })));
+  watch(P.accountsDir, (_evt, filename) => {
     if (!filename) return;
     const [account, rawArea] = String(filename).split(/[\\/]/);
     const area = rawArea && rawArea.replace(/\.json$/, '');
     if (!account || !area) return;
     contentChanges.set(`${account}/${area}`, { account, area });
-    clearTimeout(contentTimer);
-    contentTimer = setTimeout(() => {
-      for (const ev of contentChanges.values()) broadcast({ type: 'content.changed', ...ev });
-      contentChanges.clear();
-    }, 300);
+    flushContent();
   });
-} catch {
-  /* 同上 */
 }
+startWatchers();
 
 // ---------- 对话会话 ----------
 
@@ -213,7 +244,7 @@ function sendChat({ sessionId, accountId, text }) {
     id: store.newId('m_'),
     role: 'assistant',
     text: '',
-    status: cfg.mode === 'cli' ? 'running' : 'pending',
+    status: 'pending',
     tools: [],
     createdAt: now,
   };
@@ -223,7 +254,7 @@ function sendChat({ sessionId, accountId, text }) {
   const taskId = asstMsg.id;
   taskIndex.set(taskId, { sessionId: session.id, msgId: asstMsg.id });
   try {
-    bridge.submit({ id: taskId, sessionId: session.id, prompt, agentSessionId: canResume ? session.agentSessionId : null });
+    bridge.submit({ id: taskId, sessionId: session.id, accountId: account.id, prompt, agentSessionId: canResume ? session.agentSessionId : null });
   } catch (err) {
     taskIndex.delete(taskId);
     asstMsg.status = 'error';
@@ -268,6 +299,29 @@ function runAutomationTask(accountId, text) {
 const scheduler = new ops.Scheduler({ runTask: runAutomationTask, notify: broadcast, log });
 scheduler.start();
 
+// 防休眠：settings.json 的 keepAwake = off | auto | always
+function keepAwakeMode() {
+  return store.readJson(P.settings, {}).keepAwake || 'off';
+}
+function refreshKeepAwake() {
+  system.applyKeepAwake(keepAwakeMode(), ops.needsAwake());
+}
+setInterval(refreshKeepAwake, 60_000).unref();
+
+// 每天自动备份一次（settings.json 的 autoBackup 设为 off 可关闭）
+function autoBackup() {
+  if (store.readJson(P.settings, {}).autoBackup === 'off') return;
+  try {
+    const b = backup.autoBackupIfDue();
+    if (b) log(`自动备份完成：${b.name}（${b.files} 个文件）`);
+  } catch (err) {
+    log(`自动备份失败：${err.message}`);
+  }
+}
+setInterval(autoBackup, 3600_000).unref();
+setTimeout(autoBackup, 60_000).unref();
+setTimeout(refreshKeepAwake, 2_000).unref();
+
 // ---------- HTTP ----------
 
 const MIME = {
@@ -282,6 +336,9 @@ const MIME = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.gif': 'image/gif',
+  '.heic': 'image/heic',
+  '.mov': 'video/quicktime',
+  '.mp4': 'video/mp4',
   '.ico': 'image/x-icon',
 };
 
@@ -296,7 +353,7 @@ function readBody(req) {
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > 25 * 1024 * 1024) {
+      if (size > 80 * 1024 * 1024) {
         reject(store.httpError(413, '请求体过大'));
         req.destroy();
       } else chunks.push(c);
@@ -382,8 +439,12 @@ async function handleApi(req, res, url) {
     }
 
     // ----- 账号 -----
-    case 'GET /api/accounts':
-      return sendJson(res, 200, store.getAccounts());
+    case 'GET /api/accounts': {
+      // 附带每个账号的浏览器登录状态（agent 登录检查后写入）
+      const data = store.getAccounts();
+      data.accounts = data.accounts.map((a) => ({ ...a, browser: browserStatus(a.id) }));
+      return sendJson(res, 200, data);
+    }
     case 'POST /api/accounts': {
       const acc = store.saveAccount(await readBody(req));
       broadcast({ type: 'accounts.changed' });
@@ -497,6 +558,18 @@ async function handleContentApi(route, q, req) {
     case 'DELETE /api/notes':
       content.deleteNote(acc, q.get('id'));
       return { ok: true };
+    case 'POST /api/notes/media': {
+      const b = await body();
+      return content.saveMedia(acc, b.id, b.media);
+    }
+    case 'POST /api/notes/media/delete': {
+      const b = await body();
+      return content.deleteMedia(acc, b.id, b.file);
+    }
+    case 'POST /api/notes/media/crop': {
+      const b = await body();
+      return content.cropMedia(acc, b.id, b.file, b.data);
+    }
   }
   return undefined;
 }
@@ -506,6 +579,42 @@ async function handleOpsApi(route, q, req) {
   const acc = q.get('account');
   const body = () => readBody(req);
   switch (route) {
+    case 'GET /api/system':
+      return { autostart: system.autostartStatus(), keepAwake: { mode: keepAwakeMode(), active: system.keepAwakeActive() } };
+    case 'POST /api/system': {
+      const b = await body();
+      if (typeof b.autostart === 'boolean') system.setAutostart(b.autostart);
+      if (['off', 'auto', 'always'].includes(b.keepAwake)) {
+        store.writeJson(P.settings, { ...store.readJson(P.settings, {}), keepAwake: b.keepAwake });
+        refreshKeepAwake();
+      }
+      return { autostart: system.autostartStatus(), keepAwake: { mode: keepAwakeMode(), active: system.keepAwakeActive() } };
+    }
+    case 'GET /api/backups':
+      return { items: backup.listBackups(), autoBackup: store.readJson(P.settings, {}).autoBackup || 'daily' };
+    case 'POST /api/backups':
+      return backup.createBackup();
+    case 'POST /api/backups/settings': {
+      const b = await body();
+      store.writeJson(P.settings, { ...store.readJson(P.settings, {}), autoBackup: b.autoBackup === 'off' ? 'off' : 'daily' });
+      return { ok: true };
+    }
+    case 'POST /api/backups/restore': {
+      const result = backup.restoreBackup((await body()).name);
+      sessions.clear(); // 对话缓存作废，下次从恢复后的文件读取
+      startWatchers();
+      broadcast({ type: 'restored' });
+      return result;
+    }
+    case 'GET /api/trash':
+      return { items: store.listTrash() };
+    case 'POST /api/trash/restore': {
+      const result = store.restoreTrash((await body()).id);
+      sessions.clear();
+      startWatchers();
+      broadcast({ type: 'restored' });
+      return result;
+    }
     case 'GET /api/alerts':
       return { items: ops.alerts() };
     case 'GET /api/automation':
@@ -551,6 +660,51 @@ function serveAccountFile(res, q) {
   fs.createReadStream(file).pipe(res);
 }
 
+function sendZip(res, filename, entries) {
+  const buf = createZip(entries);
+  res.writeHead(200, {
+    'Content-Type': 'application/zip',
+    'Content-Length': buf.length,
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    'Cache-Control': 'no-store',
+  });
+  res.end(buf);
+}
+
+function serveNoteBundle(res, q) {
+  try {
+    const { title, entries } = content.noteBundle(q.get('account'), q.get('id'));
+    sendZip(res, `${title.replace(/[\\/:*?"<>|]/g, '_')}-素材.zip`, entries);
+  } catch (err) {
+    sendJson(res, err.status || 500, { error: err.message });
+  }
+}
+
+function serveBackup(res, q) {
+  try {
+    const file = backup.backupFile(q.get('name'));
+    res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': fs.statSync(file).size, 'Content-Disposition': `attachment; filename="${path.basename(file)}"` });
+    fs.createReadStream(file).pipe(res);
+  } catch (err) {
+    sendJson(res, err.status || 500, { error: err.message });
+  }
+}
+
+// 笔记数据导出为 CSV（带 BOM，Excel 直接打开不乱码）
+function serveAnalyticsCsv(res, q) {
+  try {
+    const { notes } = ops.getAnalytics(q.get('account'));
+    const cols = [['title', '笔记'], ['publishedAt', '发布时间'], ['views', '阅读'], ['likes', '点赞'], ['collects', '收藏'], ['comments', '评论'], ['shares', '分享'], ['follows', '涨粉'], ['url', '链接']];
+    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = notes.map((n) => cols.map(([k]) => cell(k in (n.metrics || {}) ? n.metrics[k] : n[k])).join(','));
+    const csv = '\ufeff' + [cols.map(([, name]) => cell(name)).join(','), ...rows].join('\r\n');
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent('笔记数据.csv')}` });
+    res.end(csv);
+  } catch (err) {
+    sendJson(res, err.status || 500, { error: err.message });
+  }
+}
+
 function hostAllowed(req, port) {
   const host = (req.headers.host || '').toLowerCase();
   return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
@@ -568,7 +722,7 @@ function createServer(port) {
     if (pathname.startsWith('/api/')) {
       // 所有接口都要求令牌；自定义请求头让跨站请求无法通过预检
       // EventSource 和 <img> 无法带请求头，这两个只读接口允许用查询参数传令牌
-      const queryTokenOk = pathname === '/api/events' || pathname === '/api/files';
+      const queryTokenOk = ['/api/events', '/api/files', '/api/notes/bundle', '/api/backup/download', '/api/analytics/export'].includes(pathname);
       const given = req.headers['x-workbench-token'] || (queryTokenOk ? url.searchParams.get('t') : null);
       if (given !== token) return sendJson(res, 401, { error: '令牌无效，请让 agent 重新打开工作台' });
 
@@ -580,6 +734,9 @@ function createServer(port) {
         return;
       }
       if (pathname === '/api/files') return serveAccountFile(res, url.searchParams);
+      if (pathname === '/api/notes/bundle') return serveNoteBundle(res, url.searchParams);
+      if (pathname === '/api/backup/download') return serveBackup(res, url.searchParams);
+      if (pathname === '/api/analytics/export') return serveAnalyticsCsv(res, url.searchParams);
       try {
         return await handleApi(req, res, url);
       } catch (err) {
