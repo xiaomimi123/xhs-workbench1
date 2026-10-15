@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小红书运营工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff2442'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E运%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn nav-toggle" id="nav-toggle" aria-label="菜单">☰</button>
+    <div class="brand"><span class="logo">运</span><span>小红书运营工作台</span></div>
+    <div class="topbar-right">
+      <label class="account-picker">账号
+        <select id="account-select" aria-label="当前账号"></select>
+      </label>
+      <button class="bridge-pill" id="bridge-pill" data-nav="settings" title="Agent 连接状态">
+        <span class="dot"></span><span class="label">连接中…</span>
+      </button>
+ <button class="icon-btn alerts-btn" id="alerts-btn" title="提醒" aria-label="提醒">🔔<span class="count"></span></button>
+      <button class="icon-btn chat-toggle" id="chat-toggle" title="对话面板" aria-label="切换对话面板">💬</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main" id="main"></main>
+    <aside class="chat" id="chat">
+      <div class="chat-head">
+        <select id="session-select" aria-label="历史对话"></select>
+        <button class="btn small" id="new-chat">新对话</button>
+      </div>
+      <div class="chat-banner" id="chat-banner" hidden></div>
+      <div class="chat-messages" id="chat-messages"></div>
+      <form class="composer" id="composer">
+        <textarea id="chat-input" rows="3" placeholder="和你的 agent 说点什么… （Enter 发送，Shift+Enter 换行）"></textarea>
+        <div class="composer-actions">
+          <span class="hint" id="composer-hint"></span>
+          <button type="button" class="btn ghost small" id="stop-btn" hidden>停止</button>
+          <button type="submit" class="btn primary small" id="send-btn">发送</button>
+        </div>
+      </form>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <div class="overlay" id="overlay" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
