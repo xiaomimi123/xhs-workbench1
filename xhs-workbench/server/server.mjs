@@ -15,7 +15,7 @@ import { createZip } from './zip.mjs';
 import * as system from './system.mjs';
 import * as backup from './backup.mjs';
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 const PORT_RANGE = [17890, 17910];
 
 store.ensureWorkspace();
@@ -532,6 +532,10 @@ async function handleContentApi(route, q, req) {
     case 'DELETE /api/benchmarks':
       content.deleteBenchmark(acc, q.get('id'));
       return { ok: true };
+    case 'POST /api/benchmarks/seen': {
+      const b = await body();
+      return { item: content.markBenchmarkSeen(acc, b.id) };
+    }
 
     case 'GET /api/topics':
       return { items: content.listTopics(acc) };
@@ -550,6 +554,17 @@ async function handleContentApi(route, q, req) {
     case 'POST /api/notes/upload': {
       const b = await body();
       return { name: content.uploadNoteImage(acc, b.id, b.filename, b.data) };
+    }
+    // 大文件（视频）流式上传：请求体直接写盘，不走 JSON base64
+    case 'POST /api/notes/upload-file':
+      return { name: await content.saveNoteFileStream(acc, q.get('noteId'), q.get('filename'), req) };
+    case 'POST /api/notes/video': {
+      const b = await body();
+      return content.setNoteVideo(acc, b.id, { file: b.file, cover: b.cover });
+    }
+    case 'POST /api/notes/video/delete': {
+      const b = await body();
+      return content.deleteNoteVideoFile(acc, b.id, b.file);
     }
     case 'POST /api/notes/cover': {
       const b = await body();

@@ -8,6 +8,7 @@ import * as schedule from './modules/schedule.js';
 import * as engage from './modules/engage.js';
 import * as analytics from './modules/analytics.js';
 import { renderSystem } from './modules/system.js';
+import * as onboarding from './modules/onboarding.js';
 
 // ---------- 模块定义 ----------
 
@@ -147,7 +148,7 @@ function viewOverview() {
 
   $('#main').innerHTML = `
     <h1 class="page-title">你好，${esc(acc ? acc.name : '')} 👋</h1>
-    <p class="page-sub">在右侧和你的 agent 对话，或者点下面的卡片快速开始。</p>
+    <p class="page-sub">在右侧和你的 agent 对话，或者点下面的卡片快速开始。<button class="btn small ghost" data-onboard style="margin-left:8px">🚀 新手引导</button></p>
     <div class="grid">
       ${quick.map((q) => `<div class="card quick-card" data-prompt="${esc(q.prompt)}"><h3>${esc(q.title)}</h3><p>${esc(q.text)}</p></div>`).join('')}
     </div>
@@ -183,8 +184,9 @@ function alertsHtml() {
 
 function alertListHtml() {
   const multi = S.accounts.accounts.length > 1;
+  const kindName = { publish: '发布', engage: '互动', radar: '对标' };
   return `<ul class="alert-list">${S.alerts
-    .map((a, i) => `<li><button class="alert-item" data-alert="${i}"><span class="badge ${a.status === 'failed' || a.status === 'missed' ? 'bad' : 'warn'}">${a.kind === 'publish' ? '发布' : '互动'}</span>
+    .map((a, i) => `<li><button class="alert-item" data-alert="${i}"><span class="badge ${a.status === 'failed' || a.status === 'missed' ? 'bad' : 'warn'}">${kindName[a.kind] || '提醒'}</span>
       ${multi ? `<span class="muted">[${esc(a.accountName)}]</span>` : ''} ${a.title ? `<strong>${esc(a.title)}</strong>` : ''} ${esc(a.text)}</button></li>`)
     .join('')}</ul>`;
 }
@@ -215,6 +217,7 @@ function openAlert(i) {
   $('#overlay').hidden = true;
   if (!a) return;
   if (a.account !== S.accountId) switchAccount(a.account);
+  if (a.kind === 'radar') return go('benchmark', { id: a.id });
   go(a.kind === 'publish' ? 'schedule' : 'engage');
 }
 
@@ -730,9 +733,14 @@ function usePrompt(text) {
 function bindEvents() {
   document.addEventListener('click', async (e) => {
     if (e.target.id === 'overlay') return ($('#overlay').hidden = true);
-    const t = e.target.closest('[data-nav],[data-prompt],[data-doc],[data-use-account],[data-login-account],[data-ask-kb],[data-edit-account],[data-default-account],[data-use-adapter],[data-alert],[data-close-overlay],button');
+    const t = e.target.closest('[data-nav],[data-prompt],[data-doc],[data-use-account],[data-login-account],[data-ask-kb],[data-edit-account],[data-default-account],[data-use-adapter],[data-alert],[data-close-overlay],[data-onboard],[data-onboard-skip],button');
     if (!t) return;
     if (t.dataset.alert) return openAlert(Number(t.dataset.alert));
+    if (t.dataset.onboard !== undefined) return onboarding.open();
+    if (t.dataset.onboardSkip !== undefined) {
+      onboarding.dismiss();
+      return ($('#overlay').hidden = true);
+    }
     if (t.dataset.askKb !== undefined) {
       return sendMessage(`请在知识库（knowledge/ 目录）里查找和「${S.kb.query}」相关的内容并回答我的问题，按意思找、不要只按字面匹配，回答时列出引用的文档路径。可以先用 \`node ${S.info.skillDir}/scripts/workbench.mjs kb-search "${S.kb.query}"\` 找候选文档（不能执行命令时直接搜索文件）。`);
     }
@@ -885,6 +893,7 @@ async function boot() {
   cover.autoRender({ area: 'notes' });
   refreshAlerts();
   setInterval(refreshAlerts, 60_000);
+  onboarding.maybeAutoShow();
 }
 
 boot();

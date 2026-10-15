@@ -221,6 +221,7 @@ function draw(main) {
       <div class="spacer"></div>
       <button class="btn" data-act="toggle-settings">⚙️ 设置</button>
       <button class="btn" data-act="fetch">让 agent 抓取数据</button>
+      <button class="btn" data-act="import-notes" title="把账号里已发布的笔记导入进来，复盘就有历史数据了">导入历史笔记</button>
       ${d.notes.length ? `<a class="btn" href="/api/analytics/export?${acc()}&t=${encodeURIComponent(S.token)}">导出 CSV</a>` : ''}
       <button class="btn primary" data-act="report" ${hasData ? '' : 'disabled'}>让 agent 写复盘</button>
     </div>
@@ -277,6 +278,8 @@ function bind(main) {
         return draw(main);
       case 'fetch':
         return ask(`请按 playbooks/analytics.md 抓取当前账号最新的笔记数据和账号数据，更新 ${dir}notes.json 和 account.json。`, true);
+      case 'import-notes':
+        return ask(`请按 playbooks/analytics.md 的「首次导入历史笔记」，把我账号里已发布的笔记导入 ${dir}notes.json：按 url 跳过已有条目，新条目写当前累计数据和 imported: true。`, true);
       case 'report':
         return ask(`请按 playbooks/analytics.md 写一份最近一周的复盘报告，保存到 ${dir}reports/，并把可执行的结论沉淀到知识库「复盘结论/」。`, true);
       case 'parse-imports':

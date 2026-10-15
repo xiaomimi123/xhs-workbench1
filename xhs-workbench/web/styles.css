@@ -458,3 +458,19 @@ mark { background: #ffe58a; color: inherit; border-radius: 2px; padding: 0 1px; 
 .overlay { overflow-y: auto; }
 .crop-card { max-height: calc(100vh - 32px); overflow-y: auto; }
 .crop-canvas { max-height: 52vh; width: auto; height: auto; }
+
+/* ----- v0.5：视频笔记 / 爆款雷达 / 新手引导 ----- */
+.seg { display: inline-flex; gap: 4px; }
+.seg .chip { padding: 2px 10px; font-size: 12px; }
+.video-preview { max-width: 420px; }
+.video-preview video { width: 100%; max-height: 60vh; border-radius: 10px; background: #000; display: block; }
+.video-preview .media-placeholder { min-height: 160px; border: 1px dashed var(--line); border-radius: 10px; }
+.upload-progress { height: 6px; border-radius: 999px; background: var(--hover); margin-top: 10px; overflow: hidden; }
+.upload-progress > div { height: 100%; width: 0; border-radius: 999px; background: var(--brand); transition: width 0.2s; }
+.radar-note { background: var(--brand-soft); color: var(--brand); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.onboard-list { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; max-width: 560px; }
+.onboard-step { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.onboard-step.done { opacity: 0.65; }
+.onboard-check { flex: none; width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center; font-size: 13px; font-weight: 700; background: var(--hover); color: var(--muted); }
+.onboard-step.done .onboard-check { background: var(--brand); color: #fff; }
+.onboard-body { flex: 1; min-width: 0; }

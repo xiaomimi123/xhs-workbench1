@@ -1,4 +1,4 @@
-// 笔记配图编辑：排序（拖拽 / 按钮）、裁剪、删除、实况图（静态图 + 动态视频）配对、素材打包下载
+// 笔记素材编辑：图文（排序 / 裁剪 / 实况图配对）与视频笔记（上传 / 封面），素材打包下载
 import { esc } from '../md.js';
 import { S, $, api, acc, fileUrl, toast, readFileAsDataURL } from '../core.js';
 
@@ -7,6 +7,7 @@ const BROWSER_IMG = /\.(png|jpe?g|webp|gif)$/i;
 const MAX_UPLOAD = 55 * 1024 * 1024;
 
 let current = null; // { note, box, onChange }
+let videoMode = false; // 图文 / 视频面板切换（笔记本身是视频笔记时始终显示视频面板）
 
 function src(note, file) {
   return fileUrl(`notes/${note.id}/images/${file}`, note.updatedAt);
@@ -32,13 +33,56 @@ function tile(note, m, i, offset) {
   </div>`;
 }
 
-export function mediaHtml(note) {
+const typeChips = (note, showVideo) => `<div class="seg" role="tablist" aria-label="素材类型">
+    <button class="chip${showVideo ? '' : ' active'}" data-media-type="image">图文</button>
+    <button class="chip${showVideo ? ' active' : ''}" data-media-type="video">视频</button>
+  </div>`;
+
+function videoHtml(note) {
+  const v = note.video || {};
+  const bundle = `/api/notes/bundle?${acc(`id=${encodeURIComponent(note.id)}`)}&t=${encodeURIComponent(S.token)}`;
+  return `
+    <div class="row" style="margin-bottom:10px">
+      <h3 style="margin:0">视频笔记</h3>
+      ${typeChips(note, true)}
+      <div class="spacer"></div>
+      ${v.file ? `<a class="btn small" href="${bundle}">下载全部素材</a>
+      <button class="btn small ghost danger" data-video-act="delete-video">删除视频</button>` : ''}
+    </div>
+    ${v.file
+      ? `<div class="video-preview">
+          <video controls preload="metadata" src="${src(note, v.file)}" data-video-preview></video>
+          <div class="media-placeholder" data-video-fallback hidden>${esc(v.file.split('.').pop().toUpperCase())}<br><span>浏览器无法预览这个格式，不影响发布</span></div>
+        </div>
+        <div class="row" style="margin-top:10px;flex-wrap:wrap">
+          <label class="muted" style="font-size:13px">封面
+            <select data-video-cover aria-label="视频封面">
+              <option value="">平台默认（视频首帧）</option>
+              ${note.hasCover ? `<option value="cover.png"${v.cover === 'cover.png' ? ' selected' : ''}>模板封面${note.coverStale ? '（模板已改，需重新渲染）' : ''}</option>` : ''}
+              ${(v.coverCandidates || []).filter((c) => c !== 'cover.png').map((c) => `<option value="${esc(c)}"${v.cover === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="btn small upload-btn">上传封面图片<input type="file" accept="image/*" data-video-cover-upload hidden></label>
+          <button class="btn small" data-video-act="grab-frame">截取当前帧当封面</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-bottom:0">封面按这里的选择发布；什么都没选时用视频第一帧。</p>`
+      : `<label class="btn primary upload-btn" style="margin-top:4px">上传视频（mp4 / mov，最大 1GB）<input type="file" accept=".mp4,.mov,video/mp4,video/quicktime" data-video-upload hidden></label>
+        <p class="muted" style="font-size:12px;margin-bottom:0">视频笔记只放一个视频；发布时标题、正文、话题和图文一样。</p>`}
+    <div class="upload-progress" data-upload-progress hidden><div></div></div>`;
+}
+
+export function mediaHtml(note, forceVideo = false) {
+  const showVideo = !!note.video || forceVideo;
+  if (showVideo) {
+    return `<div class="card media-box" id="media-box">${videoHtml(note)}</div>`;
+  }
   const offset = note.coverMode !== 'first' && note.hasCover ? 1 : 0;
   const total = note.media.length + offset;
   const live = note.media.filter((m) => m.video).length;
   return `<div class="card media-box" id="media-box">
     <div class="row">
       <h3 style="margin:0">配图</h3>
+      ${typeChips(note, false)}
       <span class="${total > MAX_IMAGES ? 'bad' : 'muted'}" style="font-size:13px">${total}/${MAX_IMAGES} 张${live ? ` · ${live} 张实况图` : ''}</span>
       <div class="spacer"></div>
       <label class="muted" style="font-size:13px">封面
@@ -79,12 +123,128 @@ function move(from, to) {
   return save(media);
 }
 
-/** 渲染后调用：绑定事件。onChange(note) 在配图变化后回调 */
+// ---------- 视频笔记 ----------
+
+function setProgress(p) {
+  const el = $('[data-upload-progress]', current && current.box);
+  if (!el) return;
+  el.hidden = p === null;
+  if (p !== null) el.firstElementChild.style.width = `${Math.round(p * 100)}%`;
+}
+
+/** 大文件走流式上传接口（XHR 才有上传进度） */
+function xhrUpload(note, file) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/notes/upload-file?${acc(`noteId=${encodeURIComponent(note.id)}`)}&filename=${encodeURIComponent(file.name)}`);
+    xhr.setRequestHeader('X-Workbench-Token', S.token);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) setProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        /* 非 JSON */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data.name);
+      else reject(new Error(data.error || `上传失败（${xhr.status}）`));
+    };
+    xhr.onerror = () => reject(new Error('上传失败：网络错误'));
+    xhr.send(file);
+  });
+}
+
+async function setVideo(patch) {
+  const updated = await api('POST', `/api/notes/video?${acc()}`, { id: current.note.id, ...patch });
+  current.onChange(updated);
+  return updated;
+}
+
+async function videoAction(t) {
+  const note = current.note;
+  const act = t.dataset.videoAct;
+  if (t.dataset.mediaType === 'video' && !note.video) {
+    videoMode = true;
+    return redraw();
+  }
+  if (t.dataset.mediaType === 'image') {
+    if (note.video && !confirm('转为图文笔记？已上传的视频会保留在素材目录里，随时可以切回视频模式。')) return;
+    videoMode = false;
+    try {
+      if (note.video) await setVideo({ file: '' });
+    } catch (err) {
+      return toast(err.message);
+    }
+    return redraw();
+  }
+  switch (act) {
+    case 'delete-video':
+      if (!confirm('删除这个视频？（会移到回收站，可以恢复）')) return;
+      videoMode = false;
+      try {
+        await api('POST', `/api/notes/video/delete?${acc()}`, { id: note.id, file: note.video.file });
+        current.onChange(await api('GET', `/api/notes/detail?${acc(`id=${note.id}`)}`));
+      } catch (err) {
+        toast(err.message);
+      }
+      return redraw();
+    case 'grab-frame': {
+      const pv = $('[data-video-preview]', current.box);
+      if (!pv || !pv.videoWidth) return toast('视频还没加载出画面，先播放一下再截取');
+      const c = document.createElement('canvas');
+      const scale = Math.min(1, 1080 / Math.max(pv.videoWidth, pv.videoHeight));
+      c.width = Math.round(pv.videoWidth * scale);
+      c.height = Math.round(pv.videoHeight * scale);
+      c.getContext('2d').drawImage(pv, 0, 0, c.width, c.height);
+      try {
+        t.disabled = true;
+        const { name } = await api('POST', `/api/notes/upload?${acc()}`, {
+          id: note.id,
+          filename: `封面-截帧-${Math.floor(Date.now() / 1000) % 100000}.jpg`,
+          data: c.toDataURL('image/jpeg', 0.92),
+        });
+        await setVideo({ cover: name });
+        toast('已设为封面');
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        t.disabled = false;
+      }
+      return;
+    }
+  }
+}
+
+/** 面板内重绘（切换图文 / 视频后） */
+function redraw() {
+  if (!current || !current.box) return;
+  current.box.outerHTML = mediaHtml(current.note, videoMode);
+  const next = $('#media-box');
+  if (!next) return;
+  bindMedia(next, current.note, current.onChange);
+}
+
+/** 渲染后调用：绑定事件。onChange(note) 在素材变化后回调 */
 export function bindMedia(box, note, onChange) {
+  if (!current || current.note.id !== note.id) videoMode = !!note.video;
   current = { note, box, onChange };
   if (!box) return;
 
+  // 视频预览失败（如 HEVC 编码的 mov）：显示占位
+  const pv = $('[data-video-preview]', box);
+  if (pv) {
+    pv.onerror = () => {
+      pv.hidden = true;
+      const f = $('[data-video-fallback]', box);
+      if (f) f.hidden = false;
+    };
+  }
+
   box.onclick = async (e) => {
+    const vt = e.target.closest('[data-video-act],[data-media-type]');
+    if (vt) return videoAction(vt);
     const t = e.target.closest('[data-media-act]');
     if (!t) return;
     const i = Number(t.dataset.idx);
@@ -111,6 +271,46 @@ export function bindMedia(box, note, onChange) {
 
   box.onchange = async (e) => {
     const t = e.target;
+    // ----- 视频笔记 -----
+    if (t.dataset.videoCover !== undefined) {
+      try {
+        await setVideo({ cover: t.value });
+        toast('封面已更新');
+      } catch (err) {
+        toast(err.message);
+      }
+      return;
+    }
+    if (t.dataset.videoCoverUpload !== undefined) {
+      const file = t.files[0];
+      if (!file) return;
+      try {
+        const { name } = await api('POST', `/api/notes/upload?${acc()}`, { id: current.note.id, filename: file.name, data: await readFileAsDataURL(file) });
+        await setVideo({ cover: name });
+        toast('封面已更新');
+      } catch (err) {
+        toast(err.message);
+      }
+      return;
+    }
+    if (t.dataset.videoUpload !== undefined) {
+      const file = t.files[0];
+      if (!file) return;
+      t.value = '';
+      if (file.size > 1024 * 1024 * 1024) return toast('视频超过 1GB 上限');
+      try {
+        setProgress(0);
+        const name = await xhrUpload(current.note, file);
+        await setVideo({ file: name });
+        toast('视频已上传');
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        setProgress(null);
+      }
+      return;
+    }
+    // ----- 图文 -----
     if (t.dataset.mediaPair !== undefined && t.value) {
       const media = plain(note.media);
       media[Number(t.dataset.mediaPair)].video = t.value;

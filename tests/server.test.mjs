@@ -108,6 +108,41 @@ test('笔记、排期、提醒、素材打包、数据导出', async () => {
   assert.equal((await api('GET', '/api/alerts')).status, 200);
 });
 
+test('视频笔记与对标追踪：流式上传、设置视频、雷达提醒与已读', async () => {
+  const n = (await api('POST', '/api/notes?account=default', { create: true, title: '视频集成' })).body;
+  // 流式上传：请求体直接写盘
+  const up = await fetch(`${base}/api/notes/upload-file?account=default&noteId=${n.id}&filename=demo.mp4&t=${token}`, {
+    method: 'POST',
+    headers: { 'X-Workbench-Token': token },
+    body: Buffer.from('fake-video-bytes'),
+  });
+  assert.equal(up.status, 200);
+  assert.equal((await up.json()).name, 'demo.mp4');
+  const bad = await fetch(`${base}/api/notes/upload-file?account=default&noteId=${n.id}&filename=x.exe&t=${token}`, {
+    method: 'POST',
+    headers: { 'X-Workbench-Token': token },
+    body: 'x',
+  });
+  assert.equal(bad.status, 400); // 扩展名白名单
+
+  const wrongCover = await api('POST', '/api/notes/video?account=default', { id: n.id, file: 'demo.mp4', cover: 'demo.mp4' });
+  assert.equal(wrongCover.status, 400); // 视频不能当封面
+  const set = await api('POST', '/api/notes/video?account=default', { id: n.id, file: 'demo.mp4' });
+  assert.equal(set.status, 200);
+  assert.equal(set.body.video.file, 'demo.mp4');
+  assert.deepEqual(set.body.media, []);
+  const cleared = await api('POST', '/api/notes/video?account=default', { id: n.id, file: '' });
+  assert.equal(cleared.body.video, null);
+
+  // 对标追踪：agent 回写 → 提醒 → 看过清零
+  const b = (await api('POST', '/api/benchmarks?account=default', { name: '集成雷达', tracking: true })).body;
+  await api('POST', '/api/benchmarks?account=default', { id: b.id, newCount: 2, radarNote: '《新笔记》点赞 3000' });
+  assert.ok((await api('GET', '/api/alerts')).body.items.some((a) => a.kind === 'radar' && a.id === b.id));
+  const seen = await api('POST', '/api/benchmarks/seen?account=default', { id: b.id });
+  assert.equal(seen.body.item.newCount, 0);
+  assert.ok(!((await api('GET', '/api/alerts')).body.items.some((a) => a.kind === 'radar' && a.id === b.id)));
+});
+
 test('备份：创建、列表、下载', async () => {
   const b = (await api('POST', '/api/backups')).body;
   assert.ok(b.files > 0);

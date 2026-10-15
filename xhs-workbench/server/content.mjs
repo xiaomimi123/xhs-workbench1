@@ -71,17 +71,27 @@ export const STILL_EXTS = [...IMAGE_EXTS, '.heic'];
 export const VIDEO_EXTS = ['.mov', '.mp4'];
 export const MAX_IMAGES = 18; // 小红书图文笔记的图片上限（含封面，以平台提示为准）
 
-// 保存前端上传的文件（base64）
-export function saveUpload(dir, filename, dataBase64, exts = IMAGE_EXTS) {
+// 保存前端上传的文件（base64）。大文件（视频）用 saveNoteFileStream 走流式上传。
+export function cleanUploadName(filename, exts, fallback = 'file') {
   const ext = path.extname(filename || '').toLowerCase();
   if (!exts.includes(ext)) throw httpError(400, `只支持 ${exts.map((e) => e.slice(1)).join(' / ')} 文件`);
   // 扩展名可能是大写（如 IMG_1234.HEIC），按长度去掉而不是按字符串匹配
-  const base = path.basename(filename).slice(0, -ext.length).replace(/[^\w一-龥-]+/g, '_').slice(0, 40) || 'image';
+  const base = path.basename(filename).slice(0, -ext.length).replace(/[^\w一-龥-]+/g, '_').slice(0, 40) || fallback;
+  return { base, ext };
+}
+
+export function uniqueName(dir, base, ext) {
   ensureDir(dir);
   let name = `${base}${ext}`;
   for (let i = 2; fs.existsSync(path.join(dir, name)); i++) name = `${base}-${i}${ext}`;
+  return name;
+}
+
+export function saveUpload(dir, filename, dataBase64, exts = IMAGE_EXTS) {
+  const { base, ext } = cleanUploadName(filename, exts, 'image');
   const buf = Buffer.from(String(dataBase64 || '').replace(/^data:[^,]+,/, ''), 'base64');
   if (!buf.length) throw httpError(400, '文件为空');
+  const name = uniqueName(dir, base, ext);
   fs.writeFileSync(path.join(dir, name), buf);
   return name;
 }
@@ -95,7 +105,9 @@ export function accountFile(accountId, rel) {
 
 // ---------- 对标账号 ----------
 
-const BENCH_FIELDS = ['name', 'xhsId', 'url', 'followers', 'positioning', 'remark', 'status', 'analyzedAt', 'summary'];
+const BENCH_FIELDS = ['name', 'xhsId', 'url', 'followers', 'positioning', 'remark', 'status', 'analyzedAt', 'summary',
+  // 对标追踪（爆款雷达）：tracking 由用户开启；lastCheckedAt / newCount / radarNote 由 agent 追踪检查时回写
+  'tracking', 'lastCheckedAt', 'newCount', 'radarNote'];
 
 function benchIndex(accountId) {
   return path.join(accRoot(accountId), 'benchmarks', 'index.json');
@@ -148,6 +160,18 @@ export function deleteBenchmark(accountId, id) {
   const b = removeItem(benchIndex(accountId), 'b_', id, 'benchmarks', { account: accountId });
   const dir = path.join(accRoot(accountId), 'benchmarks', id);
   if (fs.existsSync(dir)) moveToTrash(dir, 'benchmarks', { account: accountId, label: `对标拆解资料：${b.name}` });
+}
+
+/** 用户看过追踪结果：清掉新笔记提醒（agent 下次检查再发现新笔记时会重新写上） */
+export function markBenchmarkSeen(accountId, id) {
+  checkId(id);
+  const items = readItems(benchIndex(accountId), 'b_');
+  const item = items.find((b) => b.id === id);
+  if (!item) throw httpError(404, '对标账号不存在');
+  item.newCount = 0;
+  delete item.radarNote;
+  writeJson(benchIndex(accountId), { items });
+  return item;
 }
 
 // ---------- 选题 ----------
@@ -229,14 +253,17 @@ export function noteDetail(accountId, id) {
   } catch {
     /* 还没有正文 */
   }
-  const media = normalizeMedia(dir, meta.media);
+  const imgDir = path.join(dir, 'images');
+  // 视频笔记（meta.video 存在）：配图停用（meta.media 保留，切回图文时恢复），视频封面单独管理
+  const media = meta.video ? [] : normalizeMedia(dir, meta.media);
   return {
     ...meta,
     content,
     coverMode: meta.coverMode === 'first' ? 'first' : 'template',
     media,
     images: media.map((m) => m.file),
-    looseVideos: looseVideos(dir, media),
+    looseVideos: meta.video ? [] : looseVideos(dir, media),
+    video: meta.video ? { ...meta.video, coverCandidates: listFiles(imgDir, STILL_EXTS) } : null,
   };
 }
 
@@ -313,18 +340,121 @@ export function cropMedia(accountId, id, file, dataBase64) {
   return saveMedia(accountId, id, media);
 }
 
-/** 笔记素材打包：封面 + 按顺序编号的配图 / 实况视频 + 文案，方便手动发布 */
+// ---------- 视频笔记 ----------
+
+/** 设置视频笔记：file 为 images/ 里的视频（传空转为图文）；cover 可选，传空清除 */
+export function setNoteVideo(accountId, id, input = {}) {
+  const dir = noteDir(accountId, id);
+  const meta = readJson(path.join(dir, 'meta.json'), null);
+  if (!meta) throw httpError(404, '笔记不存在');
+  const imgDir = path.join(dir, 'images');
+  let video = meta.video && typeof meta.video === 'object' ? { ...meta.video } : null;
+  if ('file' in input) {
+    const file = String(input.file || '');
+    if (!file) video = null;
+    else {
+      if (!listFiles(imgDir, VIDEO_EXTS).includes(file)) throw httpError(400, '视频文件不存在，请先上传');
+      video = { file };
+    }
+  }
+  if (video && 'cover' in input) {
+    const cover = String(input.cover || '');
+    if (cover) {
+      if (!listFiles(imgDir, STILL_EXTS).includes(cover)) throw httpError(400, '封面文件不存在');
+      video.cover = cover;
+    } else delete video.cover;
+  }
+  meta.video = video;
+  meta.updatedAt = now();
+  writeJson(path.join(dir, 'meta.json'), meta);
+  return noteDetail(accountId, id);
+}
+
+/** 删除视频或它的封面文件（进回收站，可恢复） */
+export function deleteNoteVideoFile(accountId, id, file) {
+  const dir = noteDir(accountId, id);
+  const meta = readJson(path.join(dir, 'meta.json'), null);
+  if (!meta || !meta.video) throw httpError(404, '这篇不是视频笔记');
+  const isVideo = meta.video.file === file;
+  const isCover = meta.video.cover === file;
+  if (!isVideo && !isCover) throw httpError(404, '文件不属于这个视频');
+  moveToTrash(safeJoin(path.join(dir, 'images'), file), 'notes', { account: accountId, label: `视频笔记素材：${meta.title || id} / ${file}` });
+  if (isVideo) meta.video = null;
+  else delete meta.video.cover;
+  meta.updatedAt = now();
+  writeJson(path.join(dir, 'meta.json'), meta);
+  return noteDetail(accountId, id);
+}
+
+// 视频文件大，走流式上传（POST /api/notes/upload-file，请求体直接写盘）
+export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024; // 1GB
+
+export function saveNoteFileStream(accountId, id, filename, req) {
+  const dir = noteDir(accountId, id);
+  if (!fs.existsSync(path.join(dir, 'meta.json'))) throw httpError(404, '笔记不存在');
+  const imgDir = path.join(dir, 'images');
+  const { base, ext } = cleanUploadName(filename, [...STILL_EXTS, ...VIDEO_EXTS]);
+  const name = uniqueName(imgDir, base, ext);
+  const out = path.join(imgDir, name);
+  const cleanup = () => {
+    try {
+      fs.unlinkSync(out);
+    } catch {
+      /* 已经不存在 */
+    }
+  };
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    let failed = false;
+    const ws = fs.createWriteStream(out);
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > MAX_VIDEO_BYTES) {
+        failed = true;
+        ws.destroy();
+        cleanup();
+        req.destroy();
+        reject(httpError(413, '视频超过 1GB 上限'));
+      }
+    });
+    req.on('error', () => {
+      if (failed) return;
+      failed = true;
+      ws.destroy();
+      cleanup();
+      reject(httpError(400, '上传中断'));
+    });
+    ws.on('error', (err) => {
+      if (failed) return;
+      failed = true;
+      cleanup();
+      reject(err);
+    });
+    ws.on('finish', () => resolve(name));
+    req.pipe(ws);
+  });
+}
+
+/** 笔记素材打包：封面 + 按顺序编号的配图 / 实况视频（或视频笔记的视频）+ 文案，方便手动发布 */
 export function noteBundle(accountId, id) {
   const dir = noteDir(accountId, id);
   const n = noteDetail(accountId, id);
   const entries = [];
   const pad = (i) => String(i).padStart(2, '0');
   let i = 1;
-  if (n.coverMode !== 'first' && fs.existsSync(path.join(dir, 'cover.png'))) entries.push({ name: `${pad(i++)}-封面.png`, file: path.join(dir, 'cover.png') });
-  for (const m of n.media) {
-    const k = pad(i++);
-    entries.push({ name: `${k}${path.extname(m.file)}`, file: path.join(dir, 'images', m.file) });
-    if (m.video) entries.push({ name: `${k}-实况${path.extname(m.video)}`, file: path.join(dir, 'images', m.video) });
+  if (n.video) {
+    // 封面优先级：用户指定的视频封面（images/ 里）→ 模板封面（笔记根目录的 cover.png）→ 平台默认首帧（不打包）
+    let coverPath = n.video.cover ? path.join(dir, 'images', n.video.cover) : n.coverMode !== 'first' ? path.join(dir, 'cover.png') : '';
+    if (!coverPath || !fs.existsSync(coverPath)) coverPath = '';
+    else entries.push({ name: `${pad(i++)}-封面${path.extname(coverPath)}`, file: coverPath });
+    entries.push({ name: `${pad(i++)}-视频${path.extname(n.video.file)}`, file: path.join(dir, 'images', n.video.file) });
+  } else {
+    if (n.coverMode !== 'first' && fs.existsSync(path.join(dir, 'cover.png'))) entries.push({ name: `${pad(i++)}-封面.png`, file: path.join(dir, 'cover.png') });
+    for (const m of n.media) {
+      const k = pad(i++);
+      entries.push({ name: `${k}${path.extname(m.file)}`, file: path.join(dir, 'images', m.file) });
+      if (m.video) entries.push({ name: `${k}-实况${path.extname(m.video)}`, file: path.join(dir, 'images', m.video) });
+    }
   }
   const text = `${n.title || ''}\n\n${(n.content || '').trim()}\n\n${(n.tags || []).map((t) => `#${t}`).join(' ')}\n`;
   return {

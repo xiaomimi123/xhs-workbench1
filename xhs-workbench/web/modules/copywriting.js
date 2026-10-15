@@ -71,9 +71,9 @@ function drawList() {
   const items = V.items.filter((n) => V.filter === 'all' || n.status === V.filter);
   box.innerHTML = items.length
     ? items.map((n) => `<button class="note-item${n.id === V.current ? ' active' : ''}" data-note="${esc(n.id)}">
-        ${n.hasCover ? `<img src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">` : '<span class="note-thumb">📝</span>'}
+        ${n.video && !n.hasCover ? '<span class="note-thumb">🎬</span>' : n.hasCover ? `<img src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">` : '<span class="note-thumb">📝</span>'}
         <span class="note-item-text"><span class="note-item-title">${esc(n.title || '（无标题）')}</span>
-        <span class="muted">${STATUS_NAME[n.status] || n.status} · ${fmtTime(n.updatedAt)}</span></span>
+        <span class="muted">${STATUS_NAME[n.status] || n.status} · ${n.video ? '视频 · ' : ''}${fmtTime(n.updatedAt)}</span></span>
       </button>`).join('')
     : '<div class="empty">还没有笔记</div>';
 }
@@ -94,12 +94,18 @@ function lintHtml(data) {
 function previewHtml(data) {
   const n = V.note;
   const first = n.media && n.media[0] && /\.(png|jpe?g|webp|gif)$/i.test(n.media[0].file) ? n.media[0].file : null;
-  const total = (n.media ? n.media.length : 0) + (n.coverMode !== 'first' && n.hasCover ? 1 : 0);
-  const cover = n.coverMode === 'first' && first
-    ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/images/${first}`, n.updatedAt)}" alt="">`
-    : n.hasCover
-      ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">`
-      : '<div class="phone-cover placeholder">还没有封面</div>';
+  const total = n.video ? 1 : (n.media ? n.media.length : 0) + (n.coverMode !== 'first' && n.hasCover ? 1 : 0);
+  const cover = n.video
+    ? n.video.cover
+      ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/images/${n.video.cover}`, n.updatedAt)}" alt="">`
+      : n.hasCover && n.coverMode !== 'first'
+        ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">`
+        : '<div class="phone-cover placeholder">🎬 视频首帧</div>'
+    : n.coverMode === 'first' && first
+      ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/images/${first}`, n.updatedAt)}" alt="">`
+      : n.hasCover
+        ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">`
+        : '<div class="phone-cover placeholder">还没有封面</div>';
   return `<div class="phone">
     ${cover}
     <div class="phone-body">
@@ -174,7 +180,7 @@ function draw(main) {
 // 配图变化只重绘配图区，不覆盖编辑器里还没保存的文字
 function onMediaChange(fresh) {
   if (!V.note || fresh.id !== V.note.id) return;
-  for (const k of ['media', 'images', 'looseVideos', 'coverMode', 'hasCover', 'coverHash', 'updatedAt']) V.note[k] = fresh[k];
+  for (const k of ['media', 'images', 'looseVideos', 'coverMode', 'hasCover', 'coverHash', 'coverStale', 'video', 'updatedAt']) V.note[k] = fresh[k];
   const box = $('#media-box');
   if (!box) return;
   box.outerHTML = mediaHtml(V.note);

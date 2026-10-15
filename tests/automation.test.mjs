@@ -82,6 +82,47 @@ test('自动化设置的取值校验', () => {
   const c = ops.saveAutomation(ACC, { publish: { dailyLimit: 999, defaultMode: 'x' } });
   assert.equal(c.publish.dailyLimit, 20);
   assert.equal(c.publish.defaultMode, 'remind');
+  const r = ops.saveAutomation(ACC, { radar: { everyHours: 9999, likesThreshold: 0 } });
+  assert.equal(r.radar.everyHours, 168);
+  assert.equal(r.radar.likesThreshold, 1000);
+});
+
+test('爆款雷达：到点派任务、提醒、关闭后不再派', () => {
+  for (const s of ops.listSchedule(ACC)) ops.deleteSchedule(ACC, s.id);
+  const b = content.saveBenchmark(ACC, { name: '雷达号', tracking: true });
+  ops.saveAutomation(ACC, { radar: { everyHours: 24 } });
+
+  const tasks = [];
+  const sch = new ops.Scheduler({ runTask: (acc, text) => (tasks.push(text), `task-${tasks.length}`), notify: () => {}, log: () => {} });
+  sch.tick();
+  assert.equal(tasks.length, 1);
+  assert.match(tasks[0], /对标追踪/);
+  assert.ok(ops.getAutomation(ACC).lastRuns.radar);
+  sch.tick(); // 间隔内不重复派
+  assert.equal(tasks.length, 1);
+
+  // 没有新笔记时没有雷达提醒；agent 回写后提醒出现
+  assert.ok(!ops.alerts().some((a) => a.kind === 'radar'));
+  content.saveBenchmark(ACC, { id: b.id, newCount: 3, radarNote: '《爆了》点赞 1.2万' });
+  const radar = ops.alerts().find((a) => a.kind === 'radar');
+  assert.ok(radar && radar.title === '雷达号' && radar.text.includes('爆了'));
+
+  // 没有追踪中的对标时不派任务
+  content.saveBenchmark(ACC, { id: b.id, tracking: false, newCount: 0 });
+  ops.saveAutomation(ACC, { lastRuns: { radar: new Date(Date.now() - 48 * 3600_000).toISOString() } });
+  tasks.length = 0;
+  sch.tick();
+  assert.equal(tasks.length, 0);
+
+  // 关闭追踪后不派任务；有追踪时防休眠「自动」模式覆盖雷达
+  ops.saveAutomation(ACC, { radar: { everyHours: 0 } });
+  content.saveBenchmark(ACC, { id: b.id, tracking: true });
+  tasks.length = 0;
+  sch.tick();
+  assert.equal(tasks.length, 0);
+  assert.equal(ops.needsAwake(), false);
+  ops.saveAutomation(ACC, { radar: { everyHours: 24 } });
+  assert.equal(ops.needsAwake(), true);
 });
 
 test('备份与恢复：恢复前数据进回收站，本机连接配置保留', () => {

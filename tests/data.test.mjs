@@ -93,6 +93,58 @@ test('对标账号：保存、详情、删除连同资料进回收站', () => {
   assert.ok(store.listTrash().some((e) => e.label.includes('对标拆解资料')));
 });
 
+test('对标追踪：tracking 字段、agent 回写、seen 清零', () => {
+  const b = content.saveBenchmark(ACC, { name: '追踪号', tracking: true });
+  assert.equal(content.listBenchmarks(ACC).find((x) => x.id === b.id).tracking, true);
+  // agent 追踪检查后回写 newCount / radarNote / lastCheckedAt
+  content.saveBenchmark(ACC, { id: b.id, newCount: 2, radarNote: '《标题》点赞 1.5万', lastCheckedAt: '2026-10-15T10:00:00.000Z' });
+  const seen = content.markBenchmarkSeen(ACC, b.id);
+  assert.equal(seen.newCount, 0);
+  assert.equal(seen.radarNote, undefined);
+  assert.equal(seen.lastCheckedAt, '2026-10-15T10:00:00.000Z'); // 检查时间保留
+  assert.equal(seen.tracking, true);
+  assert.throws(() => content.markBenchmarkSeen(ACC, 'b_nope'), /不存在/);
+});
+
+test('视频笔记：设置视频与封面、配图停用、打包、删除进回收站', () => {
+  const n = content.saveNote(ACC, { create: true, title: '视频笔记' });
+  content.uploadNoteImage(ACC, n.id, 'demo.mp4', Buffer.from('vv').toString('base64'));
+  content.uploadNoteImage(ACC, n.id, '封面.jpg', PNG_1PX.toString('base64'));
+  assert.deepEqual(content.noteDetail(ACC, n.id).looseVideos, ['demo.mp4']); // 未设置时是未配对视频
+
+  assert.throws(() => content.setNoteVideo(ACC, n.id, { file: 'nope.mp4' }), /视频文件不存在/);
+  assert.throws(() => content.setNoteVideo(ACC, n.id, { file: 'demo.mp4', cover: 'nope.png' }), /封面文件不存在/);
+  let d = content.setNoteVideo(ACC, n.id, { file: 'demo.mp4' });
+  assert.equal(d.video.file, 'demo.mp4');
+  assert.deepEqual(d.media, []); // 视频笔记配图停用
+  assert.deepEqual(d.looseVideos, []); // 也不再显示为未配对
+  d = content.setNoteVideo(ACC, n.id, { cover: '封面.jpg' });
+  assert.equal(d.video.cover, '封面.jpg');
+
+  const { entries } = content.noteBundle(ACC, n.id);
+  assert.deepEqual(entries.map((e) => e.name), ['01-封面.jpg', '02-视频.mp4', '文案.txt']);
+
+  d = content.deleteNoteVideoFile(ACC, n.id, '封面.jpg');
+  assert.equal(d.video.cover, undefined);
+  assert.ok(store.listTrash().some((e) => e.label.includes('视频笔记素材')));
+  assert.throws(() => content.deleteNoteVideoFile(ACC, n.id, '封面.jpg'), /不属于/);
+
+  d = content.deleteNoteVideoFile(ACC, n.id, 'demo.mp4');
+  assert.equal(d.video, null); // 视频删掉后转回图文
+});
+
+test('视频笔记：图文转视频再转回，配图顺序保留', () => {
+  const n = content.saveNote(ACC, { create: true, title: '图文转视频' });
+  content.uploadNoteImage(ACC, n.id, 'p1.png', PNG_1PX.toString('base64'));
+  content.uploadNoteImage(ACC, n.id, 'v2.mp4', Buffer.from('x').toString('base64'));
+  content.saveMedia(ACC, n.id, [{ file: 'p1.png' }]);
+  let d = content.setNoteVideo(ACC, n.id, { file: 'v2.mp4' });
+  assert.deepEqual(d.media, []);
+  d = content.setNoteVideo(ACC, n.id, { file: '' }); // 切回图文
+  assert.deepEqual(d.media.map((m) => m.file), ['p1.png']);
+  assert.deepEqual(d.looseVideos, ['v2.mp4']); // 视频变成未配对，可做实况图
+});
+
 test('账号不存在时拒绝访问', () => {
   assert.throws(() => content.listNotes('nope'), /账号不存在/);
 });

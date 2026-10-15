@@ -1,6 +1,6 @@
 # 小红书自动化运营工作台 · 整体架构设计
 
-> 状态：M1–M3 及 v0.4 增强已实现（v0.4.0）。模块设计细节见 [m2-content-production.md](m2-content-production.md)、[m3-operations.md](m3-operations.md)、[v0.4-enhancements.md](v0.4-enhancements.md)。
+> 状态：M1–M3、v0.4、v0.5 增强已实现（v0.5.0）。模块设计细节见 [m2-content-production.md](m2-content-production.md)、[m3-operations.md](m3-operations.md)、[v0.4-enhancements.md](v0.4-enhancements.md)、[v0.5-enhancements.md](v0.5-enhancements.md)。
 
 ## 1. 目标与定位
 
@@ -127,7 +127,7 @@ xhs-workbench/                 ← 分发的 skill 包
 ├── web/                       ← 工作台前端（纯静态，无需构建）
 │   ├── index.html  app.js（导航、对话、知识库、账号、设置）  core.js（公共状态与接口）
 │   ├── md.js（离线 Markdown 渲染）  lint.js（字数与违禁词）  covers.js（封面 Canvas 模板）  styles.css
-│   └── modules/  benchmark.js  topics.js  copywriting.js  media.js  cover.js  schedule.js  engage.js  analytics.js  system.js
+│   └── modules/  benchmark.js  topics.js  copywriting.js  media.js  cover.js  schedule.js  engage.js  analytics.js  system.js  onboarding.js
 ├── scripts/workbench.mjs      ← 统一命令入口
 └── templates/knowledge/       ← 知识库初始模板
 
@@ -153,6 +153,7 @@ xhs-workbench/                 ← 分发的 skill 包
   - **M1** ✅：skill 骨架 + 安装自检 + 桥接层 + 对话面板 + 知识库 + 多账号
   - **M2** ✅：对标拆解 + 选题 + 文案 + 封面
   - **M3** ✅：定时发布 + 评论私信 + 数据复盘
+  - **v0.5** ✅：视频笔记 + 对标追踪雷达 + 历史笔记导入 + 新手引导
 
 ## 8. 已知限制
 

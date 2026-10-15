@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readJson, writeJson, httpError, listAccounts } from './store.mjs';
-import { accRoot, readItems, upsertItem, removeItem, listFiles, saveUpload, noteDetail, saveNote, IMAGE_EXTS } from './content.mjs';
+import { accRoot, readItems, upsertItem, removeItem, listFiles, saveUpload, noteDetail, saveNote, listBenchmarks, IMAGE_EXTS } from './content.mjs';
 
 const now = () => new Date().toISOString();
 const MISSED_AFTER_MS = 2 * 3600_000; // 超过计划时间 2 小时还没执行，视为错过，不再自动发布
@@ -15,6 +15,7 @@ export const DEFAULT_AUTOMATION = {
   publish: { defaultMode: 'remind', dailyLimit: 3, minIntervalMin: 60 },
   engage: { autoSend: false, maxPerRun: 20, checkEveryHours: 0 },
   analytics: { dailyAt: '' },
+  radar: { everyHours: 0, likesThreshold: 1000 },
   sessionId: null,
   lastRuns: {},
 };
@@ -26,13 +27,13 @@ function automationFile(acc) {
 export function getAutomation(acc) {
   const saved = readJson(automationFile(acc), {});
   const out = { ...DEFAULT_AUTOMATION, ...saved, lastRuns: { ...(saved.lastRuns || {}) } };
-  for (const k of ['publish', 'engage', 'analytics']) out[k] = { ...DEFAULT_AUTOMATION[k], ...(saved[k] || {}) };
+  for (const k of ['publish', 'engage', 'analytics', 'radar']) out[k] = { ...DEFAULT_AUTOMATION[k], ...(saved[k] || {}) };
   return out;
 }
 
 export function saveAutomation(acc, patch) {
   const cur = getAutomation(acc);
-  for (const k of ['publish', 'engage', 'analytics']) if (patch[k]) Object.assign(cur[k], patch[k]);
+  for (const k of ['publish', 'engage', 'analytics', 'radar']) if (patch[k]) Object.assign(cur[k], patch[k]);
   if ('sessionId' in patch) cur.sessionId = patch.sessionId;
   if (patch.lastRuns) Object.assign(cur.lastRuns, patch.lastRuns);
   // 基本取值校验
@@ -42,6 +43,8 @@ export function saveAutomation(acc, patch) {
   cur.engage.maxPerRun = Math.max(1, Math.min(100, Number(cur.engage.maxPerRun) || 20));
   cur.engage.checkEveryHours = Math.max(0, Math.min(72, Number(cur.engage.checkEveryHours) || 0));
   cur.engage.autoSend = !!cur.engage.autoSend;
+  cur.radar.everyHours = Math.max(0, Math.min(168, Number(cur.radar.everyHours) || 0));
+  cur.radar.likesThreshold = Math.max(1, Math.min(1_000_000, Number(cur.radar.likesThreshold) || 1000));
   if (cur.analytics.dailyAt && !/^\d{2}:\d{2}$/.test(cur.analytics.dailyAt)) throw httpError(400, '时间格式应为 HH:MM');
   writeJson(automationFile(acc), cur);
   return cur;
@@ -214,6 +217,25 @@ export function alerts() {
     if (fresh) out.push({ ...base, kind: 'engage', status: 'new', text: `${fresh} 条评论私信待处理`, at: now() });
     const approved = engage.filter((e) => e.status === 'approved').length;
     if (approved) out.push({ ...base, kind: 'engage', status: 'approved', text: `${approved} 条回复已确认，待发送`, at: now() });
+
+    // 爆款雷达：agent 追踪检查后发现新笔记（newCount / radarNote 由 agent 回写）
+    let benches = [];
+    try {
+      benches = listBenchmarks(a.id);
+    } catch {
+      /* 忽略 */
+    }
+    for (const b of benches) {
+      if (!b.tracking || (!b.newCount && !b.radarNote)) continue;
+      out.push({
+        ...base,
+        kind: 'radar',
+        id: b.id,
+        title: b.name,
+        text: b.radarNote || `对标「${b.name}」新增 ${b.newCount} 篇笔记，去看看`,
+        at: b.lastCheckedAt || now(),
+      });
+    }
   }
   return out;
 }
@@ -228,6 +250,9 @@ const PROMPTS = {
     `【自动任务 · 检查评论私信】请按 playbooks/engage.md 检查新的评论和私信，写入 accounts/${acc}/engage/items.json 并起草回复` +
     (cfg.autoSend ? `，然后直接发送回复（本次最多 ${cfg.maxPerRun} 条，用户已开启自动发送）。` : '，只起草、不要发送（等用户在工作台确认）。'),
   analytics: (acc) => `【自动任务 · 数据抓取】请按 playbooks/analytics.md 抓取最新的笔记数据和账号数据，更新 accounts/${acc}/analytics/ 下的 notes.json 和 account.json。`,
+  radar: (acc) =>
+    `【自动任务 · 对标追踪】请按 playbooks/benchmark.md 的「追踪检查」检查开启追踪的对标账号（accounts/${acc}/benchmarks/index.json 里 tracking 为 true 的），` +
+    `把新发现的笔记追加到各自的 notes.json，并更新 index.json 里的 newCount、radarNote、lastCheckedAt。`,
 };
 
 export class Scheduler {
@@ -307,6 +332,14 @@ export class Scheduler {
         if (this.#run(acc, 'analytics', PROMPTS.analytics(acc))) saveAutomation(acc, { lastRuns: { analytics: now() } });
       }
     }
+
+    // 4. 对标追踪（爆款雷达）
+    if (cfg.radar.everyHours > 0) {
+      const last = cfg.lastRuns.radar ? new Date(cfg.lastRuns.radar).getTime() : 0;
+      if (t - last >= cfg.radar.everyHours * 3600_000 && listBenchmarks(acc).some((b) => b.tracking)) {
+        if (this.#run(acc, 'radar', PROMPTS.radar(acc))) saveAutomation(acc, { lastRuns: { radar: now() } });
+      }
+    }
   }
 
   /** agent 任务结束：如果 agent 没按手册回写发布结果，标记为待确认 / 失败 */
@@ -327,7 +360,7 @@ export class Scheduler {
 }
 
 
-/** 防休眠「自动」模式：未来 3 小时内有排期，或开启了定时检查评论 / 每日抓数据 */
+/** 防休眠「自动」模式：未来 3 小时内有排期，或开启了定时检查评论 / 每日抓数据 / 对标追踪 */
 export function needsAwake() {
   const soon = Date.now() + 3 * 3600_000;
   for (const a of listAccounts()) {
@@ -335,6 +368,7 @@ export function needsAwake() {
       if (listSchedule(a.id).some((s) => (s.status === 'scheduled' && new Date(s.publishAt).getTime() <= soon) || s.status === 'running')) return true;
       const cfg = getAutomation(a.id);
       if (cfg.engage.checkEveryHours > 0 || cfg.analytics.dailyAt) return true;
+      if (cfg.radar.everyHours > 0 && listBenchmarks(a.id).some((b) => b.tracking)) return true;
     } catch {
       /* 账号目录异常时跳过 */
     }

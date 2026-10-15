@@ -2,7 +2,7 @@
 import { md, esc } from '../md.js';
 import { S, $, api, acc, fileUrl, toast, fmtTime, ask, readFileAsDataURL, accDirRel } from '../core.js';
 
-const V = { items: [], current: null, detail: null, tab: 'report', form: null };
+const V = { items: [], current: null, detail: null, tab: 'report', form: null, cfg: null, showRadar: false };
 
 function benchDir(id) {
   return `${accDirRel()}/benchmarks/${id}/`;
@@ -12,10 +12,20 @@ const STATUS = { pending: ['待拆解', ''], analyzing: ['拆解中', 'warn'], a
 
 async function load() {
   V.items = (await api('GET', `/api/benchmarks?${acc()}`)).items;
+  V.cfg = await api('GET', `/api/automation?${acc()}`);
   if (V.current) {
     V.detail = V.items.some((b) => b.id === V.current) ? await api('GET', `/api/benchmarks/detail?${acc(`id=${V.current}`)}`) : null;
     if (!V.detail) V.current = null;
   }
+}
+
+/** 点开详情 = 看过追踪结果：清掉新笔记提醒 */
+async function markSeen(id) {
+  const b = V.items.find((x) => x.id === id);
+  if (!b || (!b.newCount && !b.radarNote)) return;
+  await api('POST', `/api/benchmarks/seen?${acc()}`, { id }).catch(() => {});
+  b.newCount = 0;
+  delete b.radarNote;
 }
 
 export async function render(main, params = {}) {
@@ -47,26 +57,46 @@ function draw(main) {
     .map((b) => {
       const [label, cls] = STATUS[b.status] || STATUS.pending;
       return `<div class="card quick-card" data-bench="${esc(b.id)}">
-        <div class="row"><h3 style="margin:0">${esc(b.name)}</h3><span class="badge ${cls}">${label}</span></div>
+        <div class="row"><h3 style="margin:0">${esc(b.name)}</h3>
+          ${b.newCount ? `<span class="badge brand">新 ${b.newCount}</span>` : ''}
+          <span class="badge ${cls}">${label}</span></div>
         <p class="muted" style="margin:6px 0 0">${[b.xhsId && `小红书号 ${esc(b.xhsId)}`, b.followers && `粉丝 ${esc(b.followers)}`, b.noteCount && `已采集 ${b.noteCount} 篇`].filter(Boolean).join(' · ') || '还没有数据'}</p>
-        ${b.summary ? `<p style="margin:8px 0 0">${esc(b.summary)}</p>` : b.remark ? `<p style="margin:8px 0 0" class="muted">备注：${esc(b.remark)}</p>` : ''}
+        ${b.radarNote ? `<p class="radar-note" style="margin:8px 0 0">📡 ${esc(b.radarNote)}</p>` : b.summary ? `<p style="margin:8px 0 0">${esc(b.summary)}</p>` : b.remark ? `<p style="margin:8px 0 0" class="muted">备注：${esc(b.remark)}</p>` : ''}
+        <div class="row" style="margin-top:10px">
+          <button class="chip${b.tracking ? ' active' : ''}" data-act="${b.tracking ? 'track-off' : 'track-on'}" data-id="${esc(b.id)}">${b.tracking ? '📡 追踪中' : '📡 追踪'}</button>
+        </div>
       </div>`;
     })
     .join('');
 
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">🎯 竞品对标</h1><div class="muted">录入值得学习的账号，让 agent 拆解它们的选题、标题、封面和结构规律。</div></div>
+      <div><h1 class="page-title">🎯 竞品对标</h1><div class="muted">录入值得学习的账号，让 agent 拆解它们的选题、标题、封面和结构规律；开启追踪后新笔记会自动提醒。</div></div>
       <div class="spacer"></div>
+      <button class="btn" data-act="toggle-radar">📡 追踪设置${V.cfg && V.cfg.radar.everyHours > 0 ? `（每 ${V.cfg.radar.everyHours} 小时）` : '（关）'}</button>
       <button class="btn" data-act="recommend">让 agent 推荐对标账号</button>
       <button class="btn primary" data-act="add">添加对标账号</button>
     </div>
+    ${V.showRadar && V.cfg ? radarFormHtml() : ''}
     ${V.form ? formHtml(V.form) : ''}
     ${V.items.length ? `<div class="grid">${cards}</div>` : V.form ? '' : `<div class="card empty-card">
         <p>还没有对标账号。</p>
         <p class="muted">添加一个你想学习的账号（主页链接或名字都行），或者让 agent 根据你的账号定位推荐。</p>
       </div>`}`;
   bind(main);
+}
+
+function radarFormHtml() {
+  const r = V.cfg.radar;
+  return `<div class="card" style="margin-bottom:16px;max-width:560px">
+    <h3 style="margin-top:0">对标追踪设置（当前账号）</h3>
+    <form class="form" id="radar-form">
+      <label>检查间隔（小时，0 表示不自动检查）<input type="number" name="everyHours" min="0" max="168" step="1" value="${r.everyHours}"></label>
+      <label>新笔记点赞达到多少算「可能爆了」<input type="number" name="likesThreshold" min="1" step="1" value="${r.likesThreshold}"></label>
+      <p class="muted" style="margin:0;font-size:12px">开启追踪的对标账号会按这个间隔让 agent 检查新笔记，超过阈值的会顶栏提醒你。${V.cfg.lastRuns.radar ? `上次检查：${fmtTime(V.cfg.lastRuns.radar)}。` : ''}需要 agent 能控制浏览器、工作台保持运行。</p>
+      <div class="row"><button class="btn primary" type="submit">保存设置</button><button class="btn ghost" type="button" data-act="toggle-radar">收起</button></div>
+    </form>
+  </div>`;
 }
 
 function formHtml(f) {
@@ -99,9 +129,10 @@ function drawDetail(main) {
       ? `<div class="md">${md(report)}</div>`
       : `<div class="empty">还没有拆解报告。点上方「让 agent 拆解」开始。<br><span class="muted">如果 agent 无法直接浏览小红书，可以先在「截图素材」里上传对方主页和爆款笔记的截图。</span></div>`;
   } else if (V.tab === 'notes') {
+    const isNew = (n) => n.firstSeenAt && Date.now() - new Date(n.firstSeenAt).getTime() < 48 * 3600_000;
     body = notes.length
       ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>标题</th><th>类型</th><th>点赞</th><th>收藏</th><th>评论</th><th>选题类型</th><th>标题套路</th></tr></thead><tbody>
-          ${notes.map((n) => `<tr><td>${n.url ? `<a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a>` : esc(n.title)}</td><td>${esc(n.type)}</td><td>${esc(n.likes)}</td><td>${esc(n.collects)}</td><td>${esc(n.comments)}</td><td>${esc(n.topicType)}</td><td>${esc(n.titlePattern)}</td></tr>`).join('')}
+          ${notes.map((n) => `<tr><td>${n.url ? `<a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a>` : esc(n.title)}${isNew(n) ? ' <span class="badge brand">新</span>' : ''}</td><td>${esc(n.type)}</td><td>${esc(n.likes)}</td><td>${esc(n.collects)}</td><td>${esc(n.comments)}</td><td>${esc(n.topicType)}</td><td>${esc(n.titlePattern)}</td></tr>`).join('')}
         </tbody></table></div>`
       : '<div class="empty">agent 拆解时会把采集到的笔记数据存在这里。</div>';
   } else {
@@ -128,6 +159,8 @@ function drawDetail(main) {
       ${b.summary ? `<div class="summary">${esc(b.summary)}</div>` : ''}
       <div class="row" style="margin-top:12px">
         <button class="btn primary small" data-act="analyze">${b.status === 'analyzed' ? '让 agent 重新拆解' : '让 agent 拆解'}</button>
+        <button class="btn small" data-act="check-now" ${b.tracking ? '' : 'disabled'} title="立即检查这个账号有没有新笔记">立即检查新笔记</button>
+        <button class="chip${b.tracking ? ' active' : ''}" data-act="${b.tracking ? 'track-off' : 'track-on'}" data-id="${esc(b.id)}">${b.tracking ? '📡 追踪中' : '📡 追踪'}</button>
         <button class="btn small" data-act="to-topics" ${report ? '' : 'disabled'}>根据拆解生成选题</button>
         <button class="btn small" data-act="to-kb" ${report ? '' : 'disabled'}>沉淀到知识库</button>
       </div>
@@ -146,6 +179,7 @@ function bind(main) {
       V.current = t.dataset.bench;
       V.tab = 'report';
       V.form = null;
+      await markSeen(t.dataset.bench);
       await load();
       return draw(main);
     }
@@ -154,7 +188,25 @@ function bind(main) {
       return draw(main);
     }
     const b = V.detail && V.detail.item;
+    if (t.dataset.act === 'track-on' || t.dataset.act === 'track-off') {
+      const id = t.dataset.id;
+      try {
+        await api('POST', `/api/benchmarks?${acc()}`, { id, tracking: t.dataset.act === 'track-on' });
+        const item = V.items.find((x) => x.id === id);
+        if (item) item.tracking = t.dataset.act === 'track-on';
+        if (V.detail && V.detail.item.id === id) V.detail.item.tracking = item.tracking;
+        toast(item && item.tracking ? '已开启追踪，agent 会按设置间隔检查新笔记' : '已停止追踪');
+      } catch (err) {
+        toast(err.message);
+      }
+      return draw(main);
+    }
     switch (t.dataset.act) {
+      case 'toggle-radar':
+        V.showRadar = !V.showRadar;
+        return draw(main);
+      case 'check-now':
+        return ask(`请按 playbooks/benchmark.md 的「追踪检查」检查对标账号「${b.name}」（对标 id：${b.id}，主页：${b.url || '未提供'}）：把新发现的笔记追加到 ${benchDir(b.id)}notes.json（写 firstSeenAt），并更新 index.json 的 newCount、radarNote、lastCheckedAt。`, true);
       case 'add':
         V.form = {};
         return draw(main);
@@ -206,6 +258,22 @@ function bind(main) {
         await load();
         draw(main);
         toast('已保存');
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+  }
+
+  const radarForm = $('#radar-form', main);
+  if (radarForm) {
+    radarForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const f = new FormData(radarForm);
+      try {
+        V.cfg = await api('POST', `/api/automation?${acc()}`, { radar: { everyHours: Number(f.get('everyHours')) || 0, likesThreshold: Number(f.get('likesThreshold')) || 1000 } });
+        V.showRadar = false;
+        draw(main);
+        toast('追踪设置已保存');
       } catch (err) {
         toast(err.message);
       }
