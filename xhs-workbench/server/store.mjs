@@ -71,19 +71,19 @@ export function ensureWorkspace() {
   for (const acc of listAccounts()) ensureAccountDirs(acc.id);
 
   // 知识库为空时放入初始模板
-  if (fs.readdirSync(P.knowledge).filter((f) => !f.startsWith('.')).length === 0) {
-    copyDir(path.join(P.templates, 'knowledge'), P.knowledge);
-  }
+  if (fs.readdirSync(P.knowledge).filter((f) => !f.startsWith('.')).length === 0) seedKnowledge();
 }
 
-function copyDir(src, dest) {
-  if (!fs.existsSync(src)) return;
-  ensureDir(dest);
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const s = path.join(src, entry.name);
-    const d = path.join(dest, entry.name);
-    if (entry.isDirectory()) copyDir(s, d);
-    else if (!fs.existsSync(d)) fs.copyFileSync(s, d);
+// 包内模板文件名是 ASCII（避免解压工具弄乱中文文件名），按 manifest 复制成中文路径
+function seedKnowledge() {
+  const dir = path.join(P.templates, 'knowledge');
+  const manifest = readJson(path.join(dir, 'manifest.json'), { files: {} });
+  for (const [src, dest] of Object.entries(manifest.files)) {
+    const from = path.join(dir, src);
+    const to = safeJoin(P.knowledge, dest);
+    if (!fs.existsSync(from) || fs.existsSync(to)) continue;
+    ensureDir(path.dirname(to));
+    fs.copyFileSync(from, to);
   }
 }
 

@@ -29,7 +29,11 @@ if (!changelog.includes(`## v${version}`)) fail(`CHANGELOG.md 里没有 v${versi
 const dirty = git('status', '--porcelain', '--', SKILL);
 if (dirty && !allowDirty) fail(`${SKILL}/ 有未提交的修改，请先提交：\n${dirty}`);
 
-// 3. 所有脚本语法检查
+// 3. 包内路径只允许 ASCII：部分解压工具（如 macOS 自带的 unzip）会把中文文件名弄乱
+const nonAscii = git('-c', 'core.quotepath=false', 'ls-files', '--', SKILL).split('\n').filter((f) => /[^\x20-\x7e]/.test(f));
+if (nonAscii.length) fail(`以下文件名含非 ASCII 字符，请改名（中文名可通过 manifest 映射）：\n${nonAscii.join('\n')}`);
+
+// 4. 所有脚本语法检查
 const jsFiles = git('ls-files', '--', `${SKILL}/*.js`, `${SKILL}/*.mjs`).split('\n').filter(Boolean);
 for (const f of jsFiles) {
   try {
@@ -39,7 +43,7 @@ for (const f of jsFiles) {
   }
 }
 
-// 4. 生成 zip
+// 5. 生成 zip
 const dist = path.join(ROOT, 'dist');
 fs.mkdirSync(dist, { recursive: true });
 const out = path.join(dist, `${SKILL}-v${version}.zip`);

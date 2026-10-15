@@ -340,14 +340,19 @@ export function detectAdapters(adapters) {
   return found;
 }
 
-/** 用真实调用链路跑一次回声测试 */
-export async function pingAdapter(adapter, timeoutMs = 180_000) {
+/** 用真实调用链路跑回声测试；模型偶尔不按要求回复，失败时再试一次 */
+export async function pingAdapter(adapter, timeoutMs = 180_000, attempts = 2) {
   const started = Date.now();
-  try {
-    const { text } = await runCli(adapter, PING_PROMPT, { timeoutMs }).promise;
-    const ok = /PONG/i.test(text);
-    return { ok, ms: Date.now() - started, output: text.slice(0, 300), error: ok ? null : '回复中没有 PONG' };
-  } catch (err) {
-    return { ok: false, ms: Date.now() - started, output: '', error: err.message };
+  let last = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const { text } = await runCli(adapter, PING_PROMPT, { timeoutMs }).promise;
+      const ok = /PONG/i.test(text);
+      last = { ok, ms: Date.now() - started, output: text.slice(0, 300), error: ok ? null : `回复中没有 PONG（实际回复：${text.slice(0, 120) || '空'}）` };
+    } catch (err) {
+      last = { ok: false, ms: Date.now() - started, output: '', error: err.message };
+    }
+    if (last.ok) return last;
   }
+  return last;
 }

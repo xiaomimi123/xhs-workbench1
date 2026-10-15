@@ -51,6 +51,7 @@ node tools/package.mjs
 
 - 版本号取自 `xhs-workbench/server/server.mjs` 的 `VERSION`，发布前同步更新 `xhs-workbench/CHANGELOG.md`。
 - 包从 git 已提交的内容生成（`git archive`），`xhs-workbench/` 有未提交修改时会拒绝打包；脚本会先做语法检查，最后输出文件数和 SHA-256。
+- 包内文件名必须是 ASCII（部分解压工具会把中文文件名弄乱）。知识库模板的中文路径写在 `templates/knowledge/manifest.json` 里，初始化数据目录时再映射成中文。
 - 产物在 `dist/`（已加入 `.gitignore`）。
 
 ## 开发与调试
