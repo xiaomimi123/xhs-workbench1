@@ -1,5 +1,6 @@
 // 发布排期：安排发布时间 → 到点提醒手动发布（附发布助手）或交给 agent 自动发布
 import { esc } from '../md.js';
+import { icon } from '../icons.js';
 import { S, $, api, acc, toast, fmtTime, ask, opt, accDirRel } from '../core.js';
 
 export const CREATOR_URL = 'https://creator.xiaohongshu.com/publish/publish';
@@ -151,9 +152,9 @@ function draw(main) {
 
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">🗓️ 发布排期</h1><div class="muted">安排好发布时间，到点提醒你手动发，或交给 agent 自动发。</div></div>
+      <div><h1 class="page-title">${icon("calendar")} 发布排期</h1><div class="muted">安排好发布时间，到点提醒你手动发，或交给 agent 自动发。</div></div>
       <div class="spacer"></div>
-      <button class="btn" data-act="toggle-settings">⚙️ 发布设置</button>
+      <button class="btn" data-act="toggle-settings">${icon("sliders")} 发布设置</button>
     </div>
     ${V.showSettings ? settingsHtml() : ''}
     ${attention.length ? `<h3 class="section-title">需要处理（${attention.length}）</h3>${attention.map(attentionCard).join('')}` : ''}

@@ -474,3 +474,14 @@ mark { background: #ffe58a; color: inherit; border-radius: 2px; padding: 0 1px; 
 .onboard-check { flex: none; width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center; font-size: 13px; font-weight: 700; background: var(--hover); color: var(--muted); }
 .onboard-step.done .onboard-check { background: var(--brand); color: #fff; }
 .onboard-body { flex: 1; min-width: 0; }
+
+/* ----- 统一 SVG 图标（替代 UI 里的 emoji） ----- */
+.icon { width: 1.05em; height: 1.05em; vertical-align: -0.18em; flex: none; }
+.icon-ok { color: var(--ok); }
+.icon-warn { color: var(--warn); }
+.nav-item .icon { width: 17px; height: 17px; vertical-align: -3px; }
+.icon-btn .icon { width: 16px; height: 16px; }
+.page-title .icon { width: 22px; height: 22px; vertical-align: -4px; }
+.note-thumb .icon { width: 20px; height: 20px; }
+.icon-mini .icon { width: 13px; height: 13px; vertical-align: -2px; }
+.ok-line .icon, .error-line .icon { vertical-align: -0.15em; }

@@ -1,6 +1,7 @@
 // 封面配图：选模板 / 配色 / 文字 → 实时预览 → 保存为笔记封面。
 // agent 只需把封面规格写进 meta.json 的 cover 或 coverOptions，工作台会自动渲染成 PNG。
 import { esc } from '../md.js';
+import { icon } from '../icons.js';
 import { S, $, api, acc, fileUrl, toast, ask, go, opt, readFileAsDataURL, accDirRel } from '../core.js';
 import { TEMPLATES, PALETTES, normalizeSpec, drawCover } from '../covers.js';
 
@@ -111,7 +112,7 @@ function formHtml(s, note) {
 function draw(main) {
   if (!V.notes.length || !V.note) {
     main.innerHTML = `
-      <div class="row page-head"><div><h1 class="page-title">🎨 封面配图</h1><div class="muted">封面跟着笔记走，先有笔记再做封面。</div></div></div>
+      <div class="row page-head"><div><h1 class="page-title">${icon("palette")} 封面配图</h1><div class="muted">封面跟着笔记走，先有笔记再做封面。</div></div></div>
       <div class="card empty-card"><p>还没有笔记。</p><button class="btn primary" data-act="to-copy">去写一篇笔记</button></div>`;
     main.onclick = (e) => e.target.closest('[data-act="to-copy"]') && go('copywriting');
     return;
@@ -121,7 +122,7 @@ function draw(main) {
   const options = (n.coverOptions || []).map(normalizeSpec);
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">🎨 封面配图</h1><div class="muted">选模板、改文字，右侧实时预览；agent 出的方案也会出现在下方。</div></div>
+      <div><h1 class="page-title">${icon("palette")} 封面配图</h1><div class="muted">选模板、改文字，右侧实时预览；agent 出的方案也会出现在下方。</div></div>
       <div class="spacer"></div>
       <select id="cover-note" aria-label="选择笔记">${V.notes.map((x) => opt(x.id, x.title || '（无标题）', n.id)).join('')}</select>
     </div>
@@ -133,7 +134,7 @@ function draw(main) {
           <button class="btn primary" data-act="save">保存为封面</button>
           <button class="btn" data-act="download">下载 PNG</button>
         </div>
-        ${n.hasCover ? `<div class="muted" style="text-align:center;font-size:12px;margin-top:6px">${V.dirty ? '有未保存的修改' : n.coverStale ? '封面待渲染' : '✅ 已保存为当前封面'}</div>` : ''}
+        ${n.hasCover ? `<div class="muted" style="text-align:center;font-size:12px;margin-top:6px">${V.dirty ? '有未保存的修改' : n.coverStale ? '封面待渲染' : `${icon('check', 'icon-ok')} 已保存为当前封面`}</div>` : ''}
       </div>
     </div>
     <div class="card" style="margin-top:16px">

@@ -1,5 +1,6 @@
 // 竞品对标：录入对标账号 → agent 拆解（报告 + 笔记数据）→ 生成选题 / 沉淀知识库
 import { md, esc } from '../md.js';
+import { icon } from '../icons.js';
 import { S, $, api, acc, fileUrl, toast, fmtTime, ask, readFileAsDataURL, accDirRel } from '../core.js';
 
 const V = { items: [], current: null, detail: null, tab: 'report', form: null, cfg: null, showRadar: false };
@@ -19,17 +20,24 @@ async function load() {
   }
 }
 
-/** 点开详情 = 看过追踪结果：清掉新笔记提醒 */
+/** 看过追踪结果：清掉新笔记提醒（不依赖列表是否已加载，从提醒直接进详情也要生效） */
 async function markSeen(id) {
   const b = V.items.find((x) => x.id === id);
-  if (!b || (!b.newCount && !b.radarNote)) return;
+  if (b && !b.newCount && !b.radarNote) return;
   await api('POST', `/api/benchmarks/seen?${acc()}`, { id }).catch(() => {});
-  b.newCount = 0;
-  delete b.radarNote;
+  if (b) {
+    b.newCount = 0;
+    delete b.radarNote;
+  }
 }
 
 export async function render(main, params = {}) {
-  if (params.id) V.current = params.id;
+  if (params.id) {
+    V.current = params.id;
+    V.tab = 'report';
+    V.form = null;
+    await markSeen(params.id); // 从提醒点进来 = 看过，清掉新笔记角标
+  }
   if (V.accountId !== S.accountId) {
     V.accountId = S.accountId;
     V.current = params.id || null;
@@ -61,9 +69,9 @@ function draw(main) {
           ${b.newCount ? `<span class="badge brand">新 ${b.newCount}</span>` : ''}
           <span class="badge ${cls}">${label}</span></div>
         <p class="muted" style="margin:6px 0 0">${[b.xhsId && `小红书号 ${esc(b.xhsId)}`, b.followers && `粉丝 ${esc(b.followers)}`, b.noteCount && `已采集 ${b.noteCount} 篇`].filter(Boolean).join(' · ') || '还没有数据'}</p>
-        ${b.radarNote ? `<p class="radar-note" style="margin:8px 0 0">📡 ${esc(b.radarNote)}</p>` : b.summary ? `<p style="margin:8px 0 0">${esc(b.summary)}</p>` : b.remark ? `<p style="margin:8px 0 0" class="muted">备注：${esc(b.remark)}</p>` : ''}
+        ${b.radarNote ? `<p class="radar-note" style="margin:8px 0 0">${icon("radar")} ${esc(b.radarNote)}</p>` : b.summary ? `<p style="margin:8px 0 0">${esc(b.summary)}</p>` : b.remark ? `<p style="margin:8px 0 0" class="muted">备注：${esc(b.remark)}</p>` : ''}
         <div class="row" style="margin-top:10px">
-          <button class="chip${b.tracking ? ' active' : ''}" data-act="${b.tracking ? 'track-off' : 'track-on'}" data-id="${esc(b.id)}">${b.tracking ? '📡 追踪中' : '📡 追踪'}</button>
+          <button class="chip${b.tracking ? ' active' : ''}" data-act="${b.tracking ? 'track-off' : 'track-on'}" data-id="${esc(b.id)}">${b.tracking ? `${icon('radar')} 追踪中` : `${icon('radar')} 追踪`}</button>
         </div>
       </div>`;
     })
@@ -71,9 +79,9 @@ function draw(main) {
 
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">🎯 竞品对标</h1><div class="muted">录入值得学习的账号，让 agent 拆解它们的选题、标题、封面和结构规律；开启追踪后新笔记会自动提醒。</div></div>
+      <div><h1 class="page-title">${icon("target")} 竞品对标</h1><div class="muted">录入值得学习的账号，让 agent 拆解它们的选题、标题、封面和结构规律；开启追踪后新笔记会自动提醒。</div></div>
       <div class="spacer"></div>
-      <button class="btn" data-act="toggle-radar">📡 追踪设置${V.cfg && V.cfg.radar.everyHours > 0 ? `（每 ${V.cfg.radar.everyHours} 小时）` : '（关）'}</button>
+      <button class="btn" data-act="toggle-radar">${icon("radar")} 追踪设置${V.cfg && V.cfg.radar.everyHours > 0 ? `（每 ${V.cfg.radar.everyHours} 小时）` : '（关）'}</button>
       <button class="btn" data-act="recommend">让 agent 推荐对标账号</button>
       <button class="btn primary" data-act="add">添加对标账号</button>
     </div>
@@ -160,7 +168,7 @@ function drawDetail(main) {
       <div class="row" style="margin-top:12px">
         <button class="btn primary small" data-act="analyze">${b.status === 'analyzed' ? '让 agent 重新拆解' : '让 agent 拆解'}</button>
         <button class="btn small" data-act="check-now" ${b.tracking ? '' : 'disabled'} title="立即检查这个账号有没有新笔记">立即检查新笔记</button>
-        <button class="chip${b.tracking ? ' active' : ''}" data-act="${b.tracking ? 'track-off' : 'track-on'}" data-id="${esc(b.id)}">${b.tracking ? '📡 追踪中' : '📡 追踪'}</button>
+        <button class="chip${b.tracking ? ' active' : ''}" data-act="${b.tracking ? 'track-off' : 'track-on'}" data-id="${esc(b.id)}">${b.tracking ? `${icon('radar')} 追踪中` : `${icon('radar')} 追踪`}</button>
         <button class="btn small" data-act="to-topics" ${report ? '' : 'disabled'}>根据拆解生成选题</button>
         <button class="btn small" data-act="to-kb" ${report ? '' : 'disabled'}>沉淀到知识库</button>
       </div>

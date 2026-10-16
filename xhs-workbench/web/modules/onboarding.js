@@ -1,5 +1,6 @@
 // 新手引导：检查清单式浮层，自动检测每一步的完成状态。纯前端，完成状态存 localStorage。
 import { S, api, acc, showOverlay, currentAccount, accDirRel } from '../core.js';
+import { icon } from '../icons.js';
 import { esc } from '../md.js';
 
 const KEY = 'xhs-onboarded';
@@ -102,7 +103,7 @@ export async function open() {
   const doneCount = steps.filter((s) => s.done).length;
   const allDone = doneCount === steps.length;
   showOverlay(`
-    <div class="row"><h3 style="margin:0">🚀 新手引导</h3><div class="muted" style="font-size:13px">${doneCount}/${steps.length} 完成</div><div class="spacer"></div>
+    <div class="row"><h3 style="margin:0">${icon('rocket')} 新手引导</h3><div class="muted" style="font-size:13px">${doneCount}/${steps.length} 完成</div><div class="spacer"></div>
       <button class="btn small ghost" data-onboard-skip>${allDone ? '完成' : '跳过引导'}</button></div>
     ${allDone ? '<p class="ok-line">全部完成！之后有任何问题直接在右侧和 agent 对话。</p>' : '<p class="muted" style="font-size:13px">跟着清单走一遍就能开始运营。每步都可以「让 agent 帮忙」，或自己去对应页面操作。</p>'}
     <div class="onboard-list">
@@ -113,7 +114,9 @@ export async function open() {
         <div class="onboard-body">
           <strong>${esc(s.name)}</strong>
           <div class="muted" style="font-size:13px">${esc(s.desc)}</div>
-          ${s.buttons.length ? `<div class="row" style="margin-top:8px">${s.buttons.map(([nav, prompt, label]) => (prompt ? `<button class="btn small primary" data-prompt="${esc(prompt)}">${esc(label)}</button>` : `<button class="btn small" data-nav="${nav}">${esc(label)}</button>`)).join('')}</div>` : ''}
+          ${s.buttons.length ? `<div class="row" style="margin-top:8px">${s.buttons.map((b) => (b[0] === 'prompt'
+            ? `<button class="btn small primary" data-prompt="${esc(b[1])}">${esc(b[2])}</button>`
+            : `<button class="btn small" data-nav="${b[0]}">${esc(b[1])}</button>`)).join('')}</div>` : ''}
         </div>
       </div>`,
         )

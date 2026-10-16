@@ -134,6 +134,13 @@ test('视频笔记与对标追踪：流式上传、设置视频、雷达提醒�
   const cleared = await api('POST', '/api/notes/video?account=default', { id: n.id, file: '' });
   assert.equal(cleared.body.video, null);
 
+  // 设置视频后只传封面（file 键缺失）：视频不能被误清
+  await api('POST', '/api/notes/video?account=default', { id: n.id, file: 'demo.mp4' });
+  const coverOnly = await api('POST', '/api/notes/video?account=default', { id: n.id, cover: 'frame.jpg' });
+  assert.equal(coverOnly.status, 400); // 封面文件不存在被拒绝
+  const still = await api('GET', `/api/notes/detail?account=default&id=${n.id}`);
+  assert.equal(still.body.video.file, 'demo.mp4'); // 视频保持不变
+
   // 对标追踪：agent 回写 → 提醒 → 看过清零
   const b = (await api('POST', '/api/benchmarks?account=default', { name: '集成雷达', tracking: true })).body;
   await api('POST', '/api/benchmarks?account=default', { id: b.id, newCount: 2, radarNote: '《新笔记》点赞 3000' });

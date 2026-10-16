@@ -1,5 +1,6 @@
 // 文案：笔记列表 + 编辑器（标题 / 正文 / 话题），实时字数与违禁词检查，手机预览，一键让 agent 写 / 改
 import { esc } from '../md.js';
+import { icon } from '../icons.js';
 import { S, $, api, acc, fileUrl, toast, fmtTime, ask, go, opt, accDirRel } from '../core.js';
 import { lint, LIMITS } from '../lint.js';
 import { mediaHtml, bindMedia } from './media.js';
@@ -71,7 +72,7 @@ function drawList() {
   const items = V.items.filter((n) => V.filter === 'all' || n.status === V.filter);
   box.innerHTML = items.length
     ? items.map((n) => `<button class="note-item${n.id === V.current ? ' active' : ''}" data-note="${esc(n.id)}">
-        ${n.video && !n.hasCover ? '<span class="note-thumb">🎬</span>' : n.hasCover ? `<img src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">` : '<span class="note-thumb">📝</span>'}
+        ${n.video && !n.hasCover ? `<span class="note-thumb">${icon("video")}</span>` : n.hasCover ? `<img src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">` : `<span class="note-thumb">${icon("memo")}</span>`}
         <span class="note-item-text"><span class="note-item-title">${esc(n.title || '（无标题）')}</span>
         <span class="muted">${STATUS_NAME[n.status] || n.status} · ${n.video ? '视频 · ' : ''}${fmtTime(n.updatedAt)}</span></span>
       </button>`).join('')
@@ -87,7 +88,7 @@ function lintHtml(data) {
     </div>`;
   const list = issues.length
     ? `<ul class="issues">${issues.map((i) => `<li class="${i.level}"><strong>${esc(i.where)}</strong> ${i.word ? `出现「${esc(i.word)}」（${esc(i.category)}）：` : ''}${esc(i.tip)}</li>`).join('')}</ul>`
-    : '<div class="ok-line">✅ 没有发现字数超限或常见违禁词</div>';
+    : `${icon("check", "icon-ok")} 没有发现字数超限或常见违禁词`;
   return counter + list;
 }
 
@@ -100,7 +101,7 @@ function previewHtml(data) {
       ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/images/${n.video.cover}`, n.updatedAt)}" alt="">`
       : n.hasCover && n.coverMode !== 'first'
         ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">`
-        : '<div class="phone-cover placeholder">🎬 视频首帧</div>'
+        : `${icon("video")} 视频首帧`
     : n.coverMode === 'first' && first
       ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/images/${first}`, n.updatedAt)}" alt="">`
       : n.hasCover
@@ -150,7 +151,7 @@ function draw(main) {
           <button class="btn small" data-act="write">${data.content.trim() ? '让 agent 改写' : '让 agent 写正文'}</button>
           <button class="btn small" data-act="titles">生成标题备选</button>
           <button class="btn small" data-act="agent-check">让 agent 深度检查</button>
-          <button class="btn small" data-act="cover">🎨 做封面</button>
+          <button class="btn small" data-act="cover">${icon("palette")} 做封面</button>
           <div class="spacer"></div>
           <button class="btn small ghost danger" data-act="delete">删除</button>
         </div>
@@ -161,7 +162,7 @@ function draw(main) {
 
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">✍️ 文案</h1><div class="muted">agent 按知识库里的方法写稿，你在这里修改、检查、预览。</div></div>
+      <div><h1 class="page-title">${icon("pen")} 文案</h1><div class="muted">agent 按知识库里的方法写稿，你在这里修改、检查、预览。</div></div>
       <div class="spacer"></div>
       <button class="btn primary" data-act="new">新建笔记</button>
     </div>

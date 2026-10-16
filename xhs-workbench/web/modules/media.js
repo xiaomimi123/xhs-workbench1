@@ -1,5 +1,6 @@
 // 笔记素材编辑：图文（排序 / 裁剪 / 实况图配对）与视频笔记（上传 / 封面），素材打包下载
 import { esc } from '../md.js';
+import { icon } from '../icons.js';
 import { S, $, api, acc, fileUrl, toast, readFileAsDataURL } from '../core.js';
 
 export const MAX_IMAGES = 18;
@@ -24,11 +25,11 @@ function tile(note, m, i, offset) {
     <div class="media-actions">
       <button class="icon-mini" data-media-act="left" data-idx="${i}" title="前移" ${i === 0 ? 'disabled' : ''}>←</button>
       <button class="icon-mini" data-media-act="right" data-idx="${i}" title="后移" ${i === note.media.length - 1 ? 'disabled' : ''}>→</button>
-      ${canShow && !m.video ? `<button class="icon-mini" data-media-act="crop" data-idx="${i}" title="裁剪">✂</button>` : ''}
+      ${canShow && !m.video ? `<button class="icon-mini" data-media-act="crop" data-idx="${i}" title="裁剪">${icon("scissors")}</button>` : ''}
       ${m.video
-        ? `<button class="icon-mini" data-media-act="unlive" data-idx="${i}" title="取消实况（视频保留为未配对）">⊘</button>`
+        ? `<button class="icon-mini" data-media-act="unlive" data-idx="${i}" title="取消实况（视频保留为未配对）">${icon("ban")}</button>`
         : note.looseVideos.length ? `<select class="pair" data-media-pair="${i}" title="配上动态视频变成实况图"><option value="">+实况</option>${note.looseVideos.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}</select>` : ''}
-      <button class="icon-mini danger" data-media-act="delete" data-idx="${i}" title="删除（进回收站）">🗑</button>
+      <button class="icon-mini danger" data-media-act="delete" data-idx="${i}" title="删除（进回收站）">${icon("trash")}</button>
     </div>
   </div>`;
 }

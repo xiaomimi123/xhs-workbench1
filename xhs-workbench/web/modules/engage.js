@@ -1,5 +1,6 @@
 // 评论私信：agent 抓取新评论 / 私信并起草回复 → 用户修改确认 → agent 发送
 import { esc } from '../md.js';
+import { icon } from '../icons.js';
 import { S, $, api, acc, toast, fmtTime, ask, opt, accDirRel } from '../core.js';
 import { lint } from '../lint.js';
 
@@ -62,12 +63,12 @@ function itemHtml(e) {
       <span class="badge ${cls}">${label}</span>
       <span class="muted" style="font-size:12px">${esc(e.time ? fmtTime(e.time) : '')}</span>
       <div class="spacer"></div>
-      ${e.noteTitle ? `<span class="muted engage-note" title="${esc(e.noteTitle)}">📝 ${e.noteUrl ? `<a href="${esc(e.noteUrl)}" target="_blank" rel="noopener">${esc(e.noteTitle)}</a>` : esc(e.noteTitle)}</span>` : ''}
+      ${e.noteTitle ? `<span class="muted engage-note" title="${esc(e.noteTitle)}">${icon("memo")} ${e.noteUrl ? `<a href="${esc(e.noteUrl)}" target="_blank" rel="noopener">${esc(e.noteTitle)}</a>` : esc(e.noteTitle)}</span>` : ''}
     </div>
     <div class="engage-content">${esc(e.content)}</div>
     ${editable ? `
       <textarea class="engage-draft" data-draft="${esc(e.id)}" rows="2" placeholder="回复草稿（可以自己写，或让 agent 起草）">${esc(e.draft || '')}</textarea>
-      ${issues.length ? `<div class="error-line">⚠️ ${issues.map((i) => `「${esc(i.word)}」${esc(i.category)}`).join('，')}</div>` : ''}
+      ${issues.length ? `<div class="error-line">${icon("warning", "icon-warn")} ${issues.map((i) => `「${esc(i.word)}」${esc(i.category)}`).join('，')}</div>` : ''}
       ${e.error ? `<div class="error-line">${esc(e.error)}</div>` : ''}
       <div class="row" style="margin-top:6px">
         <button class="btn small primary" data-act="approve" data-id="${esc(e.id)}" ${e.draft || V.editing.has(e.id) ? '' : 'disabled'}>${e.status === 'approved' ? '已确认 ✓' : '确认回复'}</button>
@@ -103,9 +104,9 @@ function draw(main) {
   const approved = count('approved');
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">💬 评论私信</h1><div class="muted">agent 抓取新评论和私信、按知识库口径起草回复，你确认后再发送。</div></div>
+      <div><h1 class="page-title">${icon("chat")} 评论私信</h1><div class="muted">agent 抓取新评论和私信、按知识库口径起草回复，你确认后再发送。</div></div>
       <div class="spacer"></div>
-      <button class="btn" data-act="toggle-settings">⚙️ 设置</button>
+      <button class="btn" data-act="toggle-settings">${icon("sliders")} 设置</button>
       <button class="btn" data-act="fetch">让 agent 检查新消息</button>
     </div>
     ${V.showSettings ? settingsHtml() : ''}

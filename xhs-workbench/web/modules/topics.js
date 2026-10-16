@@ -1,5 +1,6 @@
 // 选题热点：选题池（agent 生成 / 手动添加）→ 打分排序 → 一键写成笔记
 import { esc } from '../md.js';
+import { icon } from '../icons.js';
 import { S, $, api, acc, toast, ask, go, opt, accDirRel } from '../core.js';
 
 const STATUSES = [
@@ -85,7 +86,7 @@ function draw(main) {
   const list = visible();
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">🔥 选题热点</h1><div class="muted">agent 结合热点、对标拆解和你的账号定位生成选题并打分，选中后一键写成笔记。</div></div>
+      <div><h1 class="page-title">${icon("flame")} 选题热点</h1><div class="muted">agent 结合热点、对标拆解和你的账号定位生成选题并打分，选中后一键写成笔记。</div></div>
       <div class="spacer"></div>
       <button class="btn" data-act="hot">让 agent 找热点选题</button>
       <button class="btn" data-act="add">手动添加</button>

@@ -8,29 +8,34 @@ import * as schedule from './modules/schedule.js';
 import * as engage from './modules/engage.js';
 import * as analytics from './modules/analytics.js';
 import { renderSystem } from './modules/system.js';
+import { icon } from './icons.js';
 import * as onboarding from './modules/onboarding.js';
 
 // ---------- 模块定义 ----------
 
 const MODULES = [
   { group: '工作台' },
-  { id: 'overview', icon: '🏠', name: '概览' },
-  { id: 'knowledge', icon: '📚', name: '知识库' },
+  { id: 'overview', icon: 'home', name: '概览' },
+  { id: 'knowledge', icon: 'book', name: '知识库' },
   { group: '内容生产' },
-  { id: 'benchmark', icon: '🎯', name: '竞品对标', module: benchmark },
-  { id: 'topics', icon: '🔥', name: '选题热点', module: topics },
-  { id: 'copywriting', icon: '✍️', name: '文案', module: copywriting },
-  { id: 'cover', icon: '🎨', name: '封面配图', module: cover },
+  { id: 'benchmark', icon: 'target', name: '竞品对标', module: benchmark },
+  { id: 'topics', icon: 'flame', name: '选题热点', module: topics },
+  { id: 'copywriting', icon: 'pen', name: '文案', module: copywriting },
+  { id: 'cover', icon: 'palette', name: '封面配图', module: cover },
   { group: '运营' },
-  { id: 'schedule', icon: '🗓️', name: '发布排期', module: schedule },
-  { id: 'engage', icon: '💬', name: '评论私信', module: engage },
-  { id: 'analytics', icon: '📈', name: '数据复盘', module: analytics },
+  { id: 'schedule', icon: 'calendar', name: '发布排期', module: schedule },
+  { id: 'engage', icon: 'chat', name: '评论私信', module: engage },
+  { id: 'analytics', icon: 'chart', name: '数据复盘', module: analytics },
   { group: '设置' },
-  { id: 'accounts', icon: '👤', name: '账号管理' },
-  { id: 'settings', icon: '🔌', name: '连接与设置' },
+  { id: 'accounts', icon: 'user', name: '账号管理' },
+  { id: 'settings', icon: 'plug', name: '连接与设置' },
 ];
 
 // ---------- 网络 ----------
+
+function initTopbarIcons() {
+  document.querySelectorAll('.icon-slot[data-icon]').forEach((el) => (el.outerHTML = icon(el.dataset.icon)));
+}
 
 function initToken() {
   const url = new URL(location.href);
@@ -77,7 +82,7 @@ function connectEvents() {
         setTimeout(() => location.reload(), 800);
         break;
       case 'content.changed':
-        if (['schedule', 'engage'].includes(ev.area)) refreshAlerts();
+        if (['schedule', 'engage', 'benchmarks'].includes(ev.area)) refreshAlerts();
         if (ev.area === 'browser') refreshAccounts();
         if (ev.account !== S.accountId) break;
         cover.autoRender(ev);
@@ -148,7 +153,7 @@ function viewOverview() {
 
   $('#main').innerHTML = `
     <h1 class="page-title">你好，${esc(acc ? acc.name : '')} 👋</h1>
-    <p class="page-sub">在右侧和你的 agent 对话，或者点下面的卡片快速开始。<button class="btn small ghost" data-onboard style="margin-left:8px">🚀 新手引导</button></p>
+    <p class="page-sub">在右侧和你的 agent 对话，或者点下面的卡片快速开始。<button class="btn small ghost" data-onboard style="margin-left:8px">${icon("rocket")} 新手引导</button></p>
     <div class="grid">
       ${quick.map((q) => `<div class="card quick-card" data-prompt="${esc(q.prompt)}"><h3>${esc(q.title)}</h3><p>${esc(q.text)}</p></div>`).join('')}
     </div>
@@ -177,7 +182,7 @@ const PIPELINE = [
 function alertsHtml() {
   if (!S.alerts.length) return '';
   return `<div class="card alerts-card" style="margin-top:20px">
-    <h3 style="margin-top:0">🔔 需要你处理</h3>
+    <h3 style="margin-top:0">${icon("bell")} 需要你处理</h3>
     ${alertListHtml()}
   </div>`;
 }
@@ -223,7 +228,7 @@ function openAlert(i) {
 
 function showAlerts() {
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
-  showOverlay(`<div class="row"><h3 style="margin:0">🔔 提醒</h3><div class="spacer"></div><button class="btn small ghost" data-close-overlay>关闭</button></div>
+  showOverlay(`<div class="row"><h3 style="margin:0">${icon("bell")} 提醒</h3><div class="spacer"></div><button class="btn small ghost" data-close-overlay>关闭</button></div>
     ${S.alerts.length ? alertListHtml() : '<p class="muted">没有需要处理的事项。</p>'}
     <p class="muted" style="font-size:12px;margin-bottom:0">允许浏览器通知后，到点发布时即使页面在后台也会提醒你。</p>`);
 }
@@ -269,7 +274,7 @@ function viewKnowledge() {
   $('#main').innerHTML = `
     <div class="row" style="margin-bottom:12px">
       <div>
-        <h1 class="page-title">📚 知识库</h1>
+        <h1 class="page-title">${icon("book")} 知识库</h1>
         <div class="muted" style="font-size:13px">品牌口径、爆款方法、对标拆解、复盘结论都沉淀在这里，agent 写稿时会参考。</div>
       </div>
       <div class="spacer"></div>
@@ -295,7 +300,7 @@ function renderKbTree() {
     tree.innerHTML = r.length
       ? r.map((d) => `<button class="kb-doc${d.path === cur ? ' active' : ''}" data-doc="${esc(d.path)}">${esc(d.title)}<span class="snippet">${highlight(d.snippet)}</span></button>`).join('')
       : '<div class="empty">没有找到</div>';
-    tree.insertAdjacentHTML('beforeend', `<button class="btn small ask-kb" data-ask-kb>🤖 问 agent：「${esc(S.kb.query)}」</button>`);
+    tree.insertAdjacentHTML('beforeend', `<button class="btn small ask-kb" data-ask-kb>${icon("bot")} 问 agent：「${esc(S.kb.query)}」</button>`);
     return;
   }
   const byFolder = new Map([['', []], ...S.kb.folders.map((f) => [f, []])]);
@@ -305,7 +310,7 @@ function renderKbTree() {
   }
   let html = '';
   for (const [folder, docs] of byFolder) {
-    if (folder) html += `<div class="kb-folder">📁 ${esc(folder)}</div>`;
+    if (folder) html += `<div class="kb-folder">${icon("folder")} ${esc(folder)}</div>`;
     html += docs.map((d) => `<button class="kb-doc${d.path === cur ? ' active' : ''}" data-doc="${esc(d.path)}" title="${esc(d.path)}">${esc(d.title)}</button>`).join('');
     if (folder && !docs.length) html += '<div class="kb-doc muted" style="cursor:default">（空）</div>';
   }
@@ -462,7 +467,7 @@ function viewAccounts() {
 
   $('#main').innerHTML = `
     <div class="row" style="margin-bottom:16px">
-      <div><h1 class="page-title">👤 账号管理</h1><div class="muted" style="font-size:13px">支持多账号矩阵，每个账号的数据单独存放；agent 会按当前账号的定位工作。</div></div>
+      <div><h1 class="page-title">${icon("user")} 账号管理</h1><div class="muted" style="font-size:13px">支持多账号矩阵，每个账号的数据单独存放；agent 会按当前账号的定位工作。</div></div>
       <div class="spacer"></div>
       <button class="btn" id="account-add">添加账号</button>
     </div>
@@ -475,7 +480,7 @@ function browserLine(a) {
   if (!b) return '<span class="muted">还没有登录过</span>';
   const who = [b.nickname, b.xhsId && `小红书号 ${esc(b.xhsId)}`].filter(Boolean).map(esc).join(' · ');
   const mismatch = a.xhsId && b.xhsId && a.xhsId !== b.xhsId;
-  return `${b.loggedIn ? '✅ 已登录' : '⚠️ 未登录'}${who ? `：${who}` : ''}${b.checkedAt ? `<span class="muted">（${fmtTime(b.checkedAt)} 检查）</span>` : ''}${mismatch ? `<div class="error-line">登录的小红书号和账号信息里填的（${esc(a.xhsId)}）不一致，自动操作会被拦下</div>` : ''}`;
+  return `${b.loggedIn ? `${icon("check", "icon-ok")} 已登录` : `${icon("warning", "icon-warn")} 未登录`}${who ? `：${who}` : ''}${b.checkedAt ? `<span class="muted">（${fmtTime(b.checkedAt)} 检查）</span>` : ''}${mismatch ? `<div class="error-line">登录的小红书号和账号信息里填的（${esc(a.xhsId)}）不一致，自动操作会被拦下</div>` : ''}`;
 }
 
 function loginAccount(id) {
@@ -533,16 +538,16 @@ function viewSettings() {
   const modeText = !b.configured ? '未配置' : b.mode === 'cli' ? 'CLI 模式（工作台直接调用 agent 命令行）' : '收件箱模式（agent 在自己的会话里值守）';
   const detected = S.detected;
   $('#main').innerHTML = `
-    <h1 class="page-title">🔌 连接与设置</h1>
+    <h1 class="page-title">${icon("plug")} 连接与设置</h1>
     <p class="page-sub">工作台通过「桥接层」把你的消息交给本地 agent 处理。</p>
     <div class="card" style="max-width:760px">
       <h3 style="margin-top:0">Agent 连接</h3>
       <dl class="kv">
         <dt>连接模式</dt><dd>${esc(modeText)}</dd>
         ${b.mode === 'cli' && b.adapter ? `<dt>Agent</dt><dd>${esc(b.adapter.name)} <code>${esc(b.adapter.command)}</code></dd>` : ''}
-        ${b.mode === 'inbox' ? `<dt>值守状态</dt><dd>${b.inboxOnline ? '🟢 在线' : '🟡 离线'}${b.lastPollAt ? `（最近一次 ${fmtTime(b.lastPollAt)}）` : ''}，待领取 ${b.pending} 条</dd>` : ''}
+        ${b.mode === 'inbox' ? `<dt>值守状态</dt><dd>${b.inboxOnline ? icon('dot', 'icon-ok') + ' 在线' : icon('dot', 'icon-warn') + ' 离线'}${b.lastPollAt ? `（最近一次 ${fmtTime(b.lastPollAt)}）` : ''}，待领取 ${b.pending} 条</dd>` : ''}
         <dt>上次测试</dt><dd>${b.testedAt ? fmtTime(b.testedAt) : '—'}</dd>
-        ${b.mode === 'cli' ? `<dt>浏览器控制</dt><dd>${b.browser === 'playwright' ? '✅ Playwright（独立浏览器）' : b.browser === 'chrome' ? '✅ Claude in Chrome' : '未开启（自动发布、抓评论、抓数据需要）'}</dd>` : ''}
+        ${b.mode === 'cli' ? `<dt>浏览器控制</dt><dd>${b.browser === 'playwright' ? `${icon('check', 'icon-ok')} Playwright（独立浏览器）` : b.browser === 'chrome' ? `${icon('check', 'icon-ok')} Claude in Chrome` : '未开启（自动发布、抓评论、抓数据需要）'}</dd>` : ''}
       </dl>
       <div class="row" style="margin-top:14px">
         ${b.mode === 'cli' ? '<button class="btn" id="bridge-test">重新测试连接</button>' : ''}
@@ -618,7 +623,7 @@ function isBusy() {
 
 function msgHtml(m) {
   if (m.role === 'user') return `<div class="msg user" data-msg="${m.id}"><div class="bubble">${esc(m.text)}</div></div>`;
-  const tools = (m.tools || []).slice(-6).map((t) => `<div class="tool" title="${esc(t.detail)}">${t.name === '进度' ? '⏳' : '🔧'} ${esc(t.name)} ${esc(t.detail)}</div>`).join('');
+  const tools = (m.tools || []).slice(-6).map((t) => `<div class="tool" title="${esc(t.detail)}">${t.name === '进度' ? icon('clock') : icon('wrench')} ${esc(t.name)} ${esc(t.detail)}</div>`).join('');
   const more = (m.tools || []).length > 6 ? `<div class="tool">… 共使用工具 ${m.tools.length} 次</div>` : '';
   const working = m.status === 'pending' || m.status === 'running';
   let status = '';
@@ -630,7 +635,7 @@ function msgHtml(m) {
       ${tools || more ? `<div class="tools">${more}${tools}</div>` : ''}
       <div class="md${working ? ' typing' : ''}">${md(m.text)}</div>
       ${status ? `<div class="status">${status}</div>` : ''}
-      ${m.status === 'error' ? `<div class="error">⚠️ ${esc(m.error || '出错了')}</div>` : ''}
+      ${m.status === 'error' ? `<div class="error">${icon("warning")} ${esc(m.error || '出错了')}</div>` : ''}
     </div></div>`;
 }
 
@@ -638,7 +643,7 @@ function renderMessages() {
   const box = $('#chat-messages');
   const s = S.session;
   if (!s || !s.messages.length) {
-    box.innerHTML = '<div class="chat-empty">💡 在这里给你的 agent 布置任务<br>例如「帮我把这篇爆款笔记拆解后存进知识库」</div>';
+    box.innerHTML = `<div class="chat-empty">${icon('bulb')} 在这里给你的 agent 布置任务<br>例如「帮我把这篇爆款笔记拆解后存进知识库」</div>`;
   } else {
     box.innerHTML = s.messages.map(msgHtml).join('');
     box.scrollTop = box.scrollHeight;
@@ -883,6 +888,7 @@ async function boot() {
   S.accountId = S.accounts.accounts.some((a) => a.id === saved.account) ? saved.account : S.accounts.defaultAccountId || S.accounts.accounts[0]?.id;
   S.view = MODULES.some((m) => m.id === saved.view) ? saved.view : 'overview';
 
+  initTopbarIcons();
   renderAccountSelect();
   renderBridge();
   renderNav();

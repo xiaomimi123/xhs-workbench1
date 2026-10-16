@@ -1,5 +1,6 @@
 // 数据复盘：agent 抓取笔记 / 账号数据 → 指标卡 + 趋势图 + 笔记排行 → agent 写复盘报告并沉淀到知识库
 import { md, esc } from '../md.js';
+import { icon } from '../icons.js';
 import { S, $, api, acc, toast, fmtTime, ask, opt, readFileAsDataURL, accDirRel } from '../core.js';
 
 const METRICS = [
@@ -217,9 +218,9 @@ function draw(main) {
   const metricOptions = [...METRICS, ['followers', '粉丝数']];
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">📈 数据复盘</h1><div class="muted">${d.updatedAt ? `数据更新于 ${fmtTime(d.updatedAt)}。` : ''}agent 定期抓取笔记数据，复盘结论自动沉淀到知识库。</div></div>
+      <div><h1 class="page-title">${icon("chart")} 数据复盘</h1><div class="muted">${d.updatedAt ? `数据更新于 ${fmtTime(d.updatedAt)}。` : ''}agent 定期抓取笔记数据，复盘结论自动沉淀到知识库。</div></div>
       <div class="spacer"></div>
-      <button class="btn" data-act="toggle-settings">⚙️ 设置</button>
+      <button class="btn" data-act="toggle-settings">${icon("sliders")} 设置</button>
       <button class="btn" data-act="fetch">让 agent 抓取数据</button>
       <button class="btn" data-act="import-notes" title="把账号里已发布的笔记导入进来，复盘就有历史数据了">导入历史笔记</button>
       ${d.notes.length ? `<a class="btn" href="/api/analytics/export?${acc()}&t=${encodeURIComponent(S.token)}">导出 CSV</a>` : ''}

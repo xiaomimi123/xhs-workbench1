@@ -560,7 +560,11 @@ async function handleContentApi(route, q, req) {
       return { name: await content.saveNoteFileStream(acc, q.get('noteId'), q.get('filename'), req) };
     case 'POST /api/notes/video': {
       const b = await body();
-      return content.setNoteVideo(acc, b.id, { file: b.file, cover: b.cover });
+      // 只传显式给出的键：只设封面时不能把 file 一起带过去（会误清视频）
+      const input = {};
+      if ('file' in b) input.file = b.file;
+      if ('cover' in b) input.cover = b.cover;
+      return content.setNoteVideo(acc, b.id, input);
     }
     case 'POST /api/notes/video/delete': {
       const b = await body();
