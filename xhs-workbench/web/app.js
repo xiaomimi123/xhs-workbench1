@@ -1,5 +1,5 @@
 import { md, esc, stripFrontmatter } from './md.js';
-import { S, $, api, toast, showOverlay, fmtTime, currentAccount, withBusy, setHooks } from './core.js';
+import { S, $, api, acc, toast, showOverlay, fmtTime, currentAccount, withBusy, setHooks } from './core.js';
 import * as benchmark from './modules/benchmark.js';
 import * as topics from './modules/topics.js';
 import * as copywriting from './modules/copywriting.js';
@@ -605,6 +605,7 @@ function viewSettings() {
       </dl>
     </div>`;
   renderSystem($('#system-panels'));
+  loadCuratorCard();
 }
 
 // ---------- 对话 ----------
@@ -618,7 +619,6 @@ async function refreshSessions() {
   }
 }
 
-  loadCuratorCard();
 function renderSessionSelect() {
   const cur = S.session && S.session.id;
   const opts = S.sessions.map((s) => `<option value="${esc(s.id)}"${s.id === cur ? ' selected' : ''}>${esc(s.title)} · ${fmtTime(s.updatedAt)}</option>`);
