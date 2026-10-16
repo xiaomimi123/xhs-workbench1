@@ -11,6 +11,7 @@ const content = await server('content.mjs');
 const ops = await server('automation.mjs');
 const backup = await server('backup.mjs');
 const browser = await server('browser.mjs');
+const system = await server('system.mjs');
 store.ensureWorkspace();
 const ACC = 'default';
 const inMin = (m) => new Date(Date.now() + m * 60_000).toISOString();
@@ -85,6 +86,19 @@ test('自动化设置的取值校验', () => {
   const r = ops.saveAutomation(ACC, { radar: { everyHours: 9999, likesThreshold: 0 } });
   assert.equal(r.radar.everyHours, 168);
   assert.equal(r.radar.likesThreshold, 1000);
+});
+
+test('Windows 自启动：VBS 的 cmd 引号与转义', () => {
+  const vbs = system.autostartContent('win32');
+  // cmd /c 的整条命令最外层必须是成对引号（cmd 会剥掉首尾一对），
+  // 否则引号超过两个时 cmd 把首尾引号剥掉，带空格的路径（Program Files）会断开
+  assert.ok(vbs.includes('sh.Run "cmd /c ""'), 'cmd /c 外层应使用成对引号');
+  assert.ok(vbs.includes('2>&1""", 0, False'), '重定向后以 VBS 的双引号转义收尾');
+  assert.match(vbs, /XHS_WORKSPACE/);
+  assert.match(vbs, /Set sh = CreateObject\("WScript\.Shell"\)/);
+  // darwin / linux 分支不受影响
+  assert.match(system.autostartContent('darwin'), /<plist/);
+  assert.match(system.autostartContent('linux'), /WantedBy=default\.target/);
 });
 
 test('爆款雷达：到点派任务、提醒、关闭后不再派', () => {

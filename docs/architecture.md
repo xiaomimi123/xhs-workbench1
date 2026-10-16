@@ -160,3 +160,8 @@ xhs-workbench/                 ← 分发的 skill 包
 - CLI 模式下 agent 无法弹出授权确认：Claude Code 默认只放行改文件和网页搜索 / 读取；自动发布等功能需运行 `browser-setup` 接入浏览器控制（见 `adapters/claude-code.md`）。
 - 收件箱模式需要 agent 会话保持打开；空闲轮询会消耗少量 agent 调用。
 - Codex、CodeBuddy、Gemini、Qwen、OpenCode 的调用模板来自各自文档，尚未在真机上逐一测试；以 `bridge-test` 的实测结果为准。
+- Windows 注意事项：
+  - 自启动脚本（VBS）已按带 BOM 的 UTF-16LE 写入、cmd 引号做了成对转义（中文用户目录、带空格的 Node 路径都能工作），但未在真机验证过；Windows 实测是发版前的必做项。
+  - 中文 Windows 的控制台代码页是 GBK，个别第三方 CLI 向 stderr 写的本地化文本可能乱码（JSON 输出不受影响）。
+  - 备份 zip 内含中文文件名，用系统自带解压工具打开可能乱码；应用内「恢复」不受影响，手工解压建议用 7-Zip / WinRAR。
+  - 取消 agent 任务时只结束 agent 进程本身（Windows 没有进程组），它已经打开的浏览器窗口可能需要手动关闭。

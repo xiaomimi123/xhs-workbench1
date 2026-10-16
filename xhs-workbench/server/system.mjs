@@ -20,9 +20,10 @@ function autostartFile() {
 
 const xml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-function autostartContent() {
+/** 生成开机自启配置内容。platform 可注入以便跨平台测试 */
+export function autostartContent(platform = PLATFORM) {
   const node = process.execPath;
-  if (PLATFORM === 'darwin') {
+  if (platform === 'darwin') {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -43,12 +44,16 @@ function autostartContent() {
 </plist>
 `;
   }
-  if (PLATFORM === 'win32') {
-    const q = (s) => `""${s}""`;
-    return `' 小红书运营工作台：登录后在后台启动（由 workbench.mjs autostart 生成）
+  if (platform === 'win32') {
+    // VBS 字符串里的引号要写成两个引号；cmd /c 的整条命令再用一层引号包住，
+    // 且最外层要写成两个引号（cmd 会剥掉首尾一对，剩下的才是真实引号），
+    // 否则路径带空格（C:\Program Files\nodejs\）时命令会断开。
+    const vbs = (s) => String(s).replace(/"/g, '""');
+    const cmdLine = `cmd /c ""${node}" "${SERVER}" >> "${LOG}" 2>&1"`;
+    return `' 登录后在后台启动小红书运营工作台（由 workbench.mjs autostart 生成）
 Set sh = CreateObject("WScript.Shell")
-sh.Environment("Process")("XHS_WORKSPACE") = "${WORKSPACE}"
-sh.Run "cmd /c ${q(node)} ${q(SERVER)} >> ${q(LOG)} 2>&1", 0, False
+sh.Environment("Process")("XHS_WORKSPACE") = "${vbs(WORKSPACE)}"
+sh.Run "${vbs(cmdLine)}", 0, False
 `;
   }
   return `[Unit]
@@ -78,7 +83,11 @@ export function setAutostart(on) {
   const file = autostartFile();
   if (on) {
     ensureDir(path.dirname(file));
-    fs.writeFileSync(file, autostartContent());
+    const content = autostartContent();
+    // wscript 按 ANSI（中文系统是 GBK）读 .vbs，UTF-8 的中文注释和数据目录路径会乱码；
+    // 带 BOM 的 UTF-16LE 是 wscript 明确支持的格式
+    if (file.endsWith('.vbs')) fs.writeFileSync(file, '﻿' + content, 'utf16le');
+    else fs.writeFileSync(file, content);
     // 立即注册；当前已有工作台在运行时，新实例会因单实例锁自动退出
     if (PLATFORM === 'darwin') {
       const uid = process.getuid();

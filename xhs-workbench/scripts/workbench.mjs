@@ -100,9 +100,11 @@ function openBrowser(url) {
     process.platform === 'darwin'
       ? ['open', [url]]
       : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '""', url]]
+        ? // start 的第一个带引号参数会被当成窗口标题，所以要补一个空标题
+          ['cmd', ['/c', 'start', '""', url]]
         : ['xdg-open', [url]];
-  spawn(bin, args, { detached: true, stdio: 'ignore' }).unref();
+  // Windows 上 cmd /c 的整条命令要作为一个带引号的参数传给 shell，否则 URL 里的 & 会截断命令
+  spawn(bin, args, { detached: true, stdio: 'ignore', shell: process.platform === 'win32' }).unref();
 }
 
 // ---------- 命令 ----------

@@ -140,6 +140,9 @@ export function runCli(adapter, prompt, opts = {}) {
   const kill = () => {
     try {
       if (!IS_WIN && child.pid) process.kill(-child.pid, 'SIGTERM');
+      else if (IS_WIN && child.pid)
+        // .cmd shim 的外壳是 cmd.exe，直接 kill 只杀外壳，真正的 node 子进程会残留；taskkill /T 连整棵树一起结束
+        spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
       else child.kill();
     } catch {
       /* 进程已结束 */
