@@ -108,7 +108,7 @@ function renderNav() {
   $('#sidebar').innerHTML = MODULES.map((m) =>
     m.group
       ? `<div class="nav-group">${esc(m.group)}</div>`
-      : `<button class="nav-item${S.view === m.id ? ' active' : ''}" data-nav="${m.id}"><span>${m.icon}</span><span>${esc(m.name)}</span>${m.stage ? `<span class="tag">${m.stage}</span>` : ''}</button>`,
+      : `<button class="nav-item${S.view === m.id ? ' active' : ''}" data-nav="${m.id}"><span>${icon(m.icon)}</span><span>${esc(m.name)}</span>${m.stage ? `<span class="tag">${m.stage}</span>` : ''}</button>`,
   ).join('');
 }
 
@@ -162,7 +162,7 @@ function viewOverview() {
     <div class="pipeline">
       ${PIPELINE.map(([id, text], i) => {
         const m = MODULES.find((x) => x.id === id);
-        return `<div class="card quick-card" data-nav="${id}"><div class="muted">第 ${i + 1} 步</div><h3>${m.icon} ${esc(m.name)}</h3><p>${esc(text)}</p></div>`;
+        return `<div class="card quick-card" data-nav="${id}"><div class="muted">第 ${i + 1} 步</div><h3>${icon(m.icon)} ${esc(m.name)}</h3><p>${esc(text)}</p></div>`;
       }).join('')}
     </div>`;
 }
@@ -238,7 +238,7 @@ function showAlerts() {
 function viewModule(mod) {
   $('#main').innerHTML = `
     <div class="module-intro">
-      <h1 class="page-title">${mod.icon} ${esc(mod.name)} <span class="badge brand">${mod.stage} 开发中</span></h1>
+      <h1 class="page-title">${icon(mod.icon)} ${esc(mod.name)} <span class="badge brand">${mod.stage} 开发中</span></h1>
       <p class="page-sub">${esc(mod.desc)}</p>
       <div class="card">
         <strong>面板还在开发中，不过现在就可以直接让 agent 帮你做：</strong>
