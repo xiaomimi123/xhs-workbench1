@@ -133,6 +133,16 @@ test('视频笔记：设置视频与封面、配图停用、打包、删除进�
   assert.equal(d.video, null); // 视频删掉后转回图文
 });
 
+test('视频脚本：保存、读取、打包带上', () => {
+  const n = content.saveNote(ACC, { create: true, title: '脚本笔记' });
+  content.saveVideoScript(ACC, n.id, '# 分镜表\n| 1 | 开场 | 「你好」 | 3s |');
+  assert.ok(content.noteDetail(ACC, n.id).videoScript.includes('分镜表'));
+  const { entries } = content.noteBundle(ACC, n.id);
+  const script = entries.find((e) => e.name === '视频脚本.md');
+  assert.ok(script && script.data.toString('utf8').includes('分镜表'));
+  assert.throws(() => content.saveVideoScript(ACC, 'n_不存在', 'x'), /id 不合法|不存在/);
+});
+
 test('视频笔记：图文转视频再转回，配图顺序保留', () => {
   const n = content.saveNote(ACC, { create: true, title: '图文转视频' });
   content.uploadNoteImage(ACC, n.id, 'p1.png', PNG_1PX.toString('base64'));

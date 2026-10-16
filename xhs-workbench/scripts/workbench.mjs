@@ -8,7 +8,7 @@
 //   node scripts/workbench.mjs open                          在浏览器打开工作台
 //   node scripts/workbench.mjs status                        查看运行与连接状态
 //   node scripts/workbench.mjs stop                          停止工作台
-//   node scripts/workbench.mjs browser-setup [--engine playwright|chrome] [--yes]
+//   node scripts/workbench.mjs browser-setup [--engine playwright|chrome] [--headless] [--yes]
 //                                                            让 CLI 模式的 agent 能控制浏览器（自动发布 / 抓评论 / 抓数据需要）
 //   node scripts/workbench.mjs autostart on|off|status            登录电脑后自动运行工作台
 //   node scripts/workbench.mjs backup                            立即备份数据
@@ -253,6 +253,7 @@ const commands = {
       if (!/^\d+\.\d+\.\d+/.test(version)) fail('无法查询 @playwright/mcp 版本，请确认已安装 Node.js 并能访问 npm');
       pkg = `@playwright/mcp@${version}`;
       plan.push(`使用 Playwright MCP ${version}：每个账号一份独立的浏览器资料（${path.join(WORKSPACE, 'browser-profiles', '<账号id>')}），登录状态互不影响；每个账号第一次使用时需要在 agent 打开的窗口里登录`);
+      if (flags.headless) plan.push('无头模式：抓取在后台运行，不弹出浏览器窗口（风控更敏感，弹窗异常时改回有头模式）');
     } else {
       plan.push('启用 Claude in Chrome：直接使用你日常 Chrome 里的登录状态（需要已安装 Claude 浏览器扩展）。注意：这种方式所有账号共用一个浏览器，多账号时请用 Playwright');
     }
@@ -272,6 +273,7 @@ const commands = {
       console.log(`失败：${r.error}`);
       fail('浏览器配置未生效，原配置保持不变');
     }
+    if (flags.headless && engine === 'playwright') adapter.headless = true;
     saveBridgeConfig({ ...cfg, adapter, browser: engine, testedAt: new Date().toISOString() });
     const migrated = migrateLegacyProfile();
     if (migrated) console.log(`已把旧的浏览器登录资料迁移到账号 ${migrated} 名下。`);

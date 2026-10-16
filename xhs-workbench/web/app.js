@@ -426,6 +426,30 @@ function renderAccountSelect() {
   $('#account-select').innerHTML = S.accounts.accounts.map((a) => `<option value="${esc(a.id)}"${a.id === S.accountId ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
 }
 
+async function loadCuratorCard() {
+  const box = $('#curator-card');
+  if (!box) return;
+  try {
+    const cfg = await api('GET', `/api/automation?${acc()}`);
+    const opts = [[0, '关闭'], [6, '每 6 小时'], [12, '每 12 小时'], [24, '每天一次'], [48, '每两天一次']];
+    box.innerHTML = `<div class="row"><h3 style="margin:0">📚 知识库管家</h3><div class="spacer"></div>
+      <label class="muted" style="font-size:13px">整理频率
+        <select id="curator-every">${opts.map(([v, n]) => `<option value="${v}"${cfg.curator.everyHours === v ? ' selected' : ''}>${n}</option>`).join('')}</select>
+      </label></div>
+      <p class="muted" style="margin:8px 0 0;font-size:12px">agent 会按频率自动整理知识库：归档新拆解和复盘结论、合并重复文档、维护「知识库地图」索引。${cfg.lastRuns.curator ? `上次整理：${fmtTime(cfg.lastRuns.curator)}。` : '还没有整理过。'}需要工作台保持运行。</p>`;
+    $('#curator-every').onchange = async (e) => {
+      try {
+        await api('POST', `/api/automation?${acc()}`, { curator: { everyHours: Number(e.target.value) } });
+        toast('知识库管家设置已保存');
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+  } catch {
+    box.innerHTML = '📚 知识库管家：加载失败';
+  }
+}
+
 function viewAccounts() {
   const editing = S.editingAccount;
   const list = S.accounts.accounts.map((a) => `
@@ -540,6 +564,7 @@ function viewSettings() {
   $('#main').innerHTML = `
     <h1 class="page-title">${icon("plug")} 连接与设置</h1>
     <p class="page-sub">工作台通过「桥接层」把你的消息交给本地 agent 处理。</p>
+    <div class="card" id="curator-card" style="max-width:760px;margin-bottom:16px">📚 知识库管家：加载中…</div>
     <div class="card" style="max-width:760px">
       <h3 style="margin-top:0">Agent 连接</h3>
       <dl class="kv">
@@ -548,6 +573,7 @@ function viewSettings() {
         ${b.mode === 'inbox' ? `<dt>值守状态</dt><dd>${b.inboxOnline ? icon('dot', 'icon-ok') + ' 在线' : icon('dot', 'icon-warn') + ' 离线'}${b.lastPollAt ? `（最近一次 ${fmtTime(b.lastPollAt)}）` : ''}，待领取 ${b.pending} 条</dd>` : ''}
         <dt>上次测试</dt><dd>${b.testedAt ? fmtTime(b.testedAt) : '—'}</dd>
         ${b.mode === 'cli' ? `<dt>浏览器控制</dt><dd>${b.browser === 'playwright' ? `${icon('check', 'icon-ok')} Playwright（独立浏览器）` : b.browser === 'chrome' ? `${icon('check', 'icon-ok')} Claude in Chrome` : '未开启（自动发布、抓评论、抓数据需要）'}</dd>` : ''}
+        ${b.mode === 'cli' && b.browser === 'playwright' ? `<dt>抓取方式</dt><dd><label class="row" style="gap:6px;cursor:pointer"><input type="checkbox" id="headless-toggle" ${b.adapter && b.adapter.headless ? 'checked' : ''}> 无头模式（后台抓取，不弹窗口；被风控时改回有头）</label></dd>` : ''}
       </dl>
       <div class="row" style="margin-top:14px">
         ${b.mode === 'cli' ? '<button class="btn" id="bridge-test">重新测试连接</button>' : ''}
@@ -592,6 +618,7 @@ async function refreshSessions() {
   }
 }
 
+  loadCuratorCard();
 function renderSessionSelect() {
   const cur = S.session && S.session.id;
   const opts = S.sessions.map((s) => `<option value="${esc(s.id)}"${s.id === cur ? ' selected' : ''}>${esc(s.title)} · ${fmtTime(s.updatedAt)}</option>`);
@@ -811,6 +838,13 @@ function bindEvents() {
       case 'stop-btn':
         await api('POST', '/api/chat/cancel', { sessionId: S.session.id }).catch((err) => toast(err.message));
         return;
+      case 'headless-toggle': {
+        document.body.dataset.headlessBusy = '1';
+        const r = await api('POST', '/api/bridge/headless', { on: $('#headless-toggle').checked }).catch((err) => (toast(err.message), null));
+        delete document.body.dataset.headlessBusy;
+        if (r) toast(r.headless ? '已切换为无头模式，下次抓取生效' : '已切换为有头模式，下次抓取生效');
+        return;
+      }
       case 'chat-toggle':
         // 窄屏：浮层滑入 / 滑出；宽屏：显示 / 收起常驻面板
         if (window.matchMedia('(max-width: 1100px)').matches) return document.body.classList.toggle('chat-open');

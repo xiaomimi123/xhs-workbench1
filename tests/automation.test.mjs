@@ -31,6 +31,7 @@ test('排期校验：过去时间、间隔、每日上限、重复排期', () =>
 });
 
 test('调度器：到点提醒、自动发布交给 agent、错过不补发、agent 未回写时待确认', () => {
+  ops.saveAutomation(ACC, { curator: { everyHours: 0 } }); // 只测发布
   for (const s of ops.listSchedule(ACC)) ops.deleteSchedule(ACC, s.id);
   const r = note('提醒'), au = note('自动'), miss = note('错过');
   const sr = ops.scheduleNote(ACC, { noteId: r.id, publishAt: inMin(60), mode: 'remind' });
@@ -72,10 +73,30 @@ test('调度器：会话忙时下次再试', () => {
 });
 
 test('防休眠「自动」模式的判断', () => {
+  ops.saveAutomation(ACC, { curator: { everyHours: 0 } }); // 管家单独测
   for (const s of ops.listSchedule(ACC)) ops.deleteSchedule(ACC, s.id);
   assert.equal(ops.needsAwake(), false);
   ops.scheduleNote(ACC, { noteId: note('近期').id, publishAt: inMin(90) });
   assert.equal(ops.needsAwake(), true);
+});
+
+test('知识库管家：到点派任务、间隔内不重复、防休眠覆盖', () => {
+  ops.saveAutomation(ACC, { radar: { everyHours: 0 } });
+  for (const s of ops.listSchedule(ACC)) ops.deleteSchedule(ACC, s.id);
+  const tasks = [];
+  const sch = new ops.Scheduler({ runTask: (acc, text) => (tasks.push(text), `task-${tasks.length}`), notify: () => {}, log: () => {} });
+  ops.saveAutomation(ACC, { curator: { everyHours: 24 } });
+  sch.tick();
+  assert.equal(tasks.length, 1);
+  assert.match(tasks[0], /知识库管家/);
+  assert.ok(ops.getAutomation(ACC).lastRuns.curator);
+  sch.tick();
+  assert.equal(tasks.length, 1); // 间隔内不重复
+  ops.saveAutomation(ACC, { curator: { everyHours: 0 }, lastRuns: { curator: new Date(Date.now() - 48 * 3600_000).toISOString() } });
+  sch.tick();
+  assert.equal(tasks.length, 1);
+  ops.saveAutomation(ACC, { curator: { everyHours: 24 }, lastRuns: { curator: new Date(Date.now() - 48 * 3600_000).toISOString() } });
+  assert.equal(ops.needsAwake(), true); // 管家开启时防休眠也保持唤醒
 });
 
 test('自动化设置的取值校验', () => {
@@ -86,6 +107,8 @@ test('自动化设置的取值校验', () => {
   const r = ops.saveAutomation(ACC, { radar: { everyHours: 9999, likesThreshold: 0 } });
   assert.equal(r.radar.everyHours, 168);
   assert.equal(r.radar.likesThreshold, 1000);
+  const cu = ops.saveAutomation(ACC, { curator: { everyHours: 9999 } });
+  assert.equal(cu.curator.everyHours, 168);
 });
 
 test('Windows 自启动：VBS 的 cmd 引号与转义', () => {
@@ -102,6 +125,7 @@ test('Windows 自启动：VBS 的 cmd 引号与转义', () => {
 });
 
 test('爆款雷达：到点派任务、提醒、关闭后不再派', () => {
+  ops.saveAutomation(ACC, { curator: { everyHours: 0 } }); // 只测雷达
   for (const s of ops.listSchedule(ACC)) ops.deleteSchedule(ACC, s.id);
   const b = content.saveBenchmark(ACC, { name: '雷达号', tracking: true });
   ops.saveAutomation(ACC, { radar: { everyHours: 24 } });
@@ -174,6 +198,15 @@ test('浏览器：每个账号一份资料，旧版单一资料迁移到默认�
   assert.ok(fs.existsSync(path.join(WS, 'browser-profiles', 'default', 'Cookies')));
   assert.ok(!fs.existsSync(path.join(WS, 'browser-profile')));
   assert.throws(() => browser.mcpConfigFor('default', ''), /不完整/);
+});
+
+test('浏览器：无头模式写入 MCP 配置', () => {
+  const fh = browser.mcpConfigFor('default', '@playwright/mcp@0.0.1', true);
+  const args = JSON.parse(fs.readFileSync(fh, 'utf8')).mcpServers.playwright.args;
+  assert.ok(args.includes('--headless'));
+  const f2 = browser.mcpConfigFor('default', '@playwright/mcp@0.0.1', false);
+  const args2 = JSON.parse(fs.readFileSync(f2, 'utf8')).mcpServers.playwright.args;
+  assert.ok(!args2.includes('--headless')); // 关掉后配置同步移除
 });
 
 test('浏览器：开启 / 切换 / 关闭浏览器控制参数', () => {

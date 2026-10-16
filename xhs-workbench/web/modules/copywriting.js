@@ -151,6 +151,7 @@ function draw(main) {
           <button class="btn small" data-act="write">${data.content.trim() ? '让 agent 改写' : '让 agent 写正文'}</button>
           <button class="btn small" data-act="titles">生成标题备选</button>
           <button class="btn small" data-act="agent-check">让 agent 深度检查</button>
+          <button class="btn small" data-act="video-script">${icon("video")} ${n.videoScript && n.videoScript.trim() ? '改视频脚本' : '写视频脚本'}</button>
           <button class="btn small" data-act="cover">${icon("palette")} 做封面</button>
           <div class="spacer"></div>
           <button class="btn small ghost danger" data-act="delete">删除</button>
@@ -178,10 +179,71 @@ function draw(main) {
   if (n && !V.preview) bindMedia($('#media-box', main), n, onMediaChange);
 }
 
+// ---------- 视频脚本 ----------
+
+async function openVideoScript(note) {
+  let current = note.videoScript || '';
+  if (!note.videoScript && !current) {
+    // 没有脚本时先问一次，避免空白弹层
+    try {
+      const r = await api('GET', `/api/notes/video-script?${acc(`id=${note.id}`)}`);
+      current = r.videoScript || '';
+    } catch {
+      /* 忽略 */
+    }
+  }
+  const overlay = $('#overlay');
+  overlay.innerHTML = `<div class="card" style="max-width:720px">
+    <div class="row"><h3 style="margin:0">${icon('video')} 视频脚本</h3><span class="muted" style="font-size:12px">分镜表 + 口播 + 素材清单，照着拍就行</span><div class="spacer"></div>
+      <button class="btn small ghost" data-vscript="close">关闭</button></div>
+    <textarea id="video-script-text" rows="16" style="width:100%;margin:10px 0;font-family:var(--mono, monospace);font-size:13px" placeholder="还没有脚本。点下面的「让 agent 写脚本」，或者直接在这里按格式写。">${esc(current)}</textarea>
+    <div class="row"><button class="btn primary small" data-vscript="save">保存脚本</button>
+      <button class="btn small" data-vscript="ask">让 agent 写脚本（按选题和知识库生成分镜）</button>
+      <span class="muted" style="font-size:12px">格式见 playbooks/video.md；agent 写完会回填到这里。</span></div>
+  </div>`;
+  overlay.hidden = false;
+  overlay.onclick = async (e) => {
+    const b = e.target.closest('[data-vscript]');
+    if (!b) return;
+    const text = $('#video-script-text').value;
+    if (b.dataset.vscript === 'close') {
+      overlay.hidden = true;
+      overlay.onclick = null;
+      return;
+    }
+    if (b.dataset.vscript === 'save') {
+      b.disabled = true;
+      try {
+        await api('POST', `/api/notes/video-script?${acc()}`, { id: note.id, markdown: text });
+        if (V.note && V.note.id === note.id) V.note.videoScript = text;
+        toast('脚本已保存');
+        overlay.hidden = true;
+        overlay.onclick = null;
+      } catch (err) {
+        toast(err.message);
+        b.disabled = false;
+      }
+      return;
+    }
+    if (b.dataset.vscript === 'ask') {
+      b.disabled = true;
+      try {
+        await api('POST', `/api/notes/video-script?${acc()}`, { id: note.id, markdown: text });
+        if (V.note && V.note.id === note.id) V.note.videoScript = text;
+      } catch {
+        /* 保存失败也让 agent 继续 */
+      }
+      overlay.hidden = true;
+      overlay.onclick = null;
+      ask(`请按 playbooks/video.md 为笔记「${note.title || note.id}」（notes/${note.id}/）写视频脚本：先读选题和知识库相关内容（账号定位、爆款方法论、对标拆解），把分镜表、素材清单、口播全文写成 notes/${note.id}/video.md。写完在工作台「视频脚本」弹层里能看到。`, true);
+    }
+  };
+}
+
 // 配图变化只重绘配图区，不覆盖编辑器里还没保存的文字
 function onMediaChange(fresh) {
   if (!V.note || fresh.id !== V.note.id) return;
-  for (const k of ['media', 'images', 'looseVideos', 'coverMode', 'hasCover', 'coverHash', 'coverStale', 'video', 'updatedAt']) V.note[k] = fresh[k];
+  for (const k of ['media', 'images', 'looseVideos', 'coverMode', 'hasCover', 'coverHash', 'coverStale', 'video', 'videoScript', 'updatedAt']) V.note[k] = fresh[k];
   const box = $('#media-box');
   if (!box) return;
   box.outerHTML = mediaHtml(V.note);
@@ -256,6 +318,9 @@ function bind(main) {
       case 'agent-check':
         if (!(await save(true))) return;
         return ask(`请按 playbooks/copywriting.md 的「发布前检查」逐项检查${noteRef()}，列出问题和修改建议，先不要直接改文件。`, true);
+      case 'video-script':
+        if (!(await save(true))) return;
+        return openVideoScript(V.note);
       case 'cover':
         if (!(await save(true))) return;
         return go('cover', { id: V.note.id });

@@ -16,6 +16,7 @@ export const DEFAULT_AUTOMATION = {
   engage: { autoSend: false, maxPerRun: 20, checkEveryHours: 0 },
   analytics: { dailyAt: '' },
   radar: { everyHours: 0, likesThreshold: 1000 },
+  curator: { everyHours: 24 },
   sessionId: null,
   lastRuns: {},
 };
@@ -27,13 +28,13 @@ function automationFile(acc) {
 export function getAutomation(acc) {
   const saved = readJson(automationFile(acc), {});
   const out = { ...DEFAULT_AUTOMATION, ...saved, lastRuns: { ...(saved.lastRuns || {}) } };
-  for (const k of ['publish', 'engage', 'analytics', 'radar']) out[k] = { ...DEFAULT_AUTOMATION[k], ...(saved[k] || {}) };
+  for (const k of ['publish', 'engage', 'analytics', 'radar', 'curator']) out[k] = { ...DEFAULT_AUTOMATION[k], ...(saved[k] || {}) };
   return out;
 }
 
 export function saveAutomation(acc, patch) {
   const cur = getAutomation(acc);
-  for (const k of ['publish', 'engage', 'analytics', 'radar']) if (patch[k]) Object.assign(cur[k], patch[k]);
+  for (const k of ['publish', 'engage', 'analytics', 'radar', 'curator']) if (patch[k]) Object.assign(cur[k], patch[k]);
   if ('sessionId' in patch) cur.sessionId = patch.sessionId;
   if (patch.lastRuns) Object.assign(cur.lastRuns, patch.lastRuns);
   // 基本取值校验
@@ -43,6 +44,7 @@ export function saveAutomation(acc, patch) {
   cur.engage.maxPerRun = Math.max(1, Math.min(100, Number(cur.engage.maxPerRun) || 20));
   cur.engage.checkEveryHours = Math.max(0, Math.min(72, Number(cur.engage.checkEveryHours) || 0));
   cur.engage.autoSend = !!cur.engage.autoSend;
+  cur.curator.everyHours = Math.max(0, Math.min(168, Number(cur.curator.everyHours) || 0));
   cur.radar.everyHours = Math.max(0, Math.min(168, Number(cur.radar.everyHours) || 0));
   cur.radar.likesThreshold = Math.max(1, Math.min(1_000_000, Number(cur.radar.likesThreshold) || 1000));
   if (cur.analytics.dailyAt && !/^\d{2}:\d{2}$/.test(cur.analytics.dailyAt)) throw httpError(400, '时间格式应为 HH:MM');
@@ -253,6 +255,9 @@ const PROMPTS = {
   radar: (acc) =>
     `【自动任务 · 对标追踪】请按 playbooks/benchmark.md 的「追踪检查」检查开启追踪的对标账号（accounts/${acc}/benchmarks/index.json 里 tracking 为 true 的），` +
     `把新发现的笔记追加到各自的 notes.json，并更新 index.json 里的 newCount、radarNote、lastCheckedAt。`,
+  curator: (acc) =>
+    `【自动任务 · 知识库管家】请按 playbooks/knowledge.md 的「知识库管家」整理知识库：把最近新增的拆解 / 复盘材料归档到位、` +
+    `合并重复内容、补全 frontmatter、维护「知识库地图.md」索引，完成后汇报改动清单。`,
 };
 
 export class Scheduler {
@@ -340,6 +345,14 @@ export class Scheduler {
         if (this.#run(acc, 'radar', PROMPTS.radar(acc))) saveAutomation(acc, { lastRuns: { radar: now() } });
       }
     }
+
+    // 5. 知识库管家
+    if (cfg.curator.everyHours > 0) {
+      const last = cfg.lastRuns.curator ? new Date(cfg.lastRuns.curator).getTime() : 0;
+      if (t - last >= cfg.curator.everyHours * 3600_000) {
+        if (this.#run(acc, 'curator', PROMPTS.curator(acc))) saveAutomation(acc, { lastRuns: { curator: now() } });
+      }
+    }
   }
 
   /** agent 任务结束：如果 agent 没按手册回写发布结果，标记为待确认 / 失败 */
@@ -367,7 +380,7 @@ export function needsAwake() {
     try {
       if (listSchedule(a.id).some((s) => (s.status === 'scheduled' && new Date(s.publishAt).getTime() <= soon) || s.status === 'running')) return true;
       const cfg = getAutomation(a.id);
-      if (cfg.engage.checkEveryHours > 0 || cfg.analytics.dailyAt) return true;
+      if (cfg.engage.checkEveryHours > 0 || cfg.analytics.dailyAt || cfg.curator.everyHours > 0) return true;
       if (cfg.radar.everyHours > 0 && listBenchmarks(a.id).some((b) => b.tracking)) return true;
     } catch {
       /* 账号目录异常时跳过 */

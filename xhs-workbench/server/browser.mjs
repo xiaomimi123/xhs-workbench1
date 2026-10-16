@@ -24,19 +24,14 @@ export function migrateLegacyProfile() {
  * 生成（或复用）某个账号的 MCP 配置文件，返回路径。
  * pkg：锁定版本的包名（browser-setup 时写入 adapter.playwrightMcp）
  */
-export function mcpConfigFor(accountId, pkg) {
+export function mcpConfigFor(accountId, pkg, headless = false) {
   if (!pkg) throw new Error('浏览器控制配置不完整，请重新运行 browser-setup');
   if (!/^[\w-]+$/.test(accountId || '')) accountId = getAccounts().defaultAccountId || 'default';
   migrateLegacyProfile();
   const file = path.join(P.config, 'mcp', `${accountId}.json`);
-  const want = {
-    mcpServers: {
-      playwright: {
-        command: 'npx',
-        args: ['-y', pkg, '--user-data-dir', path.join(PROFILES_DIR, accountId), '--output-dir', path.join(P.run, 'browser-output', accountId)],
-      },
-    },
-  };
+  const args = ['-y', pkg, '--user-data-dir', path.join(PROFILES_DIR, accountId), '--output-dir', path.join(P.run, 'browser-output', accountId)];
+  if (headless) args.push('--headless');
+  const want = { mcpServers: { playwright: { command: 'npx', args } } };
   if (JSON.stringify(readJson(file, null)) !== JSON.stringify(want)) writeJson(file, want);
   return file;
 }

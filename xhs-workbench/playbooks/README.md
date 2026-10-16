@@ -10,6 +10,7 @@
 | 选题热点 | [topics.md](topics.md) | ✅ 可用 |
 | 文案 | [copywriting.md](copywriting.md) | ✅ 可用 |
 | 封面配图 | [cover.md](cover.md) | ✅ 可用 |
+| 视频脚本 | [video.md](video.md) | ✅ 可用 |
 | 发布排期 | [publish.md](publish.md) | ✅ 可用 |
 | 评论私信 | [engage.md](engage.md) | ✅ 可用 |
 | 数据复盘 | [analytics.md](analytics.md) | ✅ 可用 |

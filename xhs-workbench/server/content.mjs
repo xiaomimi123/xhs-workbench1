@@ -253,18 +253,36 @@ export function noteDetail(accountId, id) {
   } catch {
     /* 还没有正文 */
   }
+  let videoScript = '';
+  try {
+    videoScript = fs.readFileSync(path.join(dir, 'video.md'), 'utf8');
+  } catch {
+    /* 还没有视频脚本 */
+  }
   const imgDir = path.join(dir, 'images');
   // 视频笔记（meta.video 存在）：配图停用（meta.media 保留，切回图文时恢复），视频封面单独管理
   const media = meta.video ? [] : normalizeMedia(dir, meta.media);
   return {
     ...meta,
     content,
+    videoScript,
     coverMode: meta.coverMode === 'first' ? 'first' : 'template',
     media,
     images: media.map((m) => m.file),
     looseVideos: meta.video ? [] : looseVideos(dir, media),
     video: meta.video ? { ...meta.video, coverCandidates: listFiles(imgDir, STILL_EXTS) } : null,
   };
+}
+
+/** 保存视频脚本（notes/<id>/video.md，分镜表 + 口播 + 素材清单） */
+export function saveVideoScript(accountId, id, markdown) {
+  const dir = noteDir(accountId, id);
+  if (!fs.existsSync(path.join(dir, 'meta.json'))) throw httpError(404, '笔记不存在');
+  fs.writeFileSync(path.join(dir, 'video.md'), String(markdown || ''));
+  const meta = readJson(path.join(dir, 'meta.json'), {});
+  meta.updatedAt = now();
+  writeJson(path.join(dir, 'meta.json'), meta);
+  return { ok: true };
 }
 
 /**
@@ -457,9 +475,11 @@ export function noteBundle(accountId, id) {
     }
   }
   const text = `${n.title || ''}\n\n${(n.content || '').trim()}\n\n${(n.tags || []).map((t) => `#${t}`).join(' ')}\n`;
+  const extra = [];
+  if (n.videoScript && n.videoScript.trim()) extra.push({ name: '视频脚本.md', data: Buffer.from(n.videoScript) });
   return {
     title: n.title || id,
-    entries: [...entries.map((e) => ({ name: e.name, data: fs.readFileSync(e.file) })), { name: '文案.txt', data: Buffer.from(text) }],
+    entries: [...entries.map((e) => ({ name: e.name, data: fs.readFileSync(e.file) })), { name: '文案.txt', data: Buffer.from(text) }, ...extra],
   };
 }
 

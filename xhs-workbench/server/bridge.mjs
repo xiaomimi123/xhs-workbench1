@@ -64,7 +64,7 @@ export function runCli(adapter, prompt, opts = {}) {
   const { agentSessionId, timeoutMs = 30 * 60_000, onText = () => {}, onTool = () => {}, onSession = () => {} } = opts;
   const vars = { prompt, workspace: WORKSPACE, skillDir: SKILL_DIR, agentSessionId: agentSessionId || '' };
   // 每个账号用自己的浏览器资料（登录状态隔离）
-  if ((adapter.args || []).includes('{mcpConfig}')) vars.mcpConfig = mcpConfigFor(opts.accountId, adapter.playwrightMcp);
+  if ((adapter.args || []).includes('{mcpConfig}')) vars.mcpConfig = mcpConfigFor(opts.accountId, adapter.playwrightMcp, !!adapter.headless);
   let args = (adapter.args || []).map((a) => fill(a, vars));
   if (agentSessionId && adapter.resumeArgs) args = args.concat(adapter.resumeArgs.map((a) => fill(a, vars)));
   const command = adapter.command || adapter.bins[0];

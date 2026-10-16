@@ -15,7 +15,7 @@ import { createZip } from './zip.mjs';
 import * as system from './system.mjs';
 import * as backup from './backup.mjs';
 
-export const VERSION = '0.5.0';
+export const VERSION = '0.6.0';
 const PORT_RANGE = [17890, 17910];
 
 store.ensureWorkspace();
@@ -488,6 +488,15 @@ async function handleApi(req, res, url) {
       broadcast({ type: 'chats.changed' });
       return sendJson(res, 200, session);
     }
+    case 'POST /api/bridge/headless': {
+      const b = await readBody(req);
+      const cfg = bridge.config();
+      if (!cfg || cfg.mode !== 'cli' || !cfg.adapter) throw store.httpError(409, '尚未配置 CLI 连接');
+      cfg.adapter.headless = !!b.on;
+      store.saveBridgeConfig(cfg);
+      broadcast({ type: 'bridge.changed' });
+      return { ok: true, headless: !!cfg.adapter.headless };
+    }
     case 'POST /api/chat/cancel':
       return sendJson(res, 200, { ok: cancelChat((await readBody(req)).sessionId) });
 
@@ -569,6 +578,14 @@ async function handleContentApi(route, q, req) {
     case 'POST /api/notes/video/delete': {
       const b = await body();
       return content.deleteNoteVideoFile(acc, b.id, b.file);
+    }
+    case 'GET /api/notes/video-script': {
+      const d = content.noteDetail(acc, q.get('id'));
+      return { videoScript: d.videoScript };
+    }
+    case 'POST /api/notes/video-script': {
+      const b = await body();
+      return content.saveVideoScript(acc, b.id, b.markdown);
     }
     case 'POST /api/notes/cover': {
       const b = await body();
