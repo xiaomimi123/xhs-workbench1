@@ -10,3 +10,5 @@ Thumbs.db
 
 # 浏览器自动化的临时文件（运行时数据默认在 ~/XHS-Workbench，不在仓库内）
 .playwright-mcp/
+
+_*.py
