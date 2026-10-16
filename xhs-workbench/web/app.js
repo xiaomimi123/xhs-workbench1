@@ -711,6 +711,7 @@ function onChatEvent(ev) {
 async function sendMessage(text) {
   text = text.trim();
   document.body.classList.add('chat-open');
+  document.body.classList.remove('chat-hidden');
   if (!text || isBusy()) return;
   try {
     const session = await api('POST', '/api/chat/send', { sessionId: S.session && S.session.id, accountId: S.accountId, text });
@@ -729,6 +730,7 @@ function usePrompt(text) {
   const input = $('#chat-input');
   input.value = text;
   document.body.classList.add('chat-open');
+  document.body.classList.remove('chat-hidden');
   input.focus();
   input.setSelectionRange(text.length, text.length);
 }
@@ -809,7 +811,14 @@ function bindEvents() {
       case 'stop-btn':
         await api('POST', '/api/chat/cancel', { sessionId: S.session.id }).catch((err) => toast(err.message));
         return;
-      case 'chat-toggle': return document.body.classList.toggle('chat-open');
+      case 'chat-toggle':
+        // 窄屏：浮层滑入 / 滑出；宽屏：显示 / 收起常驻面板
+        if (window.matchMedia('(max-width: 1100px)').matches) return document.body.classList.toggle('chat-open');
+        return document.body.classList.toggle('chat-hidden');
+      case 'chat-close':
+        // 面板内 ×：一律收起（窄屏关浮层，宽屏隐藏常驻面板）
+        document.body.classList.remove('chat-open');
+        return document.body.classList.add('chat-hidden');
       case 'nav-toggle': return document.body.classList.toggle('nav-open');
       case 'alerts-btn': return showAlerts();
     }
