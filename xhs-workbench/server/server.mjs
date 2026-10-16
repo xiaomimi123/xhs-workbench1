@@ -10,12 +10,12 @@ import { ADAPTERS, findAdapter } from './adapters.mjs';
 import { buildPrompt } from './prompt.mjs';
 import * as content from './content.mjs';
 import * as ops from './automation.mjs';
-import { browserStatus } from './browser.mjs';
+import { browserStatus, detectRealBrowser } from './browser.mjs';
 import { createZip } from './zip.mjs';
 import * as system from './system.mjs';
 import * as backup from './backup.mjs';
 
-export const VERSION = '0.6.0';
+export const VERSION = '0.6.1';
 const PORT_RANGE = [17890, 17910];
 
 store.ensureWorkspace();
@@ -493,6 +493,8 @@ async function handleApi(req, res, url) {
       const cfg = bridge.config();
       if (!cfg || cfg.mode !== 'cli' || !cfg.adapter) throw store.httpError(409, '尚未配置 CLI 连接');
       cfg.adapter.headless = !!b.on;
+      // 无论是否无头，都优先用系统真实浏览器（真实二进制指纹更干净；无头也只是同一浏览器的无头版）
+      if (!cfg.adapter.browserChannel) cfg.adapter.browserChannel = detectRealBrowser() || 'chromium';
       store.saveBridgeConfig(cfg);
       broadcast({ type: 'bridge.changed' });
       return { ok: true, headless: !!cfg.adapter.headless };

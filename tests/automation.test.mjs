@@ -200,13 +200,21 @@ test('浏览器：每个账号一份资料，旧版单一资料迁移到默认�
   assert.throws(() => browser.mcpConfigFor('default', ''), /不完整/);
 });
 
-test('浏览器：无头模式写入 MCP 配置', () => {
-  const fh = browser.mcpConfigFor('default', '@playwright/mcp@0.0.1', true);
+test('浏览器：无头模式与真实浏览器 channel 写入 MCP 配置', () => {
+  const fh = browser.mcpConfigFor('default', '@playwright/mcp@0.0.1', { headless: true });
   const args = JSON.parse(fs.readFileSync(fh, 'utf8')).mcpServers.playwright.args;
   assert.ok(args.includes('--headless'));
-  const f2 = browser.mcpConfigFor('default', '@playwright/mcp@0.0.1', false);
+  const f2 = browser.mcpConfigFor('default', '@playwright/mcp@0.0.1', { headless: false });
   const args2 = JSON.parse(fs.readFileSync(f2, 'utf8')).mcpServers.playwright.args;
   assert.ok(!args2.includes('--headless')); // 关掉后配置同步移除
+  // 真实浏览器 channel：--browser msedge；chromium 不加 flag
+  const f3 = browser.mcpConfigFor('default', '@playwright/mcp@0.0.1', { browser: 'msedge' });
+  const args3 = JSON.parse(fs.readFileSync(f3, 'utf8')).mcpServers.playwright.args;
+  assert.deepEqual(args3.slice(args3.indexOf('--browser'), args3.indexOf('--browser') + 2), ['--browser', 'msedge']);
+  const f4 = browser.mcpConfigFor('default', '@playwright/mcp@0.0.1', { browser: 'chromium' });
+  assert.ok(!JSON.parse(fs.readFileSync(f4, 'utf8')).mcpServers.playwright.args.includes('--browser'));
+  // 本机探测返回合法值
+  assert.ok(['msedge', 'chrome', null].includes(browser.detectRealBrowser()));
 });
 
 test('浏览器：开启 / 切换 / 关闭浏览器控制参数', () => {

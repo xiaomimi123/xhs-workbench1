@@ -573,7 +573,7 @@ function viewSettings() {
         ${b.mode === 'inbox' ? `<dt>值守状态</dt><dd>${b.inboxOnline ? icon('dot', 'icon-ok') + ' 在线' : icon('dot', 'icon-warn') + ' 离线'}${b.lastPollAt ? `（最近一次 ${fmtTime(b.lastPollAt)}）` : ''}，待领取 ${b.pending} 条</dd>` : ''}
         <dt>上次测试</dt><dd>${b.testedAt ? fmtTime(b.testedAt) : '—'}</dd>
         ${b.mode === 'cli' ? `<dt>浏览器控制</dt><dd>${b.browser === 'playwright' ? `${icon('check', 'icon-ok')} Playwright（独立浏览器）` : b.browser === 'chrome' ? `${icon('check', 'icon-ok')} Claude in Chrome` : '未开启（自动发布、抓评论、抓数据需要）'}</dd>` : ''}
-        ${b.mode === 'cli' && b.browser === 'playwright' ? `<dt>抓取方式</dt><dd><label class="row" style="gap:6px;cursor:pointer"><input type="checkbox" id="headless-toggle" ${b.adapter && b.adapter.headless ? 'checked' : ''}> 无头模式（后台抓取，不弹窗口；被风控时改回有头）</label></dd>` : ''}
+        ${b.mode === 'cli' && b.browser === 'playwright' ? `<dt>抓取浏览器</dt><dd>${b.adapter && b.adapter.browserChannel && b.adapter.browserChannel !== 'chromium' ? `${icon('check', 'icon-ok')} 系统真实浏览器（${b.adapter.browserChannel === 'msedge' ? 'Edge' : 'Chrome'}，指纹与真人无差）` : `${icon('warning', 'icon-warn')} 内置浏览器（建议重新运行 browser-setup，自动切换到系统 Edge/Chrome）`}；${b.adapter && b.adapter.headless ? '无头（后台）' : '有头（弹窗）'}</dd>` : ''}
       </dl>
       <div class="row" style="margin-top:14px">
         ${b.mode === 'cli' ? '<button class="btn" id="bridge-test">重新测试连接</button>' : ''}
@@ -839,6 +839,10 @@ function bindEvents() {
         await api('POST', '/api/chat/cancel', { sessionId: S.session.id }).catch((err) => toast(err.message));
         return;
       case 'headless-toggle': {
+        if ($('#headless-toggle').checked && !confirm('无头模式抓取小红书有封号风险（无头浏览器的特征容易被平台风控识别）。\n\n推荐保持有头 + 系统真实浏览器。确定要开启无头吗？')) {
+          $('#headless-toggle').checked = false;
+          return;
+        }
         document.body.dataset.headlessBusy = '1';
         const r = await api('POST', '/api/bridge/headless', { on: $('#headless-toggle').checked }).catch((err) => (toast(err.message), null));
         delete document.body.dataset.headlessBusy;

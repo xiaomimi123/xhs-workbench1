@@ -19,7 +19,9 @@
 
 | 方式 | 命令 | 特点 |
 |---|---|---|
-| Playwright MCP（默认） | `browser-setup --yes` | 独立的浏览器资料目录 `~/XHS-Workbench/browser-profile`，第一次需要用户在 agent 打开的窗口里登录小红书；之后保持登录 |
+| Playwright MCP（默认） | `browser-setup --yes` | 自动探测并优先使用系统真实浏览器（Windows 的 Edge / 装了 Chrome 则用 Chrome，都没有才用内置浏览器）；独立资料目录 `~/XHS-Workbench/browser-profiles/`，第一次需要用户在打开的窗口里登录小红书；之后保持登录。真实浏览器 + 有头是**封号风险最低**的组合 |
+| 指定浏览器 | `browser-setup --browser msedge --yes`（或 `chrome` / `chromium`） | 手动指定用哪个浏览器 |
+| 无头模式（不推荐） | `browser-setup --headless --yes` | 抓取不弹窗，但无头指纹是平台风控重点，**有封号风险**，仅在用户明确接受时使用 |
 | Claude in Chrome | `browser-setup --engine chrome --yes` | 直接使用用户日常 Chrome 的登录状态；需要已安装 Claude 浏览器扩展 |
 
 命令会修改 `bridge.json` 里的参数（加 `--mcp-config` 或 `--chrome`，并在 `--allowedTools` 中放行对应工具），然后跑一次连接测试，失败则保持原配置。
