@@ -10,6 +10,7 @@ const store = await server('store.mjs');
 const content = await server('content.mjs');
 store.ensureWorkspace();
 const ACC = 'default';
+const mats = await server('materials.mjs');
 
 test('初始化：知识库模板按 manifest 复制成中文路径', () => {
   const { docs, folders } = store.listKnowledge();
@@ -91,6 +92,27 @@ test('对标账号：保存、详情、删除连同资料进回收站', () => {
   content.deleteBenchmark(ACC, b.id);
   assert.equal(content.listBenchmarks(ACC).length, 0);
   assert.ok(store.listTrash().some((e) => e.label.includes('对标拆解资料')));
+});
+
+test('素材库：上传、登记、编辑、批注进提示词摘要、删除进回收站', () => {
+  const materials = mats;
+  const name = materials.uploadMaterial('hook-cut.mp4', Buffer.from('fake-video').toString('base64'));
+  assert.equal(name, 'hook-cut.mp4');
+  const m = materials.saveMaterial({ title: '开头 3 秒钩子范本', file: name, tags: '开头钩子, 实拍', note: '直接给结果不给过程', source: '@某账号' });
+  assert.equal(m.type, 'video');
+  assert.deepEqual(m.tags, ['开头钩子', '实拍']);
+  assert.ok(materials.listMaterials().some((x) => x.id === m.id));
+  // 编辑：type 不传时保持原值
+  const edited = materials.saveMaterial({ id: m.id, title: '改标题', note: '新批注' });
+  assert.equal(edited.title, '改标题');
+  assert.equal(edited.type, 'video');
+  assert.ok(materials.materialsSummary().includes('新批注'));
+  // 文件没了自动清条目
+  fs.rmSync(path.join(WS, 'accounts', ACC, 'materials', 'files', name));
+  assert.equal(materials.listMaterials().length, 0);
+  assert.throws(() => materials.deleteMaterial(m.id), /不存在/); // 条目已被自动清掉
+  // 非法扩展名拒绝
+  assert.throws(() => materials.uploadMaterial('x.exe', Buffer.from('x').toString('base64')), /只支持/);
 });
 
 test('对标追踪：tracking 字段、agent 回写、seen 清零', () => {

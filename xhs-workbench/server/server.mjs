@@ -14,6 +14,7 @@ import { browserStatus, detectRealBrowser } from './browser.mjs';
 import { createZip } from './zip.mjs';
 import * as system from './system.mjs';
 import * as backup from './backup.mjs';
+import * as materials from './materials.mjs';
 
 export const VERSION = '0.6.1';
 const PORT_RANGE = [17890, 17910];
@@ -589,6 +590,17 @@ async function handleContentApi(route, q, req) {
       const b = await body();
       return content.saveVideoScript(acc, b.id, b.markdown);
     }
+    case 'GET /api/materials':
+      return { items: materials.listMaterials() };
+    case 'POST /api/materials':
+      return materials.saveMaterial(await body());
+    case 'POST /api/materials/upload': {
+      const b = await body();
+      return { name: materials.uploadMaterial(b.filename, b.data) };
+    }
+    case 'DELETE /api/materials':
+      materials.deleteMaterial(q.get('id'));
+      return { ok: true };
     case 'POST /api/notes/cover': {
       const b = await body();
       return content.saveCoverImage(acc, b.id, b.data, b.hash);

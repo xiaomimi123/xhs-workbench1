@@ -489,3 +489,8 @@ mark { background: #ffe58a; color: inherit; border-radius: 2px; padding: 0 1px; 
 .note-thumb .icon { width: 20px; height: 20px; }
 .icon-mini .icon { width: 13px; height: 13px; vertical-align: -2px; }
 .ok-line .icon, .error-line .icon { vertical-align: -0.15em; }
+
+/* ----- 素材库 ----- */
+.material-card .material-thumb { max-height: 220px; overflow: hidden; border-radius: 8px; background: var(--hover); display: grid; place-items: center; }
+.material-card .material-thumb img, .material-card .material-thumb video { width: 100%; max-height: 220px; object-fit: cover; display: block; }
+.material-note { background: var(--brand-soft); color: var(--brand); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 8px 0 0; }

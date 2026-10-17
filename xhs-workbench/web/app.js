@@ -8,6 +8,7 @@ import * as schedule from './modules/schedule.js';
 import * as engage from './modules/engage.js';
 import * as analytics from './modules/analytics.js';
 import { renderSystem } from './modules/system.js';
+import * as materials from './modules/materials.js';
 import { icon } from './icons.js';
 import * as onboarding from './modules/onboarding.js';
 
@@ -22,6 +23,7 @@ const MODULES = [
   { id: 'topics', icon: 'flame', name: '选题热点', module: topics },
   { id: 'copywriting', icon: 'pen', name: '文案', module: copywriting },
   { id: 'cover', icon: 'palette', name: '封面配图', module: cover },
+  { id: 'materials', icon: 'folder', name: '素材库', module: materials },
   { group: '运营' },
   { id: 'schedule', icon: 'calendar', name: '发布排期', module: schedule },
   { id: 'engage', icon: 'chat', name: '评论私信', module: engage },

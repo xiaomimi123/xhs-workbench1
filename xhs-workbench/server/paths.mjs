@@ -24,7 +24,7 @@ export const P = {
 };
 
 // 每个账号下的业务目录（M2/M3 模块会往这些目录写数据）
-export const ACCOUNT_SUBDIRS = ['topics', 'notes', 'engage', 'analytics', 'benchmarks'];
+export const ACCOUNT_SUBDIRS = ['topics', 'notes', 'engage', 'analytics', 'benchmarks', 'materials'];
 
 export function accountDir(id) {
   return path.join(P.accountsDir, id);

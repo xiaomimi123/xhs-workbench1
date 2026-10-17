@@ -1,6 +1,7 @@
 // 把工作台里的一条消息包装成发给 agent 的完整提示词
 import path from 'node:path';
 import { SKILL_DIR, WORKSPACE, accountDir } from './paths.mjs';
+import { materialsSummary } from './materials.mjs';
 
 const HISTORY_LIMIT = 10;
 const HISTORY_CHARS = 1500;
@@ -34,6 +35,16 @@ export function buildPrompt({ session, account, text, includeHistory }) {
     '- 不要删除文件；需要删除时移入数据目录下的 .trash/。',
     '- 涉及登录、验证码、支付、账号安全时停下来，请用户本人操作。',
   ];
+
+  const library = materialsSummary();
+  if (library) {
+    parts.push(
+      '',
+      '## 素材库（用户剪辑的参考素材）',
+      '以下素材是用户标记为「值得学习模仿」的参考。写文案、做封面、出脚本时，模仿它们的选题角度、结构和节奏；需要看素材文件本体时读取 materials/files/ 下的对应文件（视频可抽帧分析）：',
+      library,
+    );
+  }
 
   if (includeHistory) {
     const history = session.messages
