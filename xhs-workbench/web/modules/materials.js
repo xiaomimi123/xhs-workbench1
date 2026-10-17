@@ -90,10 +90,12 @@ function draw(main) {
 }
 
 function formHtml(f) {
+  const currentFile = f.id && f.file ? `<div class="row" style="margin:0 0 4px"><span class="muted" style="font-size:12px">${icon('check', 'icon-ok')} 当前文件：<code>${esc(f.file)}</code>（不选新文件就保留它）</span></div>` : '';
   return `<div class="card" style="margin-bottom:16px;max-width:680px">
     <h3 style="margin-top:0">${f.id ? '编辑素材' : '添加素材'}</h3>
     <form class="form" id="material-form">
-      <label>素材文件${f.id ? `（${esc(f.file)}，更换会重新上传）` : ' *'}<input type="file" id="material-file" accept="${ACCEPT}" ${f.id ? '' : 'required'}></label>
+      <label>素材文件${f.id ? '（可换可不换）' : ' *'}<input type="file" id="material-file" accept="${ACCEPT}" ${f.id ? '' : 'required'}></label>
+      ${currentFile}
       ${f._uploading ? '<div class="upload-progress"><div style="width:100%"></div></div>' : ''}
       <label>标题 *<input type="text" name="title" required value="${esc(f.title)}" placeholder="如：开头 3 秒钩子范本"></label>
       <label>标签（逗号分隔）<input type="text" name="tags" value="${esc((f.tags || []).join(', '))}" placeholder="开头钩子, 实拍, 口播"></label>

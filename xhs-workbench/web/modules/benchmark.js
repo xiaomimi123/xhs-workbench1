@@ -236,7 +236,7 @@ function bind(main) {
         await load();
         return draw(main);
       case 'recommend':
-        return ask(`请按 playbooks/benchmark.md，根据我当前账号的定位推荐 5 个值得对标的小红书账号，说明理由，并逐个登记到 ${accDirRel()}/benchmarks/index.json（status 设为 pending）。`, true);
+        return ask(`请按 playbooks/benchmark.md 的「推荐对标账号」第一步，根据我的账号定位快速给出 5-8 个候选对标账号（不开浏览器，1-2 分钟内），说明理由并登记到 ${accDirRel()}/benchmarks/index.json（status 设为 pending）。登记完问我是否要开浏览器核实数据。`, true);
       case 'analyze': {
         const shots = V.detail.screenshots.length;
         await api('POST', `/api/benchmarks?${acc()}`, { id: b.id, status: 'analyzing' });
