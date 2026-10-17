@@ -209,7 +209,11 @@ export class Bridge extends EventEmitter {
     return {
       configured: !!cfg,
       mode: cfg ? cfg.mode : null,
-      adapter: cfg && cfg.adapter ? { id: cfg.adapter.id, name: cfg.adapter.name, command: cfg.adapter.command } : null,
+      adapter: cfg && cfg.adapter
+        ? { id: cfg.adapter.id, name: cfg.adapter.name, command: cfg.adapter.command,
+            // 浏览器抓取相关的展示字段（设置页用）；playwrightMcp 等长字段不外露
+            browserChannel: cfg.adapter.browserChannel || null, headless: !!cfg.adapter.headless }
+        : null,
       testedAt: cfg ? cfg.testedAt : null,
       browser: cfg ? cfg.browser || null : null,
       inboxOnline: Date.now() - this.lastPoll < INBOX_ONLINE_MS,
