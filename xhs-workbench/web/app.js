@@ -227,10 +227,24 @@ function openAlert(i) {
 }
 
 function showAlerts() {
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
-  showOverlay(`<div class="row"><h3 style="margin:0">${icon("bell")} 提醒</h3><div class="spacer"></div><button class="btn small ghost" data-close-overlay>关闭</button></div>
+  // 不自动请求通知权限：Chrome 的权限弹窗会卡住整个页面，改成用户点按钮才请求
+  const askPermission = 'Notification' in window && Notification.permission === 'default'
+    ? '<button class="btn small" id="notify-allow">允许系统通知</button>'
+    : '';
+  showOverlay(`<div class="row"><h3 style="margin:0">${icon("bell")} 提醒</h3><div class="spacer"></div>${askPermission}<button class="btn small ghost" data-close-overlay>关闭</button></div>
     ${S.alerts.length ? alertListHtml() : '<p class="muted">没有需要处理的事项。</p>'}
-    <p class="muted" style="font-size:12px;margin-bottom:0">允许浏览器通知后，到点发布时即使页面在后台也会提醒你。</p>`);
+    <p class="muted" style="font-size:12px;margin-bottom:0">允许系统通知后，到点发布时即使页面在后台也会提醒你。</p>`);
+  const btn = $('#notify-allow');
+  if (btn) {
+    btn.onclick = async () => {
+      try {
+        await Notification.requestPermission();
+      } catch {
+        /* 用户拒绝 */
+      }
+      showAlerts(); // 重渲染：按钮变成权限结果
+    };
+  }
 }
 
 // ---------- 未上线模块 ----------
