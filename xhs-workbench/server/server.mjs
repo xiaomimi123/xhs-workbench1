@@ -16,7 +16,7 @@ import * as system from './system.mjs';
 import * as backup from './backup.mjs';
 import * as materials from './materials.mjs';
 
-export const VERSION = '0.6.1';
+export const VERSION = '0.6.2';
 const PORT_RANGE = [17890, 17910];
 
 store.ensureWorkspace();
