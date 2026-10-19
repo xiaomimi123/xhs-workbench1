@@ -1,3 +1,4 @@
+import {imagePages} from '../note-preview.js';
 // 文案：笔记列表 + 编辑器（标题 / 正文 / 话题），实时字数与违禁词检查，手机预览，一键让 agent 写 / 改
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
@@ -12,16 +13,19 @@ export const NOTE_STATUSES = [
 ];
 const STATUS_NAME = Object.fromEntries(NOTE_STATUSES);
 
-const V = { items: [], current: null, note: null, dirty: false, preview: false, filter: 'all' };
+const V = { items: [], current: null, note: null, dirty: false, preview: false, previewIndex: 0, filter: 'all', jobs: [], instruction: '', revision: 0 };
 
 async function loadList() {
   V.items = (await api('GET', `/api/notes?${acc()}`)).items;
 }
 
-async function loadNote(id) {
-  V.note = id ? await api('GET', `/api/notes/detail?${acc(`id=${id}`)}`) : null;
-  V.current = V.note ? V.note.id : null;
-  V.dirty = false;
+async function loadNote(id, {guard=false}={}) {
+  const revision=V.revision, account=S.accountId;
+  const note=id?await api('GET', `/api/notes/detail?${acc(`id=${id}`)}`):null;
+  const jobs=id?(await api('GET', `/api/notes/jobs?${acc(`noteId=${id}`)}`)).items:[];
+  if(account!==S.accountId || guard&&(V.revision!==revision||V.current!==id)) return false;
+  V.note=note;V.current=note?note.id:null;V.jobs=jobs;V.dirty=false;
+  return true;
 }
 
 export function canLeave() {
@@ -29,6 +33,8 @@ export function canLeave() {
 }
 
 export async function render(main, params = {}) {
+  if(params.preview!==undefined)V.preview=!!params.preview;
+  V.previewIndex=0;
   if (V.accountId !== S.accountId) {
     V.accountId = S.accountId;
     V.current = null;
@@ -50,8 +56,8 @@ export async function onContent(ev) {
   if (ev.area !== 'notes') return;
   await loadList();
   // 正在编辑时不覆盖用户的输入，只刷新列表
-  if (!V.dirty && V.current) await loadNote(V.items.some((n) => n.id === V.current) ? V.current : null);
-  if (V.dirty) drawList();
+  if (!V.dirty && V.current) await loadNote(V.items.some((n) => n.id === V.current) ? V.current : null, {guard:true});
+  if (V.dirty) { drawList(); V.jobs = V.current ? (await api('GET', `/api/notes/jobs?${acc(`noteId=${V.current}`)}`)).items : []; const panel=$('#copy-jobs');if(panel)panel.innerHTML=jobsHtml(); }
   else draw($('#main'));
 }
 
@@ -107,8 +113,11 @@ function previewHtml(data) {
       : n.hasCover
         ? `<img class="phone-cover" src="${fileUrl(`notes/${n.id}/cover.png`, n.coverHash)}" alt="">`
         : '<div class="phone-cover placeholder">还没有封面</div>';
-  return `<div class="phone">
-    ${cover}
+  const pages=imagePages(n);V.previewIndex=Math.max(0,Math.min(V.previewIndex,pages.length-1));
+  const page=pages[V.previewIndex];
+  const displayed=page?`<img class="phone-cover" src="${fileUrl(`notes/${n.id}/${page.path}`,n.updatedAt)}" alt="${esc(page.label)}" style="object-fit:contain">`:cover;
+  return `${pages.length?`<div class="row" style="justify-content:center;margin:10px"><button class="btn small" data-act="preview-prev" ${V.previewIndex===0?'disabled':''}>上一张</button><span>${V.previewIndex+1} / ${pages.length} · ${esc(page.label)}</span><button class="btn small" data-act="preview-next" ${V.previewIndex===pages.length-1?'disabled':''}>下一张</button></div>`:''}<div class="phone">
+    ${displayed}
     <div class="phone-body">
       ${total > 1 ? `<div class="phone-dots">${'<span></span>'.repeat(Math.min(total, 18))}</div>` : ''}
       <div class="phone-title">${esc(data.title || '（无标题）')}</div>
@@ -116,6 +125,31 @@ function previewHtml(data) {
       <div class="phone-tags">${data.tags.map((t) => `#${esc(t)}`).join(' ')}</div>
     </div>
   </div>`;
+}
+
+function jobsHtml() {
+  const names={rewrite:'改写正文',titles:'标题优化',check:'内容检查'};
+  return V.jobs.slice(0,8).map(j=>`<div class="card" style="margin-top:10px">
+    <strong>${names[j.kind] || esc(j.kind)} · ${{queued:'排队中',running:'处理中',done:'已完成',error:'失败'}[j.status] || esc(j.status)}</strong>
+    <div class="muted">${esc(j.error || j.progress || '等待 agent')} · ${fmtTime(j.createdAt)}</div>
+    ${j.status==='error'?`<button class="btn small" data-copy-retry="${esc(j.id)}">重试</button>`:''}
+    ${j.kind==='titles'&&j.status==='done'?`<ul>${j.result.titles.map(t=>`<li>${esc(t.title)}：${esc(t.reason)}</li>`).join('')}</ul>`:''}
+    ${j.kind==='check'&&j.status==='done'?`<p>${j.stale||V.dirty?'<strong class="bad">报告已过期，请重新检查当前稿件。</strong>':''}${esc(j.result.summary)}</p>
+      <ul>${j.result.issues.map(i=>`<li><strong>${esc(i.severity)}</strong>「${esc(i.quote)}」：${esc(i.suggestion)}</li>`).join('')}</ul>
+      ${j.result.unverified.length?`<p>待核实：${j.result.unverified.map(esc).join('；')}</p>`:''}
+      <p class="muted">规则检查：标题 ${j.lint.titleLen} 字，正文 ${j.lint.bodyLen} 字，${j.lint.issues.length} 项提示。检查结果不代表平台审核通过。</p>`:''}
+  </div>`).join('');
+}
+
+async function runCopy(kind) {
+  if (!(await save(true))) return;
+  const noteId=V.current,account=S.accountId;
+  try {
+    await api('POST', `/api/notes/run?${acc()}`, {noteId,kind,instruction:kind==='rewrite'?V.instruction:''});
+    if(noteId!==V.current||account!==S.accountId)return;
+    if(!V.dirty) await loadNote(V.current,{guard:true});
+    if(!V.dirty) draw($('#main')); else { V.jobs=(await api('GET',`/api/notes/jobs?${acc(`noteId=${V.current}`)}`)).items;const panel=$('#copy-jobs');if(panel)panel.innerHTML=jobsHtml(); }
+  } catch(err) { toast(err.message); }
 }
 
 function draw(main) {
@@ -133,7 +167,7 @@ function draw(main) {
           <select id="note-visibility" aria-label="可见范围">${opt('public', '公开', n.visibility || 'public')}${opt('private', '仅自己可见', n.visibility || 'public')}</select>
           <span class="muted" style="font-size:12px">${esc(n.id)} · 更新于 ${fmtTime(n.updatedAt)}</span>
           <div class="spacer"></div>
-          <button class="btn small" data-act="preview">${V.preview ? '编辑' : '手机预览'}</button>
+          <button class="btn small" data-act="schedule-draft">发布前检查</button><button class="btn small" data-act="preview">${V.preview ? '编辑' : '手机预览'}</button>
           <button class="btn small primary" data-act="save">保存</button>
         </div>
         ${V.preview ? previewHtml(data) : `
@@ -147,6 +181,7 @@ function draw(main) {
         <label class="field">话题标签（空格或逗号分隔，不用加 #）
           <input type="text" id="note-tags" value="${esc(data.tags.join(' '))}">
         </label>`}
+        <label class="field">改写要求（可选）<input id="copy-instruction" maxlength="2000" value="${esc(V.instruction)}" placeholder="例如：开头更直接，保留步骤，减少套话"></label>
         <div class="row" style="margin-top:12px">
           <button class="btn small" data-act="write">${data.content.trim() ? '让 agent 改写' : '让 agent 写正文'}</button>
           <button class="btn small" data-act="titles">生成标题备选</button>
@@ -157,6 +192,10 @@ function draw(main) {
           <button class="btn small ghost danger" data-act="delete">删除</button>
         </div>
       </div>
+      ${n.topicId?`<div class="muted">关联选题：${esc(n.topicId)}</div>`:''}
+      ${(n.sources||[]).map(ref=>/^https:\/\/www\.xiaohongshu\.com\//.test(ref.url)?`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">来源：${esc(ref.benchmarkName||'对标')}</a>`:'').join(' · ')}
+      <div class="muted">${n.basis==='observed'?'来源为已采集观察，尚未完成拆解。':''} 文案任务保留原稿快照，不自动发布。</div>
+      <div id="copy-jobs">${jobsHtml()}</div>
       ${V.preview ? '' : `<div class="card lint-box" id="lint-box">${lintHtml(data)}</div>`}
       ${V.preview ? '' : mediaHtml(n)}`;
   }
@@ -253,13 +292,17 @@ function onMediaChange(fresh) {
 
 async function save(silent) {
   if (!V.note) return;
+  const revision=V.revision, noteId=V.note.id, account=S.accountId;
   const data = V.preview
     ? { title: V.note.title, content: V.note.content, tags: V.note.tags, status: $('#note-status').value, visibility: $('#note-visibility').value }
     : readEditor();
   try {
-    V.note = await api('POST', `/api/notes?${acc()}`, { id: V.note.id, ...data });
+    const fresh = await api('POST', `/api/notes?${acc()}`, { id: noteId, ...data });
+    if(account!==S.accountId||V.current!==noteId||revision!==V.revision){toast('保存期间有新修改，请再次保存后操作');return false;}
+    V.note=fresh;
     V.dirty = false;
     await loadList();
+    if(account!==S.accountId||V.current!==noteId||revision!==V.revision)return false;
     if (!silent) toast('已保存');
     return true;
   } catch (err) {
@@ -274,8 +317,18 @@ function noteRef() {
 
 function bind(main) {
   main.onclick = async (e) => {
-    const t = e.target.closest('[data-act],[data-note],[data-filter],[data-title]');
+    const t = e.target.closest('[data-act],[data-note],[data-filter],[data-title],[data-copy-retry]');
     if (!t) return;
+    if(t.dataset.copyRetry){
+      if(V.dirty){toast('请先保存当前修改，再基于当前稿件发起操作');return;}
+      const noteId=V.current,account=S.accountId;
+      try{
+        await api('POST',`/api/notes/retry?${acc()}`,{id:t.dataset.copyRetry});
+        if(noteId!==V.current||account!==S.accountId)return;
+        if(!V.dirty)await loadNote(noteId,{guard:true});
+        if(!V.dirty)draw(main);
+      }catch(err){toast(err.message);}return;
+    }
     if (t.dataset.note) {
       if (t.dataset.note === V.current || !canLeave()) return;
       await loadNote(t.dataset.note);
@@ -287,7 +340,8 @@ function bind(main) {
     }
     if (t.dataset.title) {
       $('#note-title', main).value = t.dataset.title;
-      V.dirty = true;
+      V.dirty = true; V.revision++;
+      const panel=$('#copy-jobs');if(panel)panel.innerHTML=jobsHtml();
       return refreshLint();
     }
     switch (t.dataset.act) {
@@ -300,27 +354,25 @@ function bind(main) {
         return draw(main);
       }
       case 'save':
-        await save();
-        return draw(main);
+        if(await save()) return draw(main);
+        return;
+      case 'preview-prev': V.previewIndex--;return draw(main);
+      case 'preview-next': V.previewIndex++;return draw(main);
       case 'preview':
         if (!V.preview) {
           Object.assign(V.note, readEditor());
         }
         V.preview = !V.preview;
         return draw(main);
-      case 'write':
-        if (!(await save(true))) return;
-        if (V.note.content.trim()) return ask(`请按 playbooks/copywriting.md 改写${noteRef()}的正文，要求：`);
-        return ask(`请按 playbooks/copywriting.md 为${noteRef()}写正文。${V.note.title ? `当前标题：「${V.note.title}」。` : ''}写好后更新 content.md，并在 meta.json 补充 titleOptions 和 tags。`, true);
-      case 'titles':
-        if (!(await save(true))) return;
-        return ask(`请按 playbooks/copywriting.md 为${noteRef()}生成 5 个标题备选（每个不超过 20 字），写入 meta.json 的 titleOptions，不要改正文。`, true);
-      case 'agent-check':
-        if (!(await save(true))) return;
-        return ask(`请按 playbooks/copywriting.md 的「发布前检查」逐项检查${noteRef()}，列出问题和修改建议，先不要直接改文件。`, true);
+      case 'write': return runCopy('rewrite');
+      case 'titles': return runCopy('titles');
+      case 'agent-check': return runCopy('check');
       case 'video-script':
         if (!(await save(true))) return;
         return openVideoScript(V.note);
+      case 'schedule-draft':
+        if(V.dirty && !(await save(true)))return;
+        return go('schedule',{id:V.note.id});
       case 'cover':
         if (!(await save(true))) return;
         return go('cover', { id: V.note.id });
@@ -335,13 +387,15 @@ function bind(main) {
   };
 
   main.oninput = (e) => {
+    if(e.target.id==='copy-instruction'){V.instruction=e.target.value;return;}
     if (['note-title', 'note-body', 'note-tags'].includes(e.target.id)) {
-      V.dirty = true;
+      V.dirty = true; V.revision++;
+      const panel=$('#copy-jobs');if(panel)panel.innerHTML=jobsHtml();
       refreshLint();
     }
   };
   main.onchange = (e) => {
-    if (e.target.id === 'note-status' || e.target.id === 'note-visibility') V.dirty = true;
+    if (e.target.id === 'note-status' || e.target.id === 'note-visibility') {V.dirty = true;V.revision++;}
   };
 }
 

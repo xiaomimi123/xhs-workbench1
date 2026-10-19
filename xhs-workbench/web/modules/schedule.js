@@ -1,3 +1,4 @@
+import {renderDraft,draftBusy} from '../schedule-draft.js';
 // 发布排期：安排发布时间 → 到点提醒手动发布（附发布助手）或交给 agent 自动发布
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
@@ -6,6 +7,7 @@ import { S, $, api, acc, toast, fmtTime, ask, opt, accDirRel } from '../core.js'
 export const CREATOR_URL = 'https://creator.xiaohongshu.com/publish/publish';
 
 const STATUS = {
+  planned: ['草案（不执行）',''],
   scheduled: ['已排期', ''],
   due: ['待手动发布', 'warn'],
   running: ['agent 发布中', 'warn'],
@@ -15,44 +17,50 @@ const STATUS = {
   missed: ['已错过', 'bad'],
   cancelled: ['已取消', ''],
 };
-const MODE = { remind: '到点提醒我', auto: 'agent 自动发布' };
+const MODE = { draft: '草案（不发布）', remind: '到点提醒我', auto: 'agent 自动发布' };
 const ATTENTION = ['due', 'missed', 'failed', 'check'];
 
 const V = { items: [], notes: [], cfg: null, showSettings: false, helper: null };
 
 async function load() {
+  const accountId=S.accountId;
   const [sch, notes, cfg] = await Promise.all([
     api('GET', `/api/schedule?${acc()}`),
     api('GET', `/api/notes?${acc()}`),
     api('GET', `/api/automation?${acc()}`),
   ]);
+  if(S.view!=='schedule'||accountId!==S.accountId)return false;
   V.items = sch.items;
   V.notes = notes.items;
   V.cfg = cfg;
+  return true;
 }
 
-export async function render(main) {
+export async function render(main, params = {}) {
+  const accountId=S.accountId;
+  V.selected=params.id;
   if (V.accountId !== S.accountId) {
     V.accountId = S.accountId;
     V.helper = null;
   }
   main.innerHTML = '<div class="empty">加载中…</div>';
   try {
-    await load();
+    if(!await load())return;
   } catch (err) {
-    main.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    if(S.view==='schedule'&&accountId===S.accountId)main.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
     return;
   }
-  draw(main);
+  if(S.view==='schedule'&&accountId===S.accountId)draw(main);
 }
 
 export async function onContent(ev) {
+  if(draftBusy())return;
   if (!['schedule', 'notes', 'automation'].includes(ev.area)) return;
   // 用户正在填表时不打断
   const active = document.activeElement;
   if (active && active.closest && active.closest('#main form')) return;
-  await load();
-  draw($('#main'));
+  if(!await load())return;
+  if(S.view==='schedule')draw($('#main'));
 }
 
 function badge(status) {
@@ -147,9 +155,10 @@ function attentionCard(s) {
 function draw(main) {
   const scheduledNoteIds = new Set(V.items.filter((s) => ['scheduled', 'due', 'running', 'check'].includes(s.status)).map((s) => s.noteId));
   const candidates = V.notes.filter((n) => n.status !== 'published' && !scheduledNoteIds.has(n.id));
-  const attention = V.items.filter((s) => ATTENTION.includes(s.status));
+  const attention = V.items.filter((s) => s.mode!=='draft'&&!s.nonExecuting&&ATTENTION.includes(s.status));
   const rows = [...V.items].reverse();
 
+  if(S.view!=='schedule')return;
   main.innerHTML = `
     <div class="row page-head">
       <div><h1 class="page-title">${icon("calendar")} 发布排期</h1><div class="muted">安排好发布时间，到点提醒你手动发，或交给 agent 自动发。</div></div>
@@ -158,7 +167,8 @@ function draw(main) {
     </div>
     ${V.showSettings ? settingsHtml() : ''}
     ${attention.length ? `<h3 class="section-title">需要处理（${attention.length}）</h3>${attention.map(attentionCard).join('')}` : ''}
-    <div class="card" style="margin:16px 0">
+    <div class="card" id="draft-panel" style="margin:16px 0"></div>
+    <details><summary>正式发布排期（会提醒或执行发布）</summary><div class="card" style="margin:16px 0">
       <h3 style="margin-top:0">安排发布</h3>
       ${candidates.length ? `<form class="row" id="schedule-form" style="align-items:flex-end">
         <label class="stack" style="flex:2;min-width:200px">笔记<select name="noteId">${candidates.map((n) => opt(n.id, `${n.title || '（无标题）'}${n.hasCover ? '' : '（无封面）'}`, '')).join('')}</select></label>
@@ -167,7 +177,7 @@ function draw(main) {
         <button class="btn primary" type="submit">加入排期</button>
       </form>` : '<div class="muted">没有可以排期的笔记。先去「文案」写一篇吧。</div>'}
     </div>
-    <h3 class="section-title">未来 7 天</h3>
+    </details><h3 class="section-title">未来 7 天</h3>
     ${weekHtml()}
     <h3 class="section-title">全部排期</h3>
     ${rows.length ? `<div class="card table-wrap" style="padding:0"><table class="data-table">
@@ -177,10 +187,15 @@ function draw(main) {
         <td>${s.publishedUrl ? `<a href="${esc(s.publishedUrl)}" target="_blank" rel="noopener">${esc(s.title)}</a>` : esc(s.title)}</td>
         <td>${MODE[s.mode] || esc(s.mode)}</td>
         <td>${badge(s.status)}</td>
-        <td class="row-actions">${s.status === 'scheduled' ? `<button class="btn small ghost" data-act="retime" data-id="${esc(s.id)}">改时间</button><button class="btn small ghost" data-act="switch-mode" data-id="${esc(s.id)}">改为${s.mode === 'auto' ? '提醒' : '自动'}</button><button class="btn small ghost" data-act="cancel" data-id="${esc(s.id)}">取消</button>` : ''}
+        <td class="row-actions">${s.mode!=='draft'&&!s.nonExecuting&&s.status === 'scheduled' ? `<button class="btn small ghost" data-act="retime" data-id="${esc(s.id)}">改时间</button><button class="btn small ghost" data-act="switch-mode" data-id="${esc(s.id)}">改为${s.mode === 'auto' ? '提醒' : '自动'}</button><button class="btn small ghost" data-act="cancel" data-id="${esc(s.id)}">取消</button>` : ''}
           ${['published', 'cancelled'].includes(s.status) ? `<button class="btn small ghost danger" data-act="delete" data-id="${esc(s.id)}">删除</button>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : '<div class="muted">还没有排期。</div>'}`;
+  if(main._draftUpdated)main.removeEventListener('draft-updated',main._draftUpdated);
+  main._draftUpdated=async()=>{const account=S.accountId;if(!await load())return;if(S.view==='schedule'&&account===S.accountId&&!draftBusy())draw(main);};
+  main.addEventListener('draft-updated',main._draftUpdated);
   bind(main);
+  renderDraft(main.querySelector('#draft-panel'),V.notes,V.items,V.selected);
+  V.selected=null;
 }
 
 async function update(data) {

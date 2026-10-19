@@ -31,7 +31,7 @@ const PROMPTS = {
     '请帮我建立账号定位：先问我几个关键问题（一次一个），最后把结论整理成知识库文档，并更新账号管理里的定位信息。',
   knowledge:
     '请按 playbooks/knowledge.md 检查我的知识库，补全缺失的基础文档（账号定位、爆款方法论、笔记方法等），完成后告诉我建了哪些。',
-  benchmark: `请根据我的账号定位（知识库「账号定位/」和账号管理里的定位），按 playbooks/benchmark.md 推荐 3 个值得对标的小红书账号，说明理由，并登记到 ${accDirRel()}/benchmarks/index.json（status 设为 pending）。`,
+  benchmark: `请根据我的账号定位，按 playbooks/benchmark.md 的「推荐对标账号」第一步推荐 3 个候选。不开浏览器；每得到一个就写到 ${accDirRel()}/benchmarks/checkpoints/pending/<id>.candidate.json，由工作台逐条合并；不要等全部找完再写，未核实数据留空。`,
   firstNote:
     '请结合知识库和对标拆解，按 playbooks/topics.md 给我出 3 个选题让我挑；我选定其中一个后，按 playbooks/copywriting.md 写成一篇笔记。',
 };

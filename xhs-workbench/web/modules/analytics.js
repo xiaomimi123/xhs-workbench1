@@ -1,3 +1,5 @@
+import {renderReview} from '../analytics-review.js';
+import {metric,interactionRate,coverage} from '../analytics-metrics.js';
 // 数据复盘：agent 抓取笔记 / 账号数据 → 指标卡 + 趋势图 + 笔记排行 → agent 写复盘报告并沉淀到知识库
 import { md, esc } from '../md.js';
 import { icon } from '../icons.js';
@@ -16,74 +18,72 @@ const METRIC_NAME = Object.fromEntries([...METRICS, ['followers', '粉丝数']])
 const V = { data: null, cfg: null, metric: 'views', sort: 'views', report: null, showSettings: false };
 
 // "1.2万" / "3,450" / 1200 → 数字
-export function num(v) {
-  if (typeof v === 'number') return v;
-  const s = String(v ?? '').replace(/[,\s]/g, '');
-  const m = /^(-?[\d.]+)(万|w|W|k|K)?$/.exec(s);
-  if (!m) return 0;
-  const n = parseFloat(m[1]);
-  return m[2] === '万' || m[2] === 'w' || m[2] === 'W' ? n * 10000 : m[2] === 'k' || m[2] === 'K' ? n * 1000 : n;
-}
+export function num(v) { return metric(v); }
 
 function fmtNum(n) {
+  if(n===null||n===undefined)return '未知';
   if (n >= 10000) return `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}万`;
   return Math.round(n).toLocaleString('zh-CN');
 }
 
 async function load() {
-  const [data, cfg] = await Promise.all([api('GET', `/api/analytics?${acc()}`), api('GET', `/api/automation?${acc()}`)]);
+  const account=S.accountId,seq=V.sequence=(V.sequence||0)+1;
+  const [data, cfg, workflow] = await Promise.all([api('GET', `/api/analytics?${acc()}`), api('GET', `/api/automation?${acc()}`),api('GET', `/api/analytics/workflow?${acc()}`)]);
+  if(account!==S.accountId||S.view!=='analytics'||seq!==V.sequence)return false;
+  V.workflow=workflow;
   V.data = data;
   V.cfg = cfg;
+  return true;
 }
 
 export async function render(main) {
+  const account=S.accountId;
   if (V.accountId !== S.accountId) {
     V.accountId = S.accountId;
     V.report = null;
   }
   main.innerHTML = '<div class="empty">加载中…</div>';
   try {
-    await load();
+    if(!await load())return;
   } catch (err) {
-    main.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    if(account===S.accountId&&S.view==='analytics')main.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
     return;
   }
   draw(main);
 }
 
 export async function onContent(ev) {
-  if (!['analytics', 'automation'].includes(ev.area)) return;
-  await load();
+  if (!['analytics', 'automation','topics'].includes(ev.area)) return;
+  if(document.activeElement?.closest('#analytics-settings'))return;
+  if(!await load())return;
   draw($('#main'));
 }
 
 // ---------- 数据整理 ----------
 
 // 账号级每日序列：优先用 account.json；没有该指标时按日期汇总各笔记的 history
+function hasAccountMetric(key){return V.data.account.some(h=>h.date&&num(h[key])!==null);}
 function series(metric) {
-  const acct = V.data.account.filter((h) => h.date && h[metric] !== undefined && h[metric] !== '');
+  const acct = V.data.account.filter((h) => h.date && num(h[metric])!==null);
   if (acct.length) return acct.map((h) => ({ date: h.date, value: num(h[metric]) })).sort((a, b) => a.date.localeCompare(b.date));
-  const byDate = new Map();
+  const byDate = new Map(),counts=new Map();
   for (const n of V.data.notes) {
     for (const h of n.history || []) {
-      if (!h.date || h[metric] === undefined) continue;
+      if (!h.date || num(h[metric])===null) continue;
+      counts.set(h.date,(counts.get(h.date)||0)+1);
       byDate.set(h.date, (byDate.get(h.date) || 0) + num(h[metric]));
     }
   }
-  return [...byDate].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
+  return [...byDate].filter(([date])=>counts.get(date)===V.data.notes.length).map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function totals() {
   const t = {};
-  for (const [k] of METRICS) t[k] = V.data.notes.reduce((s, n) => s + num(n.metrics && n.metrics[k]), 0);
+  for (const [k] of METRICS) t[k] = coverage(V.data.notes.map(n=>n.metrics||{}),k);
   return t;
 }
 
-function rate(n) {
-  const m = n.metrics || {};
-  const v = num(m.views);
-  return v ? (num(m.likes) + num(m.collects) + num(m.comments)) / v : null;
-}
+function rate(n) { return interactionRate(n.metrics); }
 
 // ---------- 图表（单序列折线，带悬停读数） ----------
 
@@ -160,7 +160,7 @@ function bindChart(box) {
 }
 
 function sparkline(history, metric) {
-  const pts = (history || []).filter((h) => h.date).sort((a, b) => a.date.localeCompare(b.date)).map((h) => num(h[metric]));
+  const pts = (history || []).filter((h) => h.date&&num(h[metric])!==null).sort((a, b) => a.date.localeCompare(b.date)).map((h) => num(h[metric]));
   if (pts.length < 2) return '<span class="muted">—</span>';
   const max = Math.max(...pts) || 1;
   const d = pts.map((v, i) => `${i ? 'L' : 'M'}${((i * 80) / (pts.length - 1)).toFixed(1)},${(22 - (v / max) * 20).toFixed(1)}`).join('');
@@ -171,10 +171,10 @@ function sparkline(history, metric) {
 
 function kpiHtml() {
   const t = totals();
-  const fol = V.data.account.filter((h) => h.followers !== undefined).sort((a, b) => a.date.localeCompare(b.date));
+  const fol = V.data.account.filter((h) => num(h.followers)!==null).sort((a, b) => a.date.localeCompare(b.date));
   const tiles = [
     ['笔记', V.data.notes.length, null],
-    ...METRICS.slice(0, 4).map(([k, n]) => [n, t[k], null]),
+    ...METRICS.slice(0, 4).map(([k, n]) => [`${n}（${t[k].known}/${t[k].total} 篇有数据）`, t[k].value, null]),
     ['粉丝', fol.length ? num(fol[fol.length - 1].followers) : null, fol.length > 1 ? num(fol[fol.length - 1].followers) - num(fol[fol.length - 2].followers) : null],
   ];
   return `<div class="kpis">${tiles
@@ -184,7 +184,7 @@ function kpiHtml() {
 
 function tableHtml() {
   const notes = [...V.data.notes].sort((a, b) =>
-    V.sort === 'rate' ? (rate(b) ?? -1) - (rate(a) ?? -1) : V.sort === 'publishedAt' ? String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')) : num(b.metrics?.[V.sort]) - num(a.metrics?.[V.sort]),
+    V.sort === 'rate' ? (rate(b) ?? -1) - (rate(a) ?? -1) : V.sort === 'publishedAt' ? String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')) : (num(b.metrics?.[V.sort])??-1) - (num(a.metrics?.[V.sort])??-1),
   );
   const th = (key, name) => `<th><button class="sort${V.sort === key ? ' active' : ''}" data-sort="${key}">${name}${V.sort === key ? ' ↓' : ''}</button></th>`;
   return `<div class="card table-wrap" style="padding:0"><table class="data-table">
@@ -213,24 +213,26 @@ function settingsHtml() {
 }
 
 function draw(main) {
+  if(S.view!=='analytics')return;
   const d = V.data;
   const hasData = d.notes.length || d.account.length;
   const metricOptions = [...METRICS, ['followers', '粉丝数']];
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">${icon("chart")} 数据复盘</h1><div class="muted">${d.updatedAt ? `数据更新于 ${fmtTime(d.updatedAt)}。` : ''}agent 定期抓取笔记数据，复盘结论自动沉淀到知识库。</div></div>
+      <div><h1 class="page-title">${icon("chart")} 数据复盘</h1><div class="muted">${d.updatedAt ? `数据更新于 ${fmtTime(d.updatedAt)}。` : ''}区分历史账号表现与对标观察，复盘建议可回流选题池。</div></div>
       <div class="spacer"></div>
       <button class="btn" data-act="toggle-settings">${icon("sliders")} 设置</button>
       <button class="btn" data-act="fetch">让 agent 抓取数据</button>
       <button class="btn" data-act="import-notes" title="把账号里已发布的笔记导入进来，复盘就有历史数据了">导入历史笔记</button>
       ${d.notes.length ? `<a class="btn" href="/api/analytics/export?${acc()}&t=${encodeURIComponent(S.token)}">导出 CSV</a>` : ''}
-      <button class="btn primary" data-act="report" ${hasData ? '' : 'disabled'}>让 agent 写复盘</button>
+      <button class="btn" data-act="report" ${hasData ? '' : 'disabled'}>旧版自由复盘</button>
     </div>
+    <div id="analytics-review" class="card" style="margin-bottom:16px"></div>
     ${V.showSettings ? settingsHtml() : ''}
     ${hasData ? `
-      ${kpiHtml()}
+      <p class="muted">以下仅为本账号已保存数据。累计指标按已知样本汇总，未知不等于零；更新日期不代表本次重新核实。</p>${kpiHtml()}
       <div class="card" style="margin-top:16px">
-        <div class="row"><h3 style="margin:0">${V.data.account.length ? '每日趋势' : '累计趋势'}</h3><span class="muted" style="font-size:12px">${V.data.account.length ? (V.metric === 'followers' ? '当天粉丝总数' : '当天新增') : '按笔记累计值汇总'}</span><div class="spacer"></div>
+        <div class="row"><h3 style="margin:0">${hasAccountMetric(V.metric) ? '每日趋势' : '累计趋势'}</h3><span class="muted" style="font-size:12px">${hasAccountMetric(V.metric) ? (V.metric === 'followers' ? '当天粉丝总数' : '当天新增') : '按笔记累计值汇总，仅显示覆盖全部笔记的日期'}</span><div class="spacer"></div>
           <select data-metric aria-label="指标">${metricOptions.map(([k, n]) => opt(k, n, V.metric)).join('')}</select>
         </div>
         <div id="chart-box">${lineChart(series(V.metric), METRIC_NAME[V.metric])}</div>
@@ -256,6 +258,7 @@ function draw(main) {
     ${V.report ? `<div class="card md report-view">${md(V.report.content)}</div>` : ''}`;
   bindChart(main);
   bind(main);
+  renderReview(main.querySelector('#analytics-review'),V.workflow,async()=>{try{if(await load())draw(main);}catch(err){if(S.view==='analytics')toast(err.message);}});
 }
 
 function bind(main) {
@@ -268,7 +271,10 @@ function bind(main) {
       return draw(main);
     }
     if (t.dataset.report) {
-      V.report = V.report && V.report.name === t.dataset.report ? null : await api('GET', `/api/analytics/report?${acc(`name=${encodeURIComponent(t.dataset.report)}`)}`).catch((err) => toast(err.message));
+      const account=S.accountId,seq=V.reportSeq=(V.reportSeq||0)+1;
+      const report = V.report && V.report.name === t.dataset.report ? null : await api('GET', `/api/analytics/report?${acc(`name=${encodeURIComponent(t.dataset.report)}`)}`).catch((err) => toast(err.message));
+      if(account!==S.accountId||S.view!=='analytics'||seq!==V.reportSeq)return;
+      V.report=report;
       draw(main);
       if (V.report) $('.report-view', main).scrollIntoView({ behavior: 'smooth' });
       return;
@@ -290,14 +296,13 @@ function bind(main) {
   main.onchange = async (e) => {
     if (e.target.dataset.metric !== undefined) {
       V.metric = e.target.value;
-      $('#chart-box', main).innerHTML = lineChart(series(V.metric), METRIC_NAME[V.metric]);
-      return bindChart(main);
+      return draw(main);
     }
     if (e.target.id === 'import-input') {
       try {
         for (const f of e.target.files) await api('POST', `/api/analytics/upload?${acc()}`, { filename: f.name, data: await readFileAsDataURL(f) });
         toast(`已上传 ${e.target.files.length} 个文件`);
-        await load();
+        if(!await load())return;
         draw(main);
       } catch (err) {
         toast(err.message);
@@ -310,7 +315,7 @@ function bind(main) {
     try {
       await api('POST', `/api/automation?${acc()}`, { analytics: { dailyAt: new FormData(e.target).get('dailyAt') || '' } });
       toast('设置已保存');
-      await load();
+      if(!await load())return;
       draw(main);
     } catch (err) {
       toast(err.message);

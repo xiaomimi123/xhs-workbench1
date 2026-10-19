@@ -104,8 +104,8 @@ export function setHooks(h) {
 }
 
 /** 让 agent 做事：send=true 直接发送，否则填进输入框让用户补充 */
-export function ask(text, send = false) {
-  return send ? hooks.send(text) : hooks.fill(text);
+export function ask(text, send = false, options = {}) {
+  return send ? hooks.send(text, options) : hooks.fill(text);
 }
 
 export function go(view, params) {

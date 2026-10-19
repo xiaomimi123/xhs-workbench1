@@ -63,6 +63,7 @@ function connectEvents() {
         renderBridge();
         break;
       case 'bridge.changed':
+      case 'browser.changed':
       case 'config.changed':
         refreshBridge();
         if (ev.type === 'config.changed') refreshAccounts();
@@ -516,15 +517,20 @@ function viewAccounts() {
 }
 
 function browserLine(a) {
+  const live = S.bridge?.browserWorker?.accounts?.[a.id];
+  const state = live && live.phase !== 'idle' ? `<div class="muted">后台窗口：${esc(live.phase)} · ${live.window === 'minimized' ? '已请求最小化' : live.window === 'visible' ? '可见有头' : live.window === 'unknown' ? '需手动恢复窗口' : '关闭'}${live.reason ? ` · ${esc(live.reason)}` : ''}</div>` : '';
   const b = a.browser;
-  if (!b) return '<span class="muted">还没有登录过</span>';
-  const who = [b.nickname, b.xhsId && `小红书号 ${esc(b.xhsId)}`].filter(Boolean).map(esc).join(' · ');
+  if (!b) return `<span class="muted">尚未保存登录记录（以实时核对为准）</span>${state}`;
+  const who = [b.nickname, b.xhsId && `小红书号 ${b.xhsId}`].filter(Boolean).map(esc).join(' · ');
   const mismatch = a.xhsId && b.xhsId && a.xhsId !== b.xhsId;
-  return `${b.loggedIn ? `${icon("check", "icon-ok")} 已登录` : `${icon("warning", "icon-warn")} 未登录`}${who ? `：${who}` : ''}${b.checkedAt ? `<span class="muted">（${fmtTime(b.checkedAt)} 检查）</span>` : ''}${mismatch ? `<div class="error-line">登录的小红书号和账号信息里填的（${esc(a.xhsId)}）不一致，自动操作会被拦下</div>` : ''}`;
+  return `${b.loggedIn ? `${icon("check", "icon-ok")} 上次已登录` : `${icon("warning", "icon-warn")} 上次未登录`}${who ? `：${who}` : ''}${b.checkedAt ? `<span class="muted">（${fmtTime(b.checkedAt)} 检查，以实时页面为准）</span>` : ''}${mismatch ? `<div class="error-line">登录的小红书号和账号信息里填的（${esc(a.xhsId)}）不一致，自动操作会被拦下</div>` : ''}${state}`;
 }
 
 function loginAccount(id) {
   if (id !== S.accountId) switchAccount(id);
+  if (S.bridge?.browserWorker?.enabled && S.bridge.browserWorker.available && S.bridge.browserWorker.compatible) {
+    return sendMessage('检查浏览器登录账号', { taskKind: 'browser.prepare' });
+  }
   sendMessage('请按 playbooks/browser.md 打开小红书创作者中心，检查这个账号的浏览器登录状态；没登录就停在登录页等我本人登录（每 15 秒检查一次，最多等 5 分钟）。完成后更新登录状态文件，不要做任何其他操作。');
 }
 
@@ -572,6 +578,23 @@ function renderBridge(override) {
   renderChatBanner();
 }
 
+function workerSettingsHtml(w = {}) {
+  const PHASE = { idle: '空闲', starting: '启动中', ready: '就绪', 'checking-login': '核对登录中', searching: '搜索中', 'reading-profile': '读取主页中', needsLogin: '等待本人登录', needsReview: '需要人工核对', error: '错误' };
+  const current = w.accounts?.[S.accountId] || {};
+  const available = w.available && w.compatible;
+  return `<div class="card" style="max-width:760px;margin-top:16px">
+    <h3 style="margin-top:0">后台有头只读采集（可选）</h3>
+    <p class="muted">同账号复用独立浏览器资料；登录/验证码窗口必须可见，核对成功后尝试最小化。不能保证不抢焦点或避开平台风控；发布、评论仍由原 agent 执行。</p>
+    <dl class="kv">
+      <dt>组件</dt><dd>${w.available ? '已安装' : '未安装'}${w.compatible ? '' : ' · 需要 CLI + 有头 Playwright MCP'}</dd>
+      <dt>当前账号</dt><dd>${PHASE[current.phase] || esc(current.phase || '空闲')} · ${current.window === 'minimized' ? '已请求最小化' : current.window === 'visible' ? '可见有头窗口' : current.window === 'unknown' ? '需手动恢复窗口' : '窗口关闭'}${current.lastElapsedMs ? ` · 最近 ${(current.lastElapsedMs / 1000).toFixed(1)} 秒` : ''}${current.reason ? `<br>${esc(current.reason)}` : ''}${current.windowNote ? `<br>${esc(current.windowNote)}` : ''}</dd>
+      <dt>资料占用</dt><dd>${current.window && current.window !== 'closed' ? 'worker 持有；原 MCP 任务启动前会先释放' : '空闲 / 原 agent 任务自行管理'}</dd>
+    </dl>
+    ${w.available ? `<button class="btn" id="worker-toggle" ${w.enabled || available ? '' : 'disabled'}>${w.enabled ? '关闭后台读取' : '开启后台读取'}</button>` : '<p class="muted">请让 agent 向你说明并在你确认后运行 <code>node scripts/workbench.mjs browser-worker-setup --yes</code> 安装可选组件；默认不安装、不启用。</p>'}
+    ${w.enabled && S.bridge?.adapter?.id === 'claude-code' ? `<div class="row" style="margin-top:12px"><label>可选快速模型（只在歧义时给人工建议，留空则不调用）<input id="fast-read-model" type="text" placeholder="例如 haiku" value="${esc(w.fastModel || '')}"></label><button class="btn small" id="fast-model-save">保存</button></div>` : ''}
+  </div>`;
+}
+
 function viewSettings() {
   const b = S.bridge || {};
   const info = S.info || {};
@@ -589,7 +612,7 @@ function viewSettings() {
         ${b.mode === 'inbox' ? `<dt>值守状态</dt><dd>${b.inboxOnline ? icon('dot', 'icon-ok') + ' 在线' : icon('dot', 'icon-warn') + ' 离线'}${b.lastPollAt ? `（最近一次 ${fmtTime(b.lastPollAt)}）` : ''}，待领取 ${b.pending} 条</dd>` : ''}
         <dt>上次测试</dt><dd>${b.testedAt ? fmtTime(b.testedAt) : '—'}</dd>
         ${b.mode === 'cli' ? `<dt>浏览器控制</dt><dd>${b.browser === 'playwright' ? `${icon('check', 'icon-ok')} Playwright（独立浏览器）` : b.browser === 'chrome' ? `${icon('check', 'icon-ok')} Claude in Chrome` : '未开启（自动发布、抓评论、抓数据需要）'}</dd>` : ''}
-        ${b.mode === 'cli' && b.browser === 'playwright' ? `<dt>抓取浏览器</dt><dd>${b.adapter && b.adapter.browserChannel && b.adapter.browserChannel !== 'chromium' ? `${icon('check', 'icon-ok')} 系统真实浏览器（${b.adapter.browserChannel === 'msedge' ? 'Edge' : 'Chrome'}，指纹与真人无差）` : `${icon('warning', 'icon-warn')} 内置浏览器（建议重新运行 browser-setup，自动切换到系统 Edge/Chrome）`}；${b.adapter && b.adapter.headless ? '无头（后台）' : '有头（弹窗）'}</dd>` : ''}
+        ${b.mode === 'cli' && b.browser === 'playwright' ? `<dt>抓取浏览器</dt><dd>${b.adapter && b.adapter.browserChannel && b.adapter.browserChannel !== 'chromium' ? `${icon('check', 'icon-ok')} 系统浏览器（${b.adapter.browserChannel === 'msedge' ? 'Edge' : 'Chrome'}；仍有平台风控风险）` : `${icon('warning', 'icon-warn')} 内置浏览器（建议重新运行 browser-setup，自动切换到系统 Edge/Chrome）`}；${b.adapter && b.adapter.headless ? '无头（后台）' : '有头（弹窗）'}</dd>` : ''}
       </dl>
       <div class="row" style="margin-top:14px">
         ${b.mode === 'cli' ? '<button class="btn" id="bridge-test">重新测试连接</button>' : ''}
@@ -611,6 +634,7 @@ function viewSettings() {
           <code>打开小红书工作台，并进入值守模式</code>
         </div>` : ''}
     </div>
+    ${workerSettingsHtml(b.browserWorker)}
     <div id="system-panels"></div>
     <div class="card" style="max-width:760px;margin-top:16px">
       <h3 style="margin-top:0">目录</h3>
@@ -751,13 +775,13 @@ function onChatEvent(ev) {
   updateMessage(m);
 }
 
-async function sendMessage(text) {
+async function sendMessage(text, options = {}) {
   text = text.trim();
   document.body.classList.add('chat-open');
   document.body.classList.remove('chat-hidden');
   if (!text || isBusy()) return;
   try {
-    const session = await api('POST', '/api/chat/send', { sessionId: S.session && S.session.id, accountId: S.accountId, text });
+    const session = await api('POST', '/api/chat/send', { sessionId: S.session && S.session.id, accountId: S.accountId, text, ...options });
     S.session = session;
     try { localStorage.setItem('xhs-session', session.id); } catch { /* 忽略 */ }
     $('#chat-input').value = '';
@@ -835,6 +859,17 @@ function bindEvents() {
       case 'account-cancel':
         S.editingAccount = null;
         return viewAccounts();
+      case 'worker-toggle':
+        return withBusy(t, '切换中…', async () => {
+          await api('POST', '/api/browser/worker', { enabled: !S.bridge?.browserWorker?.enabled });
+          await refreshBridge();
+        });
+      case 'fast-model-save':
+        return withBusy(t, '保存中…', async () => {
+          await api('POST', '/api/browser/worker', { fastModel: $('#fast-read-model').value.trim() });
+          await refreshBridge();
+          toast('快速模型设置已保存；只在歧义时使用');
+        });
       case 'bridge-test':
         return withBusy(t, '测试中…', async () => {
           const r = await api('POST', '/api/bridge/test');
@@ -915,6 +950,11 @@ function bindEvents() {
 }
 
 function switchAccount(id) {
+  if (S.accountId !== id) {
+    S.session = null;
+    renderSessionSelect();
+    renderMessages();
+  }
   S.accountId = id;
   try { localStorage.setItem('xhs-account', id); } catch { /* 忽略 */ }
   renderAccountSelect();

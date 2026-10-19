@@ -12,3 +12,11 @@ Thumbs.db
 .playwright-mcp/
 
 _*.py
+
+# 本机账号、登录状态及真实数据验收证据
+docs/verification/*
+!docs/verification/README.md
+.env
+.env.*
+!.env.example
+node_modules/

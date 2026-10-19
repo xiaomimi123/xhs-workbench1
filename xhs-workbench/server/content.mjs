@@ -1,10 +1,12 @@
 // M2 内容数据：对标账号、选题、笔记（文案 + 封面）。全部按账号存放在 accounts/<id>/ 下。
 // 数据格式与 playbooks/ 中的手册保持一致，agent 可以直接读写这些文件。
 import fs from 'node:fs';
+import { enqueueCollection, recordCollectionObservation } from './benchmark-queue.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { P, accountDir } from './paths.mjs';
 import { readJson, writeJson, ensureDir, newId, httpError, moveToTrash, trashListItem, safeJoin, listAccounts } from './store.mjs';
+import { mergeObservation, readObservation, benchmarkAvatar, saveManualAvatar, stageCapturedAvatar } from './benchmark-observation.mjs';
 
 export function accRoot(accountId) {
   if (!listAccounts().some((a) => a.id === accountId)) throw httpError(404, '账号不存在');
@@ -29,7 +31,7 @@ export function readItems(file, prefix) {
       patched = true;
     }
   }
-  if (patched || Array.isArray(data)) writeJson(file, { items });
+  if (patched || Array.isArray(data)) writeJson(file, Array.isArray(data) ? { items } : { ...data, items });
   return items;
 }
 
@@ -43,7 +45,8 @@ export function upsertItem(file, prefix, input, allowed) {
     item = { id: newId(prefix), ...fields, createdAt: now(), updatedAt: now() };
     items.unshift(item);
   }
-  writeJson(file, { items });
+  const data = readJson(file, { items: [] });
+  writeJson(file, Array.isArray(data) ? { items } : { ...data, items });
   return item;
 }
 
@@ -53,7 +56,8 @@ export function removeItem(file, prefix, id, trashGroup, meta = {}) {
   if (idx < 0) throw httpError(404, '条目不存在');
   const [removed] = items.splice(idx, 1);
   trashListItem(file, removed, trashGroup, meta); // 整条存进回收站，可恢复
-  writeJson(file, { items });
+  const data = readJson(file, { items: [] });
+  writeJson(file, Array.isArray(data) ? { items } : { ...data, items });
   return removed;
 }
 
@@ -113,18 +117,186 @@ function benchIndex(accountId) {
   return path.join(accRoot(accountId), 'benchmarks', 'index.json');
 }
 
+function readableBenchIndex(accountId) {
+  const file = benchIndex(accountId);
+  const data = readJson(file, null);
+  if (fs.existsSync(file) && !Array.isArray(data) && !Array.isArray(data?.items)) {
+    throw httpError(500, '对标列表文件无法读取，请检查备份，不要覆盖原文件');
+  }
+  return file;
+}
+
+function checkpointDir(accountId) {
+  return path.join(accRoot(accountId), 'benchmarks', 'checkpoints');
+}
+
+function checkpointText(value, max = 500) {
+  if (typeof value !== 'string' || value.length > max) throw new Error('字段格式不合法');
+  return value.trim();
+}
+
+function profileUrl(value) {
+  const raw = checkpointText(value, 2048);
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('主页链接不合法');
+  }
+  if (url.protocol !== 'https:' || !['www.xiaohongshu.com', 'xiaohongshu.com'].includes(url.hostname)
+    || url.username || url.password || !/^\/user\/profile\/[\w-]+\/?$/.test(url.pathname)) {
+    throw new Error('主页链接不是小红书账号主页');
+  }
+  return raw;
+}
+
+function profileKey(value) {
+  return new URL(value).pathname.replace(/\/$/, '');
+}
+
+/** agent 每确认一条就写独立检查点；服务端合并到列表，任务超时不影响已合并的数据。 */
+export function reconcileBenchmarkCheckpoints(accountId) {
+  const root = checkpointDir(accountId);
+  const pending = path.join(root, 'pending');
+  const result = { candidates: 0, verified: 0, observations: 0, rejected: 0 };
+  if (!fs.existsSync(pending)) return result;
+  const tombstones = path.join(root, 'deleted.json');
+  const old = readJson(tombstones, fs.existsSync(tombstones) ? null : { ids: [] });
+  if (!old || !Array.isArray(old.ids)) return result; // 墓碑损坏时宁可不导入，也不能复活已删除账号
+  const deleted = new Set(old.ids);
+  const index = benchIndex(accountId);
+  if (fs.existsSync(index)) {
+    // 旧式 agent 直接编辑列表时可能留下半截 JSON；绝不能用空列表覆盖原文件。
+    const raw = readJson(index, null);
+    if (!Array.isArray(raw) && !Array.isArray(raw?.items)) return result;
+  }
+  const stageOf = (name) => name.split('.').at(-2).split('-')[0];
+  const priority = { candidate: 0, verified: 1, observation: 2 };
+  const files = fs.readdirSync(pending).filter((f) => /^b_[\w-]+\.(?:candidate|verified|observation(?:-[a-f0-9]{8}-[0-6])?)\.json$/.test(f))
+    .sort((a, b) => a.split('.')[0].localeCompare(b.split('.')[0]) || priority[stageOf(a)] - priority[stageOf(b)] || a.localeCompare(b));
+  for (const name of files) {
+    const source = path.join(pending, name);
+    let entry;
+    try {
+      entry = JSON.parse(fs.readFileSync(source, 'utf8'));
+    } catch {
+      continue; // 写入尚未完成：不能把残缺 JSON 当成空列表
+    }
+    const stage = stageOf(name);
+    let reason = '';
+    try {
+      if (!entry || typeof entry !== 'object' || entry.id !== name.split('.')[0] || entry.stage !== stage) {
+        throw new Error('检查点 id 或阶段不匹配');
+      }
+      const file = benchIndex(accountId);
+      const items = readItems(file, 'b_');
+      const current = readJson(file, { items: [] });
+      const save = () => writeJson(file, Array.isArray(current) ? { items } : { ...current, items });
+      const item = items.find((b) => b.id === entry.id);
+      if (deleted.has(entry.id) && !item) throw new Error('账号已删除，不能从旧检查点恢复');
+      if (stage === 'candidate') {
+        const name = checkpointText(entry.name, 120);
+        if (!name) throw new Error('候选缺少名称');
+        if (item && item.name !== name) throw new Error('候选 id 已由其他账号占用');
+        if (!item && items.some((b) => b.name === name && !b.url)) throw new Error('同名候选已存在，请先核实原条目');
+        if (!item) {
+          const remark = entry.remark === undefined ? '' : checkpointText(entry.remark);
+          items.push({ id: entry.id, name, remark, status: 'pending', tracking: false,
+            createdAt: now(), updatedAt: now() });
+          save();
+          result.candidates++;
+        }
+      } else if (stage === 'observation') {
+        if (!item) throw new Error('对标账号不存在，不能写入观察');
+        mergeObservation(accountId, item, entry);
+        result.observations++;
+      } else {
+        if (!item) throw new Error('请先保存候选，再核实账号');
+        const url = profileUrl(entry.url);
+        const observedAt = checkpointText(entry.observedAt, 40);
+        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(observedAt)
+          || !Number.isFinite(Date.parse(observedAt))) throw new Error('缺少有效的 ISO 核实时间');
+        const xhsId = entry.xhsId === undefined ? '' : checkpointText(entry.xhsId, 120);
+        const followers = entry.followers === undefined ? '' : checkpointText(entry.followers, 80);
+        const profileName = entry.profileName === undefined ? '' : checkpointText(entry.profileName, 120);
+        if (!profileName) throw new Error('缺少主页昵称，无法确认身份');
+        if (item.url && profileKey(profileUrl(item.url)) !== profileKey(url)) throw new Error('主页与现有账号不一致');
+        if (xhsId && item.xhsId && item.xhsId !== xhsId) throw new Error('小红书号与现有账号不一致');
+        if (items.some((b) => {
+          if (b.id === entry.id) return false;
+          if (xhsId && b.xhsId === xhsId) return true;
+          try {
+            return b.url && profileKey(profileUrl(b.url)) === profileKey(url);
+          } catch {
+            return false; // 其他条目的无效手填链接，不阻断当前账号的核实
+          }
+        })) throw new Error('此主页或小红书号已登记为另一个对标账号');
+        const next = { ...item };
+        if (!next.url) next.url = url;
+        if (!next.xhsId && xhsId) next.xhsId = xhsId;
+        if (followers) {
+          next.observedFollowers = followers; // 与用户手填值分开保留，避免把旧值误当成核实数据
+          if (!next.followers || next.followers === '待核实') next.followers = followers;
+        }
+        next.profileName = profileName;
+        if (entry.source !== undefined) {
+          if (entry.source !== 'profile-visible') throw new Error('核实来源不合法');
+          next.verificationSource = { kind: 'profile-visible', url, fields: followers ? ['profileName', 'xhsId', 'followers'] : ['profileName', 'xhsId'] };
+        }
+        next.verifiedAt = observedAt;
+        next.updatedAt = now();
+        Object.assign(item, next);
+        save();
+        result.verified++;
+      }
+    } catch (err) {
+      reason = err.message;
+      result.rejected++;
+    }
+    if (!reason && stage === 'observation') recordCollectionObservation(accountId, entry.id);
+    if (!reason && ['candidate', 'verified'].includes(stage)) enqueueCollection(accountId, [entry.id]);
+    // 已处理的文件移走；崩溃发生在写入列表之后、移走之前时，重放也是幂等的。
+    const destination = path.join(root, reason ? 'rejected' : 'applied');
+    ensureDir(destination);
+    const target = path.join(destination, `${Date.now()}-${crypto.randomBytes(3).toString('hex')}-${name}`);
+    fs.renameSync(source, target);
+    if (reason) fs.writeFileSync(`${target}.reason.txt`, reason);
+  }
+  return result;
+}
+
+export function benchmarkCheckpointIssues(accountId) {
+  const dir = checkpointDir(accountId);
+  const pending = path.join(dir, 'pending');
+  const rejected = path.join(dir, 'rejected');
+  return {
+    incomplete: fs.existsSync(pending) ? fs.readdirSync(pending).filter((f) => f.endsWith('.json')).length : 0,
+    rejected: fs.existsSync(rejected) ? fs.readdirSync(rejected).filter((f) => f.endsWith('.json')).length : 0,
+  };
+}
+
 export function listBenchmarks(accountId) {
+  reconcileBenchmarkCheckpoints(accountId);
+  const index = readableBenchIndex(accountId);
   const dir = path.join(accRoot(accountId), 'benchmarks');
-  return readItems(benchIndex(accountId), 'b_').map((b) => ({
-    ...b,
-    hasReport: fs.existsSync(path.join(dir, b.id, 'report.md')),
-    noteCount: readJson(path.join(dir, b.id, 'notes.json'), []).length || 0,
-  }));
+  return readItems(index, 'b_').map((b) => {
+    const { snapshot, issue } = readObservation(accountId, b);
+    return { ...b, avatar: benchmarkAvatar(accountId, b, snapshot),
+      observation: snapshot ? { state: snapshot.state, observedAt: snapshot.observedAt,
+        source: snapshot.source, noteCount: snapshot.notes.length, profile: snapshot.profile, reason: snapshot.reason } : null,
+      observationIssue: issue,
+      hasReport: fs.existsSync(path.join(dir, b.id, 'report.md')),
+      noteCount: readJson(path.join(dir, b.id, 'notes.json'), []).length || 0 };
+  });
 }
 
 export function saveBenchmark(accountId, input) {
   if (!input.id && !String(input.name || '').trim()) throw httpError(400, '请填写对标账号名称');
-  const item = upsertItem(benchIndex(accountId), 'b_', { status: 'pending', ...input }, BENCH_FIELDS);
+  const index = readableBenchIndex(accountId);
+  if (input.id && !readItems(index, 'b_').some((b) => b.id === input.id)) {
+    throw httpError(404, '对标账号不存在');
+  }
+  const item = upsertItem(index, 'b_', input.id ? input : { status: 'pending', ...input }, BENCH_FIELDS);
   ensureDir(path.join(accRoot(accountId), 'benchmarks', item.id, 'screenshots'));
   return item;
 }
@@ -141,12 +313,24 @@ export function benchmarkDetail(accountId, id) {
     /* 尚未拆解 */
   }
   const notes = readJson(path.join(dir, 'notes.json'), []);
+  const observed = readObservation(accountId, item);
   return {
     item,
+    observation: observed.snapshot, observationIssue: observed.issue,
     report,
     notes: Array.isArray(notes) ? notes : notes.items || [],
     screenshots: listFiles(path.join(dir, 'screenshots'), IMAGE_EXTS).map((f) => `benchmarks/${id}/screenshots/${f}`),
   };
+}
+
+export function uploadBenchmarkAvatar(accountId, id, filename, dataBase64) {
+  benchmarkDetail(accountId, id); // 不允许给不存在或已删除的对标账号添加头像
+  return saveManualAvatar(accountId, id, filename, dataBase64);
+}
+
+export function stageBenchmarkAvatar(accountId, id, buffer) {
+  benchmarkDetail(accountId, id);
+  return stageCapturedAvatar(accountId, id, buffer);
 }
 
 export function uploadBenchmarkShot(accountId, id, filename, dataBase64) {
@@ -157,7 +341,16 @@ export function uploadBenchmarkShot(accountId, id, filename, dataBase64) {
 
 export function deleteBenchmark(accountId, id) {
   checkId(id);
-  const b = removeItem(benchIndex(accountId), 'b_', id, 'benchmarks', { account: accountId });
+  const index = readableBenchIndex(accountId);
+  if (!readItems(index, 'b_').some((b) => b.id === id)) throw httpError(404, '对标账号不存在');
+  // 先记录墓碑，再移走条目；即使删除中途退出，旧检查点也不能把账号重新加回来。
+  const file = path.join(checkpointDir(accountId), 'deleted.json');
+  const data = readJson(file, fs.existsSync(file) ? null : { ids: [] });
+  if (!data || !Array.isArray(data.ids)) throw httpError(500, '对标删除记录无法读取，请先检查备份');
+  const ids = new Set(data.ids);
+  ids.add(id);
+  writeJson(file, { ids: [...ids] });
+  const b = removeItem(index, 'b_', id, 'benchmarks', { account: accountId });
   const dir = path.join(accRoot(accountId), 'benchmarks', id);
   if (fs.existsSync(dir)) moveToTrash(dir, 'benchmarks', { account: accountId, label: `对标拆解资料：${b.name}` });
 }
@@ -165,18 +358,20 @@ export function deleteBenchmark(accountId, id) {
 /** 用户看过追踪结果：清掉新笔记提醒（agent 下次检查再发现新笔记时会重新写上） */
 export function markBenchmarkSeen(accountId, id) {
   checkId(id);
-  const items = readItems(benchIndex(accountId), 'b_');
+  const index = readableBenchIndex(accountId);
+  const items = readItems(index, 'b_');
   const item = items.find((b) => b.id === id);
   if (!item) throw httpError(404, '对标账号不存在');
   item.newCount = 0;
   delete item.radarNote;
-  writeJson(benchIndex(accountId), { items });
+  const data = readJson(index, { items: [] });
+  writeJson(index, Array.isArray(data) ? { items } : { ...data, items });
   return item;
 }
 
 // ---------- 选题 ----------
 
-const TOPIC_FIELDS = ['title', 'angle', 'keywords', 'source', 'sourceRef', 'scores', 'score', 'status', 'reason', 'noteId'];
+const TOPIC_FIELDS = ['title', 'angle', 'keywords', 'source', 'sourceRef', 'scores', 'score', 'status', 'reason', 'noteId', 'sources', 'basis', 'generationId', 'reviewId', 'reviewIndex', 'evidence'];
 
 function topicsFile(accountId) {
   return path.join(accRoot(accountId), 'topics', 'topics.json');
@@ -188,7 +383,7 @@ export function listTopics(accountId) {
 
 export function saveTopic(accountId, input) {
   if (!input.id && !String(input.title || '').trim()) throw httpError(400, '请填写选题');
-  return upsertItem(topicsFile(accountId), 't_', { status: 'idea', source: '手动添加', ...input }, TOPIC_FIELDS);
+  return upsertItem(topicsFile(accountId), 't_', { ...(!input.id ? { status: 'idea', source: '手动添加' } : {}), ...input }, TOPIC_FIELDS);
 }
 
 export function deleteTopic(accountId, id) {
@@ -197,7 +392,7 @@ export function deleteTopic(accountId, id) {
 
 // ---------- 笔记（文案 + 封面） ----------
 
-const NOTE_FIELDS = ['title', 'titleOptions', 'tags', 'topicId', 'status', 'cover', 'coverOptions', 'publishedUrl', 'publishedAt', 'visibility', 'coverMode'];
+const NOTE_FIELDS = ['title', 'titleOptions', 'tags', 'topicId', 'status', 'cover', 'coverOptions', 'publishedUrl', 'publishedAt', 'visibility', 'coverMode', 'sources', 'basis'];
 
 function noteDir(accountId, id) {
   return path.join(accRoot(accountId), 'notes', checkId(id));
@@ -484,6 +679,12 @@ export function noteBundle(accountId, id) {
 }
 
 export function saveNote(accountId, input) {
+  if (!input.id && input.topicId) {
+    const topic = listTopics(accountId).find(t => t.id === input.topicId);
+    if (!topic) throw httpError(404, '选题不存在');
+    const existing = listNotes(accountId).find(n => n.id === topic.noteId || n.topicId === topic.id);
+    if (existing) return noteDetail(accountId, existing.id);
+  }
   const id = input.id ? checkId(input.id) : newId('n_');
   const dir = noteDir(accountId, id);
   const prev = readJson(path.join(dir, 'meta.json'), null);
@@ -510,6 +711,12 @@ export function saveCoverImage(accountId, id, dataBase64, hash) {
   if (!fs.existsSync(path.join(dir, 'meta.json'))) throw httpError(404, '笔记不存在');
   const buf = Buffer.from(String(dataBase64 || '').replace(/^data:[^,]+,/, ''), 'base64');
   if (!buf.length) throw httpError(400, '封面为空');
+  const current = readNote(dir);
+  if (current.coverHash !== String(hash || '')) throw httpError(409, '封面方案已修改，请重新渲染');
+  if (current.hasCover && !fs.readFileSync(path.join(dir, 'cover.png')).equals(buf)) {
+    const backup = path.join(dir, 'cover-backups');ensureDir(backup);
+    fs.copyFileSync(path.join(dir, 'cover.png'), path.join(backup, newId('cover_')+'.png'));
+  }
   fs.writeFileSync(path.join(dir, 'cover.png'), buf);
   fs.writeFileSync(path.join(dir, '.cover-hash'), String(hash || ''));
   return { ok: true };

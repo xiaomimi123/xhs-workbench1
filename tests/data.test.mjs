@@ -17,6 +17,7 @@ test('初始化：知识库模板按 manifest 复制成中文路径', () => {
   assert.ok(docs.some((d) => d.path === '账号定位/账号定位模板.md'));
   assert.ok(folders.includes('爆款方法论'));
   assert.ok(fs.existsSync(path.join(WS, 'accounts', ACC, 'notes')));
+  assert.ok(fs.existsSync(path.join(WS, 'accounts', ACC, 'benchmarks', 'checkpoints', 'pending')));
 });
 
 test('知识库读写、路径越界防护', () => {
@@ -91,6 +92,7 @@ test('对标账号：保存、详情、删除连同资料进回收站', () => {
   assert.equal(content.benchmarkDetail(ACC, b.id).item.status, 'pending');
   content.deleteBenchmark(ACC, b.id);
   assert.equal(content.listBenchmarks(ACC).length, 0);
+  assert.throws(() => content.saveBenchmark(ACC, { id: b.id, tracking: true }), /不存在/);
   assert.ok(store.listTrash().some((e) => e.label.includes('对标拆解资料')));
 });
 
@@ -179,4 +181,103 @@ test('视频笔记：图文转视频再转回，配图顺序保留', () => {
 
 test('账号不存在时拒绝访问', () => {
   assert.throws(() => content.listNotes('nope'), /账号不存在/);
+});
+
+test('对标检查点：候选逐条落盘、已核实字段合并，重复回放不重复建号', () => {
+  const dir = path.join(WS, 'accounts', ACC, 'benchmarks', 'checkpoints', 'pending');
+  fs.mkdirSync(dir, { recursive: true });
+  const write = (id, stage, fields) => fs.writeFileSync(path.join(dir, `${id}.${stage}.json`), JSON.stringify({ id, stage, ...fields }));
+  const indexPath = path.join(WS, 'accounts', ACC, 'benchmarks', 'index.json');
+  const previous = store.readJson(indexPath, { items: [] });
+  store.writeJson(indexPath, { ...previous, customMarker: '保留顶层元数据' });
+  write('b_checkpoint_a', 'candidate', { name: '待核实号', remark: '只知道候选方向' });
+  let list = content.listBenchmarks(ACC);
+  let item = list.find((b) => b.id === 'b_checkpoint_a');
+  assert.equal(item.name, '待核实号');
+  assert.equal(item.status, 'pending');
+  assert.equal(item.verifiedAt, undefined);
+  assert.equal(item.url, undefined);
+
+  content.saveBenchmark(ACC, { id: item.id, remark: '用户改过备注', followers: '777', status: 'analyzed' });
+  content.saveBenchmark(ACC, { id: item.id, tracking: true });
+  write('b_checkpoint_a', 'verified', {
+    url: 'https://www.xiaohongshu.com/user/profile/123abc', profileName: '主页昵称',
+    followers: '1.2万', xhsId: 'demo123', observedAt: '2026-10-17T05:00:00.000Z',
+  });
+  item = content.listBenchmarks(ACC).find((b) => b.id === 'b_checkpoint_a');
+  assert.equal(item.status, 'analyzed');
+  assert.equal(item.remark, '用户改过备注');
+  assert.equal(item.tracking, true);
+  assert.equal(item.url, 'https://www.xiaohongshu.com/user/profile/123abc');
+  assert.equal(item.profileName, '主页昵称');
+  assert.equal(item.followers, '777'); // 手填粉丝数不能被核实检查点悄悄覆盖
+  assert.equal(item.observedFollowers, '1.2万'); // 仍要保存页面实际看到的数值
+  assert.equal(item.verifiedAt, '2026-10-17T05:00:00.000Z');
+  assert.equal(store.readJson(indexPath, {}).customMarker, '保留顶层元数据');
+  assert.equal(fs.readdirSync(dir).length, 0);
+
+  write('b_checkpoint_a', 'candidate', { name: '待核实号' });
+  list = content.listBenchmarks(ACC);
+  assert.equal(list.filter((b) => b.id === 'b_checkpoint_a').length, 1);
+});
+
+test('对标检查点：未写完、身份冲突和删除后残留文件不污染列表', () => {
+  const root = path.join(WS, 'accounts', ACC, 'benchmarks', 'checkpoints');
+  const dir = path.join(root, 'pending');
+  const bad = path.join(dir, 'b_incomplete.candidate.json');
+  fs.writeFileSync(bad, '{"stage": "candidate",');
+  assert.ok(!content.listBenchmarks(ACC).some((b) => b.id === 'b_incomplete'));
+  assert.equal(content.benchmarkCheckpointIssues(ACC).incomplete, 1);
+  fs.rmSync(bad);
+
+  const conflict = { id: 'b_checkpoint_a', stage: 'verified', url: 'https://www.xiaohongshu.com/user/profile/other',
+    profileName: '别的账号', observedAt: '2026-10-17T05:10:00.000Z' };
+  fs.writeFileSync(path.join(dir, 'b_checkpoint_a.verified.json'), JSON.stringify(conflict));
+  assert.equal(content.listBenchmarks(ACC).find((b) => b.id === conflict.id).url,
+    'https://www.xiaohongshu.com/user/profile/123abc');
+  assert.ok(content.benchmarkCheckpointIssues(ACC).rejected >= 1);
+  assert.ok(fs.readdirSync(path.join(root, 'rejected')).some((f) => f.endsWith('.reason.txt')));
+  fs.writeFileSync(path.join(dir, 'b_checkpoint_a.verified.json'), JSON.stringify({
+    ...conflict, url: 'https://example.com/user/profile/other',
+  }));
+  content.listBenchmarks(ACC);
+  assert.ok(content.benchmarkCheckpointIssues(ACC).rejected >= 2); // 不接受伪装成主页的其他域名
+
+  content.deleteBenchmark(ACC, 'b_checkpoint_a');
+  fs.writeFileSync(path.join(dir, 'b_checkpoint_a.candidate.json'), JSON.stringify({
+    stage: 'candidate', id: 'b_checkpoint_a', name: '待核实号',
+  }));
+  assert.ok(!content.listBenchmarks(ACC).some((b) => b.id === 'b_checkpoint_a'));
+  assert.ok(content.benchmarkCheckpointIssues(ACC).rejected >= 3);
+
+  const trashed = store.listTrash().find((x) => x.kind === 'item' && x.label === '对标账号：待核实号');
+  store.restoreTrash(trashed.id);
+  fs.writeFileSync(path.join(dir, 'b_checkpoint_a.verified.json'), JSON.stringify({
+    id: 'b_checkpoint_a', stage: 'verified', url: 'https://www.xiaohongshu.com/user/profile/123abc',
+    profileName: '主页昵称', observedAt: '2026-10-17T05:00:00.000Z',
+  }));
+  assert.ok(content.listBenchmarks(ACC).find((b) => b.id === 'b_checkpoint_a').verifiedAt);
+  assert.ok(!fs.existsSync(path.join(dir, 'b_checkpoint_a.verified.json')));
+});
+
+test('对标检查点：不同账号隔离，损坏的旧列表不能被空数据覆盖', () => {
+  const other = store.saveAccount({ name: '测试账号 B' });
+  const dir = path.join(WS, 'accounts', other.id, 'benchmarks', 'checkpoints', 'pending');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'b_isolated.candidate.json'), JSON.stringify({
+    stage: 'candidate', id: 'b_isolated', name: '只属于 B',
+  }));
+  assert.ok(!content.listBenchmarks(ACC).some((b) => b.id === 'b_isolated'));
+  assert.ok(content.listBenchmarks(other.id).some((b) => b.id === 'b_isolated'));
+  const index = path.join(WS, 'accounts', other.id, 'benchmarks', 'index.json');
+  const saved = fs.readFileSync(index, 'utf8');
+  fs.writeFileSync(index, '{ incomplete');
+  fs.writeFileSync(path.join(dir, 'b_should_wait.candidate.json'), JSON.stringify({
+    stage: 'candidate', id: 'b_should_wait', name: '不应覆盖',
+  }));
+  assert.equal(content.reconcileBenchmarkCheckpoints(other.id).candidates, 0);
+  assert.equal(fs.readFileSync(index, 'utf8'), '{ incomplete');
+  assert.throws(() => content.listBenchmarks(other.id), /无法读取/);
+  fs.writeFileSync(index, saved);
+  assert.ok(content.listBenchmarks(other.id).some((b) => b.id === 'b_should_wait'));
 });

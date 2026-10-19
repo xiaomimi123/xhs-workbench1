@@ -9,7 +9,9 @@
 //   node scripts/workbench.mjs status                        查看运行与连接状态
 //   node scripts/workbench.mjs stop                          停止工作台
 //   node scripts/workbench.mjs browser-setup [--engine playwright|chrome] [--headless] [--yes]
-//                                                            让 CLI 模式的 agent 能控制浏览器（自动发布 / 抓评论 / 抓数据需要）
+//                                                            为 CLI agent 配置浏览器控制
+//   node scripts/workbench.mjs browser-worker-setup [--yes]  安装可选的后台有头读取组件
+//   node scripts/workbench.mjs browser-worker-status        检查后台读取组件
 //   node scripts/workbench.mjs autostart on|off|status            登录电脑后自动运行工作台
 //   node scripts/workbench.mjs backup                            立即备份数据
 //   node scripts/workbench.mjs restore <备份文件> --yes           从备份恢复（当前数据先移入回收站）
@@ -23,7 +25,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { P, SKILL_DIR, WORKSPACE } from '../server/paths.mjs';
-import { ensureWorkspace, readJson, saveBridgeConfig, getBridgeConfig } from '../server/store.mjs';
+import { ensureWorkspace, readJson, writeJson, saveBridgeConfig, getBridgeConfig } from '../server/store.mjs';
 import { ADAPTERS } from '../server/adapters.mjs';
 import { detectAdapters, pingAdapter } from '../server/bridge.mjs';
 import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
@@ -108,6 +110,10 @@ function openBrowser(url) {
   spawn(bin, args, { detached: true, stdio: 'ignore', shell: process.platform === 'win32' }).unref();
 }
 
+function storeWorkerSetting(enabled) {
+  writeJson(P.settings, { ...readJson(P.settings, {}), backgroundBrowser: enabled });
+}
+
 // ---------- 命令 ----------
 
 const commands = {
@@ -154,6 +160,10 @@ const commands = {
       let adapter = chosen;
       if (prev.browser && prev.adapter && prev.adapter.id === chosen.id && (prev.browser === 'chrome' || prev.adapter.playwrightMcp)) {
         adapter = applyBrowser(chosen, prev.browser, prev.adapter.playwrightMcp);
+        if (prev.browser === 'playwright') {
+          adapter.browserChannel = prev.adapter.browserChannel;
+          adapter.headless = !!prev.adapter.headless;
+        }
         console.log('已保留之前的浏览器控制设置。');
       }
       saveBridgeConfig({ ...prev, mode: 'cli', adapter, browser: adapter === chosen ? null : prev.browser, testedAt: new Date().toISOString(), results });
@@ -221,6 +231,7 @@ const commands = {
     if (alive) {
       const { status } = await api('GET', '/api/bridge');
       if (status.mode === 'inbox') console.log(`值守 agent：${status.inboxOnline ? '在线' : '离线'}，待领取任务 ${status.pending} 条`);
+      else console.log(`进行中任务：${status.running}，待处理任务：${status.pending}`);
     }
   },
 
@@ -238,6 +249,7 @@ const commands = {
   async 'browser-setup'() {
     const cfg = getBridgeConfig();
     if (!cfg) fail('请先运行 bridge-test 完成连接设置');
+    if (readJson(P.settings, {}).backgroundBrowser) fail('请先在设置页关闭后台有头读取，再修改 agent 浏览器配置');
     const engine = flags.engine === 'chrome' ? 'chrome' : 'playwright';
     if (cfg.mode !== 'cli' || !cfg.adapter || cfg.adapter.id !== 'claude-code') {
       console.log('当前不是 Claude Code 的 CLI 模式，无法自动配置。');
@@ -253,7 +265,7 @@ const commands = {
       const version = v.status === 0 ? v.stdout.trim() : '';
       if (!/^\d+\.\d+\.\d+/.test(version)) fail('无法查询 @playwright/mcp 版本，请确认已安装 Node.js 并能访问 npm');
       pkg = `@playwright/mcp@${version}`;
-      // 浏览器选择：--browser msedge|chrome 用系统真实浏览器（指纹与真人无差，封号风险最低），默认自动探测
+      // 浏览器选择：--browser msedge|chrome 用系统真实浏览器（仍有平台风控风险），默认自动探测
       const { detectRealBrowser } = await import('../server/browser.mjs');
       const real = flags.browser ? (['msedge', 'chrome', 'chromium'].includes(flags.browser) ? flags.browser : null) : detectRealBrowser() || 'chromium';
       if (!real) fail('--browser 只支持 msedge / chrome / chromium');
@@ -280,13 +292,33 @@ const commands = {
       console.log(`失败：${r.error}`);
       fail('浏览器配置未生效，原配置保持不变');
     }
-    if (flags.headless && engine === 'playwright') adapter.headless = true;
+    if (engine === 'playwright') adapter.headless = !!flags.headless;
     if (adapterBrowserChannel && engine === 'playwright') adapter.browserChannel = adapterBrowserChannel;
     saveBridgeConfig({ ...cfg, adapter, browser: engine, testedAt: new Date().toISOString() });
     const migrated = migrateLegacyProfile();
     if (migrated) console.log(`已把旧的浏览器登录资料迁移到账号 ${migrated} 名下。`);
     console.log(`通过（${(r.ms / 1000).toFixed(1)} 秒）`);
     console.log(`RESULT: browser ${engine}`);
+  },
+
+  async 'browser-worker-status'() {
+    const { browserRuntimeStatus } = await import('../server/browser-runtime.mjs');
+    const runtime = browserRuntimeStatus();
+    const enabled = !!readJson(P.settings, {}).backgroundBrowser;
+    console.log(`后台有头采集：${enabled ? '已启用' : '未启用'}；Playwright Core ${runtime.version}：${runtime.available ? '已安装' : '未安装'}`);
+  },
+
+  async 'browser-worker-setup'() {
+    checkNode();
+    const cfg = getBridgeConfig();
+    if (cfg?.mode !== 'cli' || cfg.browser !== 'playwright' || !cfg.adapter?.playwrightMcp) fail('请先运行 browser-setup 配置有头 Playwright 浏览器');
+    if (cfg.adapter.headless) fail('当前为无头模式；后台有头采集需要先切回有头浏览器');
+    const { browserRuntimeStatus, installBrowserRuntime, PLAYWRIGHT_VERSION } = await import('../server/browser-runtime.mjs');
+    console.log(`将在本机数据目录安装可选的 playwright-core@${PLAYWRIGHT_VERSION}，复用当前账号的独立浏览器资料；不会复制登录状态，也不会自动切无头。`);
+    if (!flags.yes) return console.log('确认后加 --yes 重新运行。');
+    const runtime = browserRuntimeStatus().available ? browserRuntimeStatus() : installBrowserRuntime();
+    storeWorkerSetting(true);
+    console.log(`后台有头采集组件已安装（${runtime.version}）；刷新工作台设置页查看状态。`);
   },
 
   async autostart() {

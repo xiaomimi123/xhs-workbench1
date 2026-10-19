@@ -165,3 +165,62 @@ test('系统设置：防休眠模式可切换', async () => {
   assert.equal(r.body.keepAwake.mode, 'off');
   assert.equal(typeof r.body.autostart.enabled, 'boolean');
 });
+
+test('选题 HTTP 全流程：已有对标资料 → 来源选题 → 单份草稿，重复点击不重复建稿', async()=>{
+ const content=await server('content.mjs');const {mergeObservation}=await server('benchmark-observation.mjs');
+ const b=content.saveBenchmark('default',{name:'隔离来源',url:'https://www.xiaohongshu.com/user/profile/abcdef123',xhsId:'fixture'});
+ const index=path.join(WS,'accounts/default/benchmarks/index.json');const data=store.readJson(index,{});data.items.find(x=>x.id===b.id).verifiedAt='2026-10-17T00:00:00Z';store.writeJson(index,data);
+ mergeObservation('default',{...b,verifiedAt:'2026-10-17T00:00:00Z'},{id:b.id,stage:'observation',url:b.url,xhsId:'fixture',profileName:b.name,source:'agent-visible',state:'partial',observedAt:'2026-10-17T00:00:00Z',notes:[{url:'https://www.xiaohongshu.com/explore/abcdef123',title:'参考笔记',description:'资料内容'}]});
+ const first=await api('POST','/api/topics/generate?account=default',{benchmarkId:b.id});assert.equal(first.status,200);
+ const same=await api('POST','/api/topics/generate?account=default',{benchmarkId:b.id});assert.equal(same.body.id,first.body.id);
+ const done=await waitFor(async()=>{const d=(await api('GET','/api/topics?account=default')).body;const j=d.jobs.find(j=>j.id===first.body.id);if(j?.status==='error')throw Error(j.error);return j?.status==='done'?j:null;});
+ const topicId=done.topicIds[0];const draft=await api('POST','/api/topics/write?account=default',{topicId});
+ const again=await api('POST','/api/topics/write?account=default',{topicId});assert.equal(again.body.noteId,draft.body.noteId);
+ await waitFor(async()=>{const d=(await api('GET','/api/topics?account=default')).body;const j=d.jobs.find(j=>j.id===draft.body.id);if(j?.status==='error')throw Error(j.error);return j?.status==='done';});
+ const note=(await api('GET',`/api/notes/detail?account=default&id=${draft.body.noteId}`)).body;assert.match(note.content,/检查清单/);assert.equal(note.status,'draft');assert.equal(note.sources[0].benchmarkId,b.id);
+ const listing=(await api('GET','/api/topics?account=default')).body;assert.equal(listing.items.find(t=>t.id===topicId).basis,'observed');assert.equal(listing.items.find(t=>t.id===topicId).score,undefined);
+});
+
+test('文案 HTTP 流程：改写、标题优化、检查及报告过期',async()=>{
+ const n=(await api('POST','/api/notes?account=default',{create:true,title:'原始标题',content:'原始正文',tags:['审片']})).body;
+ for(const kind of ['rewrite','titles','check']){
+  const start=await api('POST','/api/notes/run?account=default',{noteId:n.id,kind});assert.equal(start.status,200);
+  const done=await waitFor(async()=>{const jobs=(await api('GET',`/api/notes/jobs?account=default&noteId=${n.id}`)).body.items;const j=jobs.find(x=>x.id===start.body.id);if(j?.status==='error')throw Error(j.error);return j?.status==='done'?j:null;});
+  assert.equal(done.kind,kind);
+ }
+ const fresh=(await api('GET',`/api/notes/detail?account=default&id=${n.id}`)).body;
+ assert.equal(fresh.title,'原始标题');assert.match(fresh.content,/修改后的/);assert.equal(fresh.titleOptions.length,5);assert.equal(fresh.status,'draft');
+ await api('POST','/api/notes?account=default',{id:n.id,title:'修改标题'});
+ const jobs=(await api('GET',`/api/notes/jobs?account=default&noteId=${n.id}`)).body.items;assert.equal(jobs.find(j=>j.kind==='check').stale,true);
+});
+
+test('封面 HTTP 流程：方案生成、卡片 PNG 落盘与文案保留',async()=>{
+ const note=(await api('POST','/api/notes?account=default',{create:true,title:'图片流程原稿',content:'先看目标，再写反馈。',tags:['审片']})).body;
+ const image='data:image/png;base64,'+fs.readFileSync(new URL('./fixtures/card.png',import.meta.url)).toString('base64');
+ for(const kind of ['options','cards']){
+  const started=await api('POST','/api/covers/run?account=default',{noteId:note.id,kind});assert.equal(started.status,200);
+  const j=await waitFor(async()=>{const jobs=(await api('GET',`/api/covers/jobs?account=default&noteId=${note.id}`)).body.items;const x=jobs.find(x=>x.id===started.body.id);if(x?.status==='error')throw Error(x.error);return ['done','ready'].includes(x?.status)?x:null;});
+  if(kind==='cards')for(let index=0;index<3;index++){const r=await api('POST','/api/covers/render?account=default',{id:j.id,index,spec:j.specs[index],expectedSpec:j.specHashes[index],data:image});assert.equal(r.status,200);}
+  else {const state=(await api('GET',`/api/covers/state?account=default&noteId=${note.id}`)).body;assert.equal((await api('POST','/api/covers/save?account=default',{noteId:note.id,spec:j.specs[0],expected:state.version,expectedCover:state.coverHash,data:image})).status,200);}
+ }
+ const n=(await api('GET',`/api/notes/detail?account=default&id=${note.id}`)).body;assert.equal(n.content,note.content);assert.equal(n.title,note.title);assert.equal(n.media.length,3);assert.equal(n.hasCover,true);assert.equal(n.coverStale,false);assert.equal(n.status,'draft');
+});
+test('复盘 HTTP 全流程：账号数据 → 报告 → 幂等入池 → 新稿',async()=>{
+ store.writeJson(path.join(WS,'accounts/default/analytics/notes.json'),{updatedAt:'2026-10-16T00:00:00Z',items:[{id:'a_review',title:'历史样本',metrics:{views:100,likes:2,collects:1,comments:0},url:'https://www.xiaohongshu.com/explore/abcdef123'}]});
+ const start=await api('POST','/api/analytics/review?account=default',{sourceId:'account'});assert.equal(start.status,200);
+ const report=await waitFor(async()=>{const d=(await api('GET','/api/analytics/workflow?account=default')).body;const j=d.jobs.find(j=>j.id===start.body.id);if(j?.status==='error')throw Error(j.error);return j?.status==='done'?j:null;});assert.equal(report.dataset.kind,'account');
+ const t=await api('POST','/api/analytics/review/topic?account=default',{id:report.id,index:0});assert.equal(t.status,200);assert.equal((await api('POST','/api/analytics/review/topic?account=default',{id:report.id,index:0})).body.id,t.body.id);
+ const startWrite=(await api('POST','/api/topics/write?account=default',{topicId:t.body.id})).body;
+ await waitFor(async()=>{const j=(await api('GET','/api/topics?account=default')).body.jobs.find(j=>j.id===startWrite.id);if(j?.status==='error')throw Error(j.error);return j?.status==='done';});
+ const note=(await api('GET',`/api/notes/detail?account=default&id=${startWrite.noteId}`)).body;assert.equal(note.status,'draft');assert.equal(note.sources[0].kind,'account');assert.equal(note.sources[0].reportId,report.id);
+});
+test('评论私信 HTTP：草稿编辑和本地确认撤回不写发送队列',async()=>{
+ const file=path.join(WS,'accounts/default/engage/items.json');store.writeJson(file,{items:[{id:'e_review_local',type:'dm',user:'示例读者',content:'列表预览',status:'ignored'}]});const original=fs.readFileSync(file);
+ const start=await api('POST','/api/engage/review?account=default',{itemIds:['e_review_local']});assert.equal(start.status,200);
+ const done=await waitFor(async()=>{const j=(await api('GET','/api/engage/workflow?account=default')).body.jobs.find(j=>j.id===start.body.id);if(j?.status==='error')throw Error(j.error);return j?.status==='done'?j:null;});let r=done.reviews[0];assert.equal(r.incomplete,true);
+ const payload=()=>({jobId:done.id,itemId:r.itemId,version:r.version});
+ r=(await api('POST','/api/engage/review/edit?account=default',{...payload(),draft:'请补充你想了解的问题。'})).body;
+ r=(await api('POST','/api/engage/review/confirm?account=default',payload())).body;assert.equal(r.status,'confirmed_local');assert.equal(r.nonExecuting,true);
+ r=(await api('POST','/api/engage/review/revoke?account=default',payload())).body;assert.equal(r.status,'drafted');assert.ok(fs.readFileSync(file).equals(original));
+ const cfg=(await api('GET','/api/automation?account=default')).body;assert.equal(cfg.engage.autoSend,false);
+});

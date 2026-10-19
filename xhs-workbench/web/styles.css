@@ -494,3 +494,50 @@ mark { background: #ffe58a; color: inherit; border-radius: 2px; padding: 0 1px; 
 .material-card .material-thumb { max-height: 220px; overflow: hidden; border-radius: 8px; background: var(--hover); display: grid; place-items: center; }
 .material-card .material-thumb img, .material-card .material-thumb video { width: 100%; max-height: 220px; object-fit: cover; display: block; }
 .material-note { background: var(--brand-soft); color: var(--brand); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 8px 0 0; }
+
+/* 对标账号：头像卡片与原始页面观察（和 agent 拆解数据分开展示） */
+.benchmark-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); }
+.benchmark-card { display: flex; flex-direction: column; gap: 12px; min-height: 245px; cursor: pointer; transition: border-color .15s, transform .15s; }
+.benchmark-card:hover, .benchmark-card:focus-visible { border-color: var(--brand); transform: translateY(-2px); outline: none; }
+.benchmark-card-head, .benchmark-hero-head { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.benchmark-card-title, .benchmark-hero-title { min-width: 0; }
+.benchmark-card-title h3, .benchmark-hero-title h2 { margin: 0 0 4px; overflow-wrap: anywhere; }
+.benchmark-card-title .muted { font-size: 12px; overflow-wrap: anywhere; }
+.benchmark-avatar { flex: none; width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--line); overflow: hidden; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; font-weight: 700; font-size: 16px; }
+.benchmark-avatar.large { width: 88px; height: 88px; font-size: 21px; }
+.benchmark-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.benchmark-card-status { display: flex; flex-wrap: wrap; gap: 6px; }
+.benchmark-card-stat { display: grid; gap: 5px; padding: 12px; border-radius: 9px; background: var(--hover); font-size: 12px; }
+.benchmark-card p { font-size: 12px; overflow-wrap: anywhere; }
+.benchmark-card-footer { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+.benchmark-open { margin-left: auto; font-size: 12px; color: var(--brand); font-weight: 600; }
+.benchmark-hero { display: grid; gap: 12px; }
+.benchmark-hero-head { flex-wrap: wrap; }
+.benchmark-hero-sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.benchmark-hero p { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+.benchmark-actions { margin-top: 4px; }
+.benchmark-observation h3 { font-size: 16px; }
+.benchmark-capture-warning { padding: 10px 12px; margin: 8px 0; border-radius: 8px; background: var(--hover); color: var(--warn); font-size: 13px; overflow-wrap: anywhere; }
+.benchmark-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.benchmark-metrics > div { min-width: 0; padding: 12px; border-radius: 9px; background: var(--hover); display: grid; gap: 7px; }
+.benchmark-metrics span { color: var(--muted); font-size: 12px; }
+.benchmark-metrics strong { font-size: 17px; overflow-wrap: anywhere; }
+.benchmark-bio { margin-top: 16px; font-size: 13px; }
+.benchmark-bio p { line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; margin: 7px 0 0; }
+.benchmark-note-list { display: grid; gap: 10px; }
+.benchmark-note-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+.benchmark-note-card strong { overflow-wrap: anywhere; }
+.benchmark-note-card p { margin: 9px 0 0; font-size: 12px; line-height: 1.6; }
+.benchmark-note-meta { color: var(--muted); font-size: 12px; margin-top: 9px; overflow-wrap: anywhere; }
+.benchmark-note-metrics { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 12px; margin-top: 10px; }
+@media (max-width: 760px) {
+  .benchmark-grid { grid-template-columns: 1fr; }
+  .benchmark-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .benchmark-card { min-height: 0; }
+  .benchmark-actions .btn, .benchmark-actions .upload-btn { white-space: normal; }
+}
+@media (max-width: 390px) {
+  .benchmark-metrics { grid-template-columns: 1fr 1fr; gap: 7px; }
+  .benchmark-hero-head .spacer { display: none; }
+  .benchmark-note-card .row .spacer { display: none; }
+}

@@ -3,16 +3,96 @@ import { md, esc } from '../md.js';
 import { icon } from '../icons.js';
 import { S, $, api, acc, fileUrl, toast, fmtTime, ask, readFileAsDataURL, accDirRel } from '../core.js';
 
-const V = { items: [], current: null, detail: null, tab: 'report', form: null, cfg: null, showRadar: false };
+const V = { items: [], current: null, detail: null, tab: 'observed', form: null, cfg: null, issues: null, showRadar: false };
 
 function benchDir(id) {
   return `${accDirRel()}/benchmarks/${id}/`;
 }
 
-const STATUS = { pending: ['待拆解', ''], analyzing: ['拆解中', 'warn'], analyzed: ['已拆解', 'brand'] };
+const STATUS = { pending: ['待拆解', ''], analyzing: ['拆解未完成', 'warn'], analyzed: ['已拆解', 'brand'] };
+
+function followerLabel(b) {
+  if (b.observedFollowers) {
+    const manual = b.followers && b.followers !== b.observedFollowers && b.followers !== '待核实'
+      ? ` · 手填 ${esc(b.followers)}` : '';
+    return `粉丝（页面） ${esc(b.observedFollowers)}${manual}`;
+  }
+  return b.followers && b.followers !== '待核实' ? `粉丝（未核实） ${esc(b.followers)}` : '粉丝待核实';
+}
+
+const OBS_SOURCE = { 'worker-ocr': '本地 OCR 与页面交叉核对', 'worker-visible': '后台只读采集', 'agent-visible': 'agent 页面观察', 'profile-visible': '主页身份核实' };
+
+function safeXhsUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && ['xiaohongshu.com', 'www.xiaohongshu.com'].includes(url.hostname) && !url.username && !url.password ? url.href : '';
+  } catch { return ''; }
+}
+
+function portraitHtml(b, large = false) {
+  const name = b.profileName || b.name || '';
+  const initials = [...name].slice(0, 2).join('') || '未';
+  return `<div class="benchmark-avatar${large ? ' large' : ''}">
+    ${b.avatar?.path ? `<img src="${fileUrl(b.avatar.path, b.avatar.observedAt || '')}" alt="${esc(name)}的头像" loading="lazy">`
+      : `<span aria-label="头像未采集">${esc(initials)}</span>`}
+  </div>`;
+}
+
+function observedValue(field, fallback = '未抓到') {
+  return field?.value ? `<span title="${esc(`观察于 ${fmtTime(field.observedAt)} · ${OBS_SOURCE[field.source] || '页面观察'}`)}">${esc(field.value)}</span>`
+    : `<span class="muted">${fallback}</span>`;
+}
+
+function captureLabel(b) {
+  if (!b.observation) return '主页数据待补齐';
+  const n = b.observation.noteCount || 0;
+  return `${b.observation.state === 'complete' ? '已采集' : '部分采集'} · 主页可见笔记 ${n} 篇`;
+}
+
+function evidenceHtml(evidence, label) {
+  return evidence ? `<p class="muted"><a href="${fileUrl(evidence.screenshot)}" target="_blank" rel="noopener noreferrer">${label}截图</a> · <a href="${fileUrl(evidence.ocr)}" target="_blank" rel="noopener noreferrer">识别/采集原文</a></p>` : '';
+}
+
+function noteObservationHtml(n, index) {
+  const f = n.fields || {};
+  return `<article class="benchmark-note-card">
+    <div class="row"><span class="badge">${index + 1}</span><strong>${observedValue(f.title, '标题未抓到')}</strong><div class="spacer"></div>
+      <a class="btn small" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">打开笔记</a></div>
+    ${evidenceHtml(n.evidence, '笔记')}
+    <div class="benchmark-note-meta">${observedValue(f.type, '类型未抓到')} · 发布时间 ${observedValue(f.publishedAt)} · 观察于 ${fmtTime(n.observedAt)}</div>
+    ${f.description?.value ? `<p class="muted">${esc(f.description.value)}</p>` : ''}
+    <div class="benchmark-note-metrics"><span>点赞 ${observedValue(f.likes)}</span><span>收藏 ${observedValue(f.collects)}</span><span>评论 ${observedValue(f.comments)}</span></div>
+  </article>`;
+}
+
+function observationHtml(detail) {
+  const { item: b, observation: data, observationIssue } = detail;
+  const profile = data?.profile || {};
+  const source = OBS_SOURCE[data?.source] || '页面观察';
+  const fields = [
+    ['粉丝（页面）', profile.followers || (b.observedFollowers ? { value: b.observedFollowers, observedAt: b.verifiedAt, source: 'profile-visible' } : null)],
+    ['关注', profile.following], ['获赞与收藏', profile.likesAndCollects], ['主页笔记数', profile.noteCount],
+  ];
+  return `<div class="benchmark-observation">
+    <div class="row"><h3 style="margin:0">主页可见数据</h3><div class="spacer"></div><span class="badge ${data?.state === 'complete' ? 'brand' : 'warn'}">${data ? data.state === 'complete' ? '本次采集完成' : '部分数据待补' : '尚未采集'}</span></div>
+    <p class="muted" style="margin:8px 0 14px">${data ? `${source} · 观察于 ${fmtTime(data.observedAt)}` : b.verifiedAt ? `主页身份核实于 ${fmtTime(b.verifiedAt)}；详细数据尚未采集` : '主页尚未核实'}。页面未显示的数字不会填 0。</p>
+    ${observationIssue ? `<div class="benchmark-capture-warning">${icon('warning')} ${esc(observationIssue)}</div>` : ''}
+    ${data?.state !== 'complete' && data?.reason ? `<div class="benchmark-capture-warning">${icon('warning')} ${esc(data.reason)}</div>` : ''}
+    ${evidenceHtml(data?.profileEvidence, '主页 OCR')}
+    <div class="benchmark-metrics">${fields.map(([label, value]) => `<div><span>${label}</span><strong>${observedValue(value)}</strong></div>`).join('')}</div>
+    <div class="benchmark-bio"><span class="muted">主页简介</span><p>${observedValue(profile.bio)}</p></div>
+    <div class="row" style="margin:22px 0 10px"><h3 style="margin:0">主页可见笔记</h3><span class="badge">${data?.notes?.length || 0} / 最多 5 篇</span></div>
+    <p class="muted" style="font-size:12px;margin:0 0 12px">仅显示实际打开并读到的页面字段；未能确认排序时不称“最新”。深度拆解在「拆解报告 / agent 笔记」中。</p>
+    ${data?.notes?.length ? `<div class="benchmark-note-list">${data.notes.map(noteObservationHtml).join('')}</div>`
+      : `<div class="empty">${b.url ? '尚无笔记观察。自动采集进度见列表；遇到阻塞后可整体继续。' : '先核实主页，再读取笔记数据。'}</div>`}
+  </div>`;
+}
 
 async function load() {
-  V.items = (await api('GET', `/api/benchmarks?${acc()}`)).items;
+  const listing = await api('GET', `/api/benchmarks?${acc()}`);
+  V.items = listing.items;
+  V.issues = listing.checkpointIssues;
+  V.collection = listing.collection;
   V.cfg = await api('GET', `/api/automation?${acc()}`);
   if (V.current) {
     V.detail = V.items.some((b) => b.id === V.current) ? await api('GET', `/api/benchmarks/detail?${acc(`id=${V.current}`)}`) : null;
@@ -34,7 +114,7 @@ async function markSeen(id) {
 export async function render(main, params = {}) {
   if (params.id) {
     V.current = params.id;
-    V.tab = 'report';
+    V.tab = 'observed';
     V.form = null;
     await markSeen(params.id); // 从提醒点进来 = 看过，清掉新笔记角标
   }
@@ -64,15 +144,17 @@ function draw(main) {
   const cards = V.items
     .map((b) => {
       const [label, cls] = STATUS[b.status] || STATUS.pending;
-      return `<div class="card quick-card" data-bench="${esc(b.id)}">
-        <div class="row"><h3 style="margin:0">${esc(b.name)}</h3>
-          ${b.newCount ? `<span class="badge brand">新 ${b.newCount}</span>` : ''}
+      return `<div class="card benchmark-card" data-bench="${esc(b.id)}" role="button" tabindex="0" aria-label="查看对标账号 ${esc(b.name)} 的详细数据">
+        <div class="benchmark-card-head">${portraitHtml(b)}<div class="benchmark-card-title"><h3>${esc(b.profileName || b.name)}</h3>
+          <span class="muted">${b.xhsId ? `小红书号 ${esc(b.xhsId)}` : '小红书号待核实'}</span></div>
+          ${b.newCount ? `<span class="badge brand">新 ${b.newCount}</span>` : ''}</div>
+        <div class="benchmark-card-status"><span class="badge ${b.verifiedAt ? 'brand' : 'warn'}">${b.verifiedAt ? '已核实主页' : '主页待核实'}</span>
           <span class="badge ${cls}">${label}</span></div>
-        <p class="muted" style="margin:6px 0 0">${[b.xhsId && `小红书号 ${esc(b.xhsId)}`, b.followers && `粉丝 ${esc(b.followers)}`, b.noteCount && `已采集 ${b.noteCount} 篇`].filter(Boolean).join(' · ') || '还没有数据'}</p>
-        ${b.radarNote ? `<p class="radar-note" style="margin:8px 0 0">${icon("radar")} ${esc(b.radarNote)}</p>` : b.summary ? `<p style="margin:8px 0 0">${esc(b.summary)}</p>` : b.remark ? `<p style="margin:8px 0 0" class="muted">备注：${esc(b.remark)}</p>` : ''}
-        <div class="row" style="margin-top:10px">
-          <button class="chip${b.tracking ? ' active' : ''}" data-act="${b.tracking ? 'track-off' : 'track-on'}" data-id="${esc(b.id)}">${b.tracking ? `${icon('radar')} 追踪中` : `${icon('radar')} 追踪`}</button>
-        </div>
+        <div class="benchmark-card-stat"><span>${followerLabel(b)}</span><span>${captureLabel(b)}</span></div>
+        ${b.avatar?.kind === 'manual' ? '<div class="muted" style="font-size:11px">头像：手动上传</div>' : b.avatar?.kind === 'downloaded' ? '<div class="muted" style="font-size:11px">头像：原图下载</div>' : b.avatar ? '<div class="muted" style="font-size:11px">头像：页面截图</div>' : '<div class="muted" style="font-size:11px">头像尚未采集</div>'}
+        ${b.radarNote ? `<p class="radar-note">${icon('radar')} ${esc(b.radarNote)}</p>` : b.summary && b.status === 'analyzed' ? `<p>${esc(b.summary)}</p>` : b.remark ? `<p>备注：${esc(b.remark)}</p>` : ''}
+        <div class="benchmark-card-footer"><button class="chip${b.tracking ? ' active' : ''}" data-act="${b.tracking ? 'track-off' : 'track-on'}" data-id="${esc(b.id)}">${b.tracking ? `${icon('radar')} 追踪中` : `${icon('radar')} 追踪`}</button>
+          <span class="benchmark-open">查看数据 →</span></div>
       </div>`;
     })
     .join('');
@@ -85,9 +167,18 @@ function draw(main) {
       <button class="btn" data-act="recommend">让 agent 推荐对标账号</button>
       <button class="btn primary" data-act="add">添加对标账号</button>
     </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="row"><strong>自动资料采集</strong><span>已完成 ${V.collection?.items.filter(x => x.state === 'complete').length || 0} · 待处理 ${V.collection?.items.filter(x => ['pending', 'running', 'blocked', 'partial'].includes(x.state)).length || 0}</span>
+      <button class="btn small" data-act="collect-fill">补齐缺失的已登记对标</button>
+      <button class="btn small" data-act="collect-pause">暂停队列</button><button class="btn small" data-act="collect-resume">已准备登录，整体继续</button></div>
+      <p class="muted">${esc(V.collection?.reason || '任务期间逐篇保存；登录或受限时暂停。批量补齐将打开当前账号的有头浏览器。')}</p>
+      ${(V.collection?.items || []).filter(x => ['running', 'partial', 'blocked'].includes(x.state)).map(x => `<div>${esc(V.items.find(b => b.id === x.id)?.name || x.id)}：${x.state === 'running' ? '采集中' : '未完整采集'} · 尝试 ${x.attempts} 次 ${esc(x.reason || '')}</div>`).join('')}
+    </div>
+    ${V.issues?.rejected ? `<div class="card" style="margin-bottom:12px">${icon('warning')} ${V.issues.rejected} 个对标检查点有冲突，未导入；请查看数据目录的 checkpoints/rejected/ 和原因文件。</div>` : ''}
+    ${V.issues?.incomplete ? `<div class="muted" style="margin-bottom:12px">${V.issues.incomplete} 个检查点尚未完整写入，未作为结果显示。</div>` : ''}
     ${V.showRadar && V.cfg ? radarFormHtml() : ''}
     ${V.form ? formHtml(V.form) : ''}
-    ${V.items.length ? `<div class="grid">${cards}</div>` : V.form ? '' : `<div class="card empty-card">
+    ${V.items.length ? `<div class="grid benchmark-grid">${cards}</div>` : V.form ? '' : `<div class="card empty-card">
         <p>还没有对标账号。</p>
         <p class="muted">添加一个你想学习的账号（主页链接或名字都行），或者让 agent 根据你的账号定位推荐。</p>
       </div>`}`;
@@ -117,6 +208,7 @@ function formHtml(f) {
         <label style="flex:1">小红书号<input type="text" name="xhsId" value="${esc(f.xhsId)}"></label>
         <label style="flex:1">粉丝数<input type="text" name="followers" value="${esc(f.followers)}"></label>
       </div>
+      <label>手填定位（可选，不会被页面抓取覆盖）<input type="text" name="positioning" value="${esc(f.positioning)}"></label>
       <label>备注（为什么对标它、想学什么）<textarea name="remark" rows="2">${esc(f.remark)}</textarea></label>
       <div class="row"><button class="btn primary" type="submit">保存</button><button class="btn ghost" type="button" data-act="cancel-form">取消</button></div>
     </form>
@@ -127,50 +219,55 @@ function drawDetail(main) {
   const { item: b, report, notes, screenshots } = V.detail;
   const [label, cls] = STATUS[b.status] || STATUS.pending;
   const tabs = [
+    ['observed', '主页数据'],
     ['report', '拆解报告'],
-    ['notes', `笔记数据（${notes.length}）`],
+    ['notes', `agent 笔记（${notes.length}）`],
     ['shots', `截图素材（${screenshots.length}）`],
   ];
   let body = '';
-  if (V.tab === 'report') {
+  if (V.tab === 'observed') {
+    body = observationHtml(V.detail);
+  } else if (V.tab === 'report') {
     body = report
-      ? `<div class="md">${md(report)}</div>`
-      : `<div class="empty">还没有拆解报告。点上方「让 agent 拆解」开始。<br><span class="muted">如果 agent 无法直接浏览小红书，可以先在「截图素材」里上传对方主页和爆款笔记的截图。</span></div>`;
+      ? `${b.status !== 'analyzed' ? '<div class="benchmark-capture-warning">报告文件尚未标记为已完成拆解，请勿将它当成完整分析。</div>' : ''}<div class="md">${md(report)}</div>`
+      : `<div class="empty">还没有拆解报告。先看「主页数据」，需要规律分析时再点「让 agent 拆解」。</div>`;
   } else if (V.tab === 'notes') {
     const isNew = (n) => n.firstSeenAt && Date.now() - new Date(n.firstSeenAt).getTime() < 48 * 3600_000;
     body = notes.length
-      ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>标题</th><th>类型</th><th>点赞</th><th>收藏</th><th>评论</th><th>选题类型</th><th>标题套路</th></tr></thead><tbody>
-          ${notes.map((n) => `<tr><td>${n.url ? `<a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a>` : esc(n.title)}${isNew(n) ? ' <span class="badge brand">新</span>' : ''}</td><td>${esc(n.type)}</td><td>${esc(n.likes)}</td><td>${esc(n.collects)}</td><td>${esc(n.comments)}</td><td>${esc(n.topicType)}</td><td>${esc(n.titlePattern)}</td></tr>`).join('')}
+      ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>标题</th><th>类型 / 发布时间</th><th>点赞</th><th>收藏</th><th>评论</th><th>选题类型 / 标题套路</th></tr></thead><tbody>
+          ${notes.map((n) => `<tr><td>${safeXhsUrl(n.url) ? `<a href="${esc(safeXhsUrl(n.url))}" target="_blank" rel="noopener noreferrer">${esc(n.title || '未填写')}</a>` : esc(n.title || '未填写')}${isNew(n) ? ' <span class="badge brand">新</span>' : ''}</td><td>${esc(n.type || '—')}<br>${esc(n.publishedAt || '时间未填')}</td><td>${esc(n.likes || '—')}</td><td>${esc(n.collects || '—')}</td><td>${esc(n.comments || '—')}</td><td>${esc(n.topicType || '—')}<br>${esc(n.titlePattern || '')}${n.coverText ? `<br>封面：${esc(n.coverText)}` : ''}</td></tr>`).join('')}
         </tbody></table></div>`
-      : '<div class="empty">agent 拆解时会把采集到的笔记数据存在这里。</div>';
+      : '<div class="empty">agent 还没有完成笔记拆解。这与上方「主页可见笔记」的原始观察是两种数据。</div>';
   } else {
     body = `
-      <label class="btn upload-btn">上传截图<input type="file" accept="image/*" multiple id="shot-input" hidden></label>
-      <span class="muted" style="margin-left:8px">主页、爆款笔记、评论区截图都可以，agent 会读取图片内容。</span>
-      <div class="gallery">${screenshots.map((p) => `<a href="${fileUrl(p)}" target="_blank"><img src="${fileUrl(p)}" alt=""></a>`).join('')}</div>`;
+      <label class="btn upload-btn">上传参考截图<input type="file" accept="image/*" multiple id="shot-input" hidden></label>
+      <span class="muted" style="margin-left:8px">主页、爆款笔记、评论区截图供 agent 分析；不会自动当成头像。</span>
+      <div class="gallery">${screenshots.map((p) => `<a href="${fileUrl(p)}" target="_blank" rel="noopener noreferrer"><img src="${fileUrl(p)}" alt="对标截图"></a>`).join('')}</div>`;
   }
 
   main.innerHTML = `
-    <div class="row page-head">
-      <button class="btn ghost small" data-act="back">← 全部对标账号</button>
-    </div>
-    <div class="card">
-      <div class="row">
-        <h2 style="margin:0">${esc(b.name)}</h2><span class="badge ${cls}">${label}</span>
-        ${b.analyzedAt ? `<span class="muted" style="font-size:12px">拆解于 ${fmtTime(b.analyzedAt)}</span>` : ''}
-        <div class="spacer"></div>
-        <button class="btn small" data-act="edit">编辑</button>
-        <button class="btn small ghost danger" data-act="delete">删除</button>
+    <div class="row page-head"><button class="btn ghost small" data-act="back">← 全部对标账号</button></div>
+    <div class="card benchmark-hero">
+      <div class="benchmark-hero-head">${portraitHtml(b, true)}
+        <div class="benchmark-hero-title"><div class="row"><h2>${esc(b.profileName || b.name)}</h2><span class="badge ${b.verifiedAt ? 'brand' : 'warn'}">${b.verifiedAt ? '已核实主页' : '主页待核实'}</span><span class="badge ${cls}">${label}</span></div>
+          <div class="muted">${b.xhsId ? `小红书号 ${esc(b.xhsId)}` : '小红书号待核实'}${b.profileName && b.profileName !== b.name ? ` · 登记名 ${esc(b.name)}` : ''}</div>
+          <div class="muted" style="font-size:12px">头像：${b.avatar?.kind === 'downloaded' ? '主页头像原图下载' : b.avatar?.kind === 'captured' ? '页面头像截图' : b.avatar?.kind === 'manual' ? '手动上传' : '未采集'}</div>
+        </div>
+        <div class="spacer"></div><button class="btn small" data-act="edit">编辑</button><button class="btn small ghost danger" data-act="delete">删除</button>
       </div>
-      <div class="muted" style="margin-top:6px">${[b.xhsId && `小红书号 ${esc(b.xhsId)}`, b.followers && `粉丝 ${esc(b.followers)}`, b.url && `<a href="${esc(b.url)}" target="_blank" rel="noopener">主页</a>`].filter(Boolean).join(' · ')}</div>
-      ${b.remark ? `<div style="margin-top:6px">备注：${esc(b.remark)}</div>` : ''}
-      ${b.summary ? `<div class="summary">${esc(b.summary)}</div>` : ''}
-      <div class="row" style="margin-top:12px">
-        <button class="btn primary small" data-act="analyze">${b.status === 'analyzed' ? '让 agent 重新拆解' : '让 agent 拆解'}</button>
-        <button class="btn small" data-act="check-now" ${b.tracking ? '' : 'disabled'} title="立即检查这个账号有没有新笔记">立即检查新笔记</button>
+      <div class="benchmark-hero-sub">${[followerLabel(b), safeXhsUrl(b.url) && `<a href="${esc(safeXhsUrl(b.url))}" target="_blank" rel="noopener noreferrer">打开主页</a>`, b.analyzedAt && `拆解于 ${fmtTime(b.analyzedAt)}`].filter(Boolean).join(' · ')}</div>
+      ${b.positioning ? `<p>手填定位：${esc(b.positioning)}</p>` : ''}
+      ${b.remark ? `<p class="muted">备注：${esc(b.remark)}</p>` : ''}
+      ${b.summary && b.status === 'analyzed' ? `<div class="summary">${esc(b.summary)}</div>` : ''}
+      <div class="row benchmark-actions">
+        <button class="btn primary small" data-act="verify">${b.observation ? '刷新主页与近 5 篇笔记' : '补齐头像和主页数据'}</button>
+        ${S.bridge?.browserWorker?.enabled ? '<button class="btn small ghost" data-act="verify-agent">改用 agent 采集</button>' : ''}
+        <label class="btn small upload-btn">手动上传头像<input type="file" accept="image/png,image/jpeg,image/webp" id="avatar-input" hidden></label>
+        <button class="btn small" data-act="analyze">${b.status === 'analyzed' ? '让 agent 重新拆解' : '让 agent 拆解'}</button>
+        <button class="btn small" data-act="check-now" ${b.tracking ? '' : 'disabled'} title="检查这个账号有没有新笔记">立即检查新笔记</button>
         <button class="chip${b.tracking ? ' active' : ''}" data-act="${b.tracking ? 'track-off' : 'track-on'}" data-id="${esc(b.id)}">${b.tracking ? `${icon('radar')} 追踪中` : `${icon('radar')} 追踪`}</button>
-        <button class="btn small" data-act="to-topics" ${report ? '' : 'disabled'}>根据拆解生成选题</button>
-        <button class="btn small" data-act="to-kb" ${report ? '' : 'disabled'}>沉淀到知识库</button>
+        <button class="btn small" data-act="to-topics" ${V.detail.observation?.notes?.length || report && b.status==='analyzed' ? '' : 'disabled'}>根据已采集资料生成选题</button>
+        <button class="btn small" data-act="to-kb" ${report && b.status === 'analyzed' ? '' : 'disabled'}>沉淀到知识库</button>
       </div>
     </div>
     ${V.form ? formHtml(V.form) : ''}
@@ -185,7 +282,7 @@ function bind(main) {
     if (!t) return;
     if (t.dataset.bench) {
       V.current = t.dataset.bench;
-      V.tab = 'report';
+      V.tab = 'observed';
       V.form = null;
       await markSeen(t.dataset.bench);
       await load();
@@ -198,6 +295,8 @@ function bind(main) {
     const b = V.detail && V.detail.item;
     if (t.dataset.act === 'track-on' || t.dataset.act === 'track-off') {
       const id = t.dataset.id;
+      const target = V.items.find((x) => x.id === id);
+      if (t.dataset.act === 'track-on' && !target?.url) return toast('先核实主页链接，再开启追踪');
       try {
         await api('POST', `/api/benchmarks?${acc()}`, { id, tracking: t.dataset.act === 'track-on' });
         const item = V.items.find((x) => x.id === id);
@@ -235,11 +334,22 @@ function bind(main) {
         V.current = null;
         await load();
         return draw(main);
+      case 'collect-fill':
+      case 'collect-pause':
+      case 'collect-resume':
+        await api('POST', `/api/benchmarks/collection?${acc()}`, { action: t.dataset.act.slice(8) });
+        await load(); return draw(main);
       case 'recommend':
-        return ask(`请按 playbooks/benchmark.md 的「推荐对标账号」第一步，根据我的账号定位快速给出 5-8 个候选对标账号（不开浏览器，1-2 分钟内），说明理由并登记到 ${accDirRel()}/benchmarks/index.json（status 设为 pending）。登记完问我是否要开浏览器核实数据。`, true);
+        return ask(`请按 playbooks/benchmark.md 的自动接续流程，根据我的账号定位推荐最多 5-8 个候选，每个候选立即写 ${accDirRel()}/benchmarks/checkpoints/pending/<id>.candidate.json。浏览器可用时在同一次流程核实登录和目标身份，随即保存头像元素局部 PNG、主页字段、最多五篇可见笔记的独立检查点与收尾状态。不要要求逐卡点击，不重复登记；登录、风控或能力不可用时停止并说明原因。`, true);
+      case 'verify':
+      case 'verify-agent':
+        if (t.dataset.act === 'verify' && S.bridge?.browserWorker?.enabled && S.bridge.browserWorker.available && S.bridge.browserWorker.compatible) {
+          return ask(`只读核实对标账号「${b.name}」的主页`, true, { taskKind: 'benchmark.verify', benchmarkId: b.id });
+        }
+        return ask(`请按 playbooks/benchmark.md 的「主页资料与近 5 篇笔记观察」执行，单独处理对标「${b.name}」（id：${b.id}，已登记主页：${b.url || '未提供'}）。先实时核对登录账号与目标主页身份；未核实时先写 ${accDirRel()}/benchmarks/checkpoints/pending/${b.id}.verified.json。随后用不同文件名逐条写 ${b.id}.observation-<批次8位十六进制>-<步骤0到6>.json 检查点，记录可见简介/指标与最多 5 篇笔记的真实字段；能截取头像元素时保存局部 PNG 并登记文件名。已有核实也要补齐资料，不要只复述旧粉丝数；缺失项说明原因，登录/风控按 playbooks/browser.md 停止。`, true);
       case 'analyze': {
         const shots = V.detail.screenshots.length;
-        await api('POST', `/api/benchmarks?${acc()}`, { id: b.id, status: 'analyzing' });
+        if (!b.url && !shots) return toast('先核实主页，或上传主页和笔记截图，再拆解');
         return ask(
           `请按 playbooks/benchmark.md 拆解对标账号「${b.name}」（对标 id：${b.id}，主页：${b.url || '未提供'}）。数据目录：${benchDir(b.id)}。` +
             (shots ? `我在 ${benchDir(b.id)}screenshots/ 上传了 ${shots} 张截图，请一并分析。` : ''),
@@ -247,10 +357,29 @@ function bind(main) {
         );
       }
       case 'to-topics':
-        return ask(`请读取对标账号「${b.name}」的拆解报告（${benchDir(b.id)}report.md），结合我的账号定位，按 playbooks/topics.md 生成 8 个可以借鉴的选题，写入选题池（source 填「对标拆解」，sourceRef 填 ${b.id}）。`, true);
+        try { await api('POST', `/api/topics/generate?${acc()}`, {benchmarkId:b.id}); go('topics'); } catch(err){toast(err.message);} return;
       case 'to-kb':
         return ask(`请把对标账号「${b.name}」拆解报告（${benchDir(b.id)}report.md）里可复用的规律，按 playbooks/knowledge.md 沉淀到知识库（对标拆解/ 和 爆款方法论/ 目录），完成后告诉我改动了哪些文档。`, true);
     }
+  };
+
+  main.onkeydown = (e) => {
+    if (!['Enter', ' '].includes(e.key) || !e.target.matches('.benchmark-card')) return;
+    e.preventDefault();
+    e.target.click();
+  };
+
+  const avatarInput = $('#avatar-input', main);
+  if (avatarInput) avatarInput.onchange = async () => {
+    const file = avatarInput.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) return toast('头像图片不能超过 2MB');
+    try {
+      await api('POST', `/api/benchmarks/avatar?${acc()}`, { id: V.current, filename: file.name, data: await readFileAsDataURL(file) });
+      await load();
+      draw(main);
+      toast('手动头像已保存；自动截图可在下次采集时替换显示');
+    } catch (err) { toast(err.message); }
   };
 
   const form = $('#bench-form', main);

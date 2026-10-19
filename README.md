@@ -14,7 +14,7 @@
 | M3 | 定时发布、评论私信、数据复盘 | ✅ 已完成（已在测试账号上验证抓数据、抓评论、回复评论、定时自动发布） |
 | v0.4 | 多账号分别登录、实况图与多图编辑、开机自启与防休眠、备份与回收站、知识库智能检索、自动化测试 | ✅ 已完成 |
 | v0.5 | 视频笔记、对标追踪（爆款雷达）、历史笔记导入、新手引导 | ✅ 已完成 |
-| v0.6 | 知识库管家（自动整理）、视频脚本生产、无头抓取模式 | ✅ 已完成 |
+| v0.6 | 知识库管家（自动整理）、视频脚本生产、可选无头模式、对标任务检查点 | ✅ 已完成 |
 
 ## 目录结构
 
@@ -29,7 +29,10 @@
 │   ├── m2-content-production.md  M2 内容生产模块设计
 │   ├── m3-operations.md       M3 运营自动化设计
 │   ├── v0.4-enhancements.md   v0.4 增强功能设计
-│   └── v0.5-enhancements.md   v0.5 增强功能设计
+│   ├── v0.5-enhancements.md   v0.5 增强功能设计
+│   ├── benchmark-recovery.md  对标超时检查点与恢复
+│   ├── background-browser.md   可选有头只读采集与模型路由
+│   └── benchmark-observation.md 对标卡片与主页/笔记观察
 └── xhs-workbench/             ← 分发的技能包（整个文件夹交给用户）
     ├── SKILL.md               agent 入口：安装、自检、启动、值守流程
     ├── README.md              给用户的安装与使用指南
@@ -56,7 +59,7 @@
 npm test
 ```
 
-零依赖（Node 内置 `node:test`），约 1 秒跑完。用 `tests/fixtures/fake-agent.mjs` 模拟各种 agent 输出，不会调用真实 AI。
+测试自身零依赖（Node 内置 `node:test`）；包含 HTTP 与模拟浏览器的集成测试，覆盖对标卡片的主页/笔记观察、头像文件校验及 agent 增量检查点等场景；实际用例数量以运行结果为准。假 agent 不调用真实 AI，也不读取本机登录资料。
 
 ## 打包发布
 
@@ -71,7 +74,7 @@ node tools/package.mjs
 
 ## 开发与调试
 
-需要 Node.js ≥ 18，无第三方依赖。
+需要 Node.js ≥ 18；基础服务无第三方依赖。可选后台有头只读采集需另行安装固定版本 `playwright-core@1.64.1` 到本机数据目录，默认不开启。竞品对标的头像卡片与最多 5 篇主页可见笔记见 [docs/benchmark-observation.md](docs/benchmark-observation.md)；启用的工作进程见 [docs/background-browser.md](docs/background-browser.md)。自动发布/评论、多账号与爆款雷达继续由原流程承担。
 
 ```bash
 node xhs-workbench/scripts/workbench.mjs setup
@@ -85,7 +88,7 @@ node xhs-workbench/scripts/workbench.mjs bridge-test --prefer claude-code
 node xhs-workbench/scripts/workbench.mjs start --open
 ```
 
-全部命令：`setup`、`bridge-test`、`browser-setup`、`start`、`open`、`status`、`stop`、`autostart`、`backup`、`restore`、`kb-search`、`lint`、`inbox-next`、`inbox-reply`（不带参数运行可查看说明）。
+全部命令：`setup`、`bridge-test`、`browser-setup`、`browser-worker-setup`、`browser-worker-status`、`start`、`open`、`status`、`stop`、`autostart`、`backup`、`restore`、`kb-search`、`lint`、`inbox-next`、`inbox-reply`（不带参数运行可查看说明）。
 
 ### 环境变量
 
@@ -107,7 +110,7 @@ node xhs-workbench/scripts/workbench.mjs start --open
 
 ### M2 内容生产（详见 [docs/m2-content-production.md](docs/m2-content-production.md)）
 
-- **竞品对标**：登记对标账号、上传截图，agent 拆解出报告和笔记数据，一键生成选题或沉淀到知识库
+- **竞品对标**：登记对标账号、上传截图；可选后台有头只读核实主页字段（明确字段零模型调用），agent 拆解报告和笔记数据，一键生成选题或沉淀知识库。见 [后台浏览器设计](docs/background-browser.md)
 - **选题热点**：agent 按热度 / 契合度 / 竞争空间 / 易产出打分，选题池按状态管理，一键「写成笔记」
 - **文案**：笔记编辑器，实时字数与违禁词检查，手机预览，让 agent 写稿 / 改写 / 出标题备选
 - **封面配图**：4 个 Canvas 模板 × 6 套配色实时预览；agent 写封面规格后工作台自动渲染成 PNG
@@ -118,7 +121,7 @@ node xhs-workbench/scripts/workbench.mjs start --open
 - **评论私信**：agent 抓取并起草回复，用户逐条确认后再发送（可改为自动发送），草稿实时违禁词检查
 - **数据复盘**：指标卡、趋势图、笔记排行（互动率 + 迷你趋势），agent 写复盘报告并沉淀到知识库；支持上传创作者中心导出的表格 / 截图
 - **定时调度**：本地服务内置调度器，定时发布 / 定时检查评论 / 每日抓数据，统一发到「⏰ 自动任务」会话；顶栏🔔汇总待处理事项，支持浏览器系统通知
-- **浏览器控制**：`browser-setup` 为 CLI 模式的 Claude Code 接入 Playwright MCP 或 Claude in Chrome（需用户同意）
+- **浏览器控制**：`browser-setup` 为 CLI 模式的 Claude Code 接入 Playwright MCP 或 Claude in Chrome（需用户同意）；`browser-worker-setup --yes` 可另行安装有头只读组件，同账号 MCP 任务前先释放持久资料。发布/评论仍走原 agent 流程
 
 > 定时任务需要电脑开机且工作台保持运行。
 
@@ -143,5 +146,12 @@ node xhs-workbench/scripts/workbench.mjs start --open
 
 - **知识库管家**：agent 按频率自动整理知识库（归档、合并、索引），让沉淀可持续复用
 - **视频脚本**：分镜表 + 口播 + 素材清单，agent 按选题和知识库生成，素材打包随身带走
-- **无头抓取**：浏览器抓取可切后台模式，不干扰正常使用电脑
-- **自动化测试**：46 个
+- **无头抓取**：可选后台模式；小红书抓取默认使用有头浏览器，不能保证规避风控
+- **对标超时检查点与头像卡片**：候选、已核实主页和逐篇原始观察增量落盘；列表展示真实头像或占位，详情默认显示主页字段与最多 5 篇可见笔记，报告仍独立；详见 [docs/benchmark-recovery.md](docs/benchmark-recovery.md) 和 [docs/benchmark-observation.md](docs/benchmark-observation.md)
+- **自动化测试**：对标检查点、只读 worker、模拟浏览器与 HTTP/SSE 链路等
+
+### 对标资料自动接续（P0）
+
+推荐候选/核实检查点会自动进入当前账号的持久采集队列。agent 已在浏览器采集时就地写主页与逐篇笔记检查点，服务等待任务结束后判断缺项，完整目标不会再开 worker。worker 未开启时接续 agent 浏览器；能力缺失、登录/风控或部分失败会暂停并显示原因。列表支持账号级补齐、暂停、整体继续，无需逐卡点击。身份核实与资料采集状态分开。
+
+实现与隔离验证见 [自动采集说明](docs/benchmark-auto-collection.md)。真实创作者登录与目标主页资料已部分验证；头像、笔记全流程及 Windows Edge 焦点行为尚未通过真实验收，详见自动采集说明。

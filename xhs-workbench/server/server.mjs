@@ -1,5 +1,12 @@
-// 小红书运营工作台 · 本地服务（零依赖，仅用 Node 内置模块）
+import {EngageWorkflow} from './engage-workflow.mjs';
+import {AnalyticsWorkflow} from './analytics-workflow.mjs';
+import {CoverWorkflow} from './cover-workflow.mjs';
+import {CopyWorkflow} from './copy-workflow.mjs';
+import { TopicWorkflow, topicSources } from './topic-workflow.mjs';
+import { stageDownloadedAvatar, stageVisualEvidence } from './benchmark-observation.mjs';
+// 小红书运营工作台 · 本地服务（基础功能零依赖；后台只读浏览器按需加载）
 import http from 'node:http';
+import { BenchmarkQueue, collectionStatus, observationComplete } from './benchmark-queue.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -11,6 +18,9 @@ import { buildPrompt } from './prompt.mjs';
 import * as content from './content.mjs';
 import * as ops from './automation.mjs';
 import { browserStatus, detectRealBrowser } from './browser.mjs';
+import { BrowserWorker } from './browser-worker.mjs';
+import { browserRuntimeStatus } from './browser-runtime.mjs';
+import { canonicalProfileUrl } from './browser-read.mjs';
 import { createZip } from './zip.mjs';
 import * as system from './system.mjs';
 import * as backup from './backup.mjs';
@@ -42,7 +52,87 @@ async function ensureSingleInstance() {
     /* 端口没响应，视为旧记录 */
   }
 }
-const bridge = new Bridge();
+const browserWorker = new BrowserWorker({
+  detect: () => bridge.config()?.adapter?.browserChannel || detectRealBrowser(),
+  onState: (account) => broadcast({ type: 'browser.changed', account }),
+});
+function workerInfo() {
+  const cfg = bridge.config();
+  const runtime = browserRuntimeStatus();
+  const enabled = !!store.readJson(P.settings, {}).backgroundBrowser;
+  return { enabled, available: runtime.available,
+    compatible: cfg?.mode === 'cli' && cfg.browser === 'playwright' && !!cfg.adapter?.playwrightMcp
+      && cfg.adapter?.args?.includes('{mcpConfig}') && !cfg.adapter?.headless,
+    fastModel: cfg?.adapter?.id === 'claude-code' ? store.readJson(P.settings, {}).fastReadModel || '' : '',
+    accounts: browserWorker.status() };
+}
+
+function writeVerifiedCheckpoint(task, result) {
+  // 与 agent 相同的逐条检查点合同。先落盘、立即合并，冲突保留在 rejected/，不直改 index.json。
+  const { accountId } = task;
+  const liveAccount = store.getAccount(accountId);
+  if (liveAccount?.xhsId !== task.account.xhsId) throw new Error('当前账号的小红书号在任务期间已改变，核实结果未保存；请重新核对');
+  const current = content.benchmarkDetail(accountId, task.benchmark.id).item;
+  if (['name', 'xhsId', 'url'].some((key) => (current[key] || '') !== (task.benchmark[key] || ''))) {
+    throw new Error('对标账号身份信息在任务期间已修改，核实结果未保存；请重新核对');
+  }
+  const dir = path.join(P.accountsDir, accountId, 'benchmarks', 'checkpoints', 'pending');
+  const file = path.join(dir, `${current.id}.verified.json`);
+  if (fs.existsSync(file)) throw new Error('已有未处理的核实检查点，请先处理冲突后再重试');
+  store.writeJson(file, { id: current.id, stage: 'verified', url: result.url,
+    xhsId: result.xhsId, profileName: result.profileName, followers: result.followers,
+    observedAt: result.observedAt, source: 'profile-visible' });
+  const applied = content.reconcileBenchmarkCheckpoints(accountId);
+  if (applied.verified !== 1) throw new Error('核实检查点未能合并，请检查 checkpoints/rejected/ 的原因文件');
+  broadcast({ type: 'content.changed', account: accountId, area: 'benchmarks' });
+}
+function writeObservationCheckpoint(task, result) {
+  const { accountId } = task;
+  if (store.getAccount(accountId)?.xhsId !== task.account.xhsId) throw new Error('工作台账号信息在观察期间已改变');
+  const current = content.benchmarkDetail(accountId, task.benchmark.id).item;
+  if (current.name !== task.benchmark.name || canonicalProfileUrl(current.url) !== result.url || current.xhsId !== result.xhsId) {
+    throw new Error('对标主页身份在观察期间已改变，未保存本次数据');
+  }
+  const pending = path.join(P.accountsDir, accountId, 'benchmarks', 'checkpoints', 'pending', `${current.id}.observation.json`);
+  if (fs.existsSync(pending)) throw new Error('已有尚未处理的观察检查点，请先检查冲突');
+  let avatarFile;
+  let warning = '';
+  if (result.avatarDownloaded) {
+    try { avatarFile = stageDownloadedAvatar(accountId, current.id, result.avatarDownloaded.buffer, result.avatarDownloaded.ext); }
+    catch (err) { warning = `下载头像未能保存：${err.message.slice(0, 100)}`; }
+  } else if (result.avatarPng) {
+    try { avatarFile = content.stageBenchmarkAvatar(accountId, current.id, result.avatarPng); }
+    catch (err) { warning = `头像截图未能保存：${err.message.slice(0, 100)}`; }
+  }
+  const profileEvidence = result.profileEvidence ? stageVisualEvidence(accountId, current.id, result.profileEvidence) : undefined;
+  const noteEvidence = result.noteEvidence ? stageVisualEvidence(accountId, current.id, result.noteEvidence) : undefined;
+  const reason = [result.reason, warning].filter(Boolean).join('；').slice(0, 240);
+  store.writeJson(pending, { stage: 'observation', id: current.id, url: result.url, xhsId: result.xhsId,
+    profileName: result.profileName, observedAt: result.observedAt, source: 'worker-visible',
+    state: warning && result.state === 'complete' ? 'partial' : result.state, reason,
+    ...(result.profile ? { profile: result.profile } : {}),
+    ...(result.notes ? { notes: result.notes.map(n => ({ ...n, ...(noteEvidence ? { evidence: noteEvidence } : {}) })) } : {}),
+    ...(profileEvidence ? { profileEvidence } : {}),
+    ...(result.visibleNoteUrls ? { visibleNoteUrls: result.visibleNoteUrls } : {}),
+    ...(result.discoveredCount !== undefined ? { discoveredCount: result.discoveredCount } : {}),
+    ...(result.attemptedCount !== undefined ? { attemptedCount: result.attemptedCount } : {}),
+    ...(avatarFile ? { avatarFile } : {}) });
+  const applied = content.reconcileBenchmarkCheckpoints(accountId);
+  if (applied.observations !== 1) throw new Error('观察检查点未能合并，请检查 checkpoints/rejected/ 的原因文件');
+  broadcast({ type: 'content.changed', account: accountId, area: 'benchmarks' });
+  return { warning };
+}
+
+const bridge = new Bridge({ browserWorker, onBenchmarkVerified: writeVerifiedCheckpoint, onBenchmarkObservation: writeObservationCheckpoint,
+  onBrowserPrepared: (task, result) => {
+    if (store.getAccount(task.accountId)?.xhsId !== result.xhsId) throw new Error('账号设置已变化，请重新核对登录账号');
+    const file = path.join(P.accountsDir, task.accountId, 'browser.json');
+    const previous = store.readJson(file, {});
+    store.writeJson(file, { loggedIn: true, xhsId: result.xhsId,
+      nickname: previous.xhsId === result.xhsId ? previous.nickname || '' : '', checkedAt: new Date().toISOString() });
+    broadcast({ type: 'content.changed', account: task.accountId, area: 'browser' });
+  },
+});
 
 function loadOrCreateToken() {
   try {
@@ -108,6 +198,20 @@ function startWatchers() {
 }
 startWatchers();
 
+function flushBenchmarkCheckpoints(accountId) {
+  try {
+    const saved = content.reconcileBenchmarkCheckpoints(accountId);
+    if (saved.candidates || saved.verified || saved.observations || saved.rejected) {
+      broadcast({ type: 'content.changed', account: accountId, area: 'benchmarks' });
+    }
+  } catch (err) {
+    console.error(`对标检查点合并失败（${accountId}）：${err.message}`);
+  }
+}
+
+// 服务重启后也要接续上次已写完但尚未合并的检查点。
+for (const account of store.listAccounts()) flushBenchmarkCheckpoints(account.id);
+
 // ---------- 对话会话 ----------
 
 const sessions = new Map(); // 内存缓存
@@ -143,15 +247,66 @@ function saveNow(session) {
   store.saveChat(session);
 }
 
+function normalModelKey(adapter) {
+  if (!adapter) return '';
+  const args = adapter.args || [];
+  const flag = args.indexOf('--model');
+  return flag >= 0 ? String(args[flag + 1] || '') : String(adapter.model || '');
+}
+
 function lookupTask(taskId) {
   const ref = taskIndex.get(taskId);
   if (!ref) return {};
   const session = getSession(ref.sessionId);
   const msg = session && session.messages.find((m) => m.id === ref.msgId);
-  return { session, msg };
+  return { session, msg, ref };
 }
 
+const topicWorkflow = new TopicWorkflow({
+  changed: account => { broadcast({type:'content.changed',account,area:'topics'}); broadcast({type:'content.changed',account,area:'notes'}); },
+  submit: task => {
+    const account=store.getAccount(task.accountId);
+    if(!account)throw new Error('账号不存在');
+    bridge.submit({...task, prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
+  },
+});
+topicWorkflow.recover();
+const analyticsWorkflow=new AnalyticsWorkflow({
+ changed:account=>broadcast({type:'content.changed',account,area:'analytics'}),
+ submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});},
+});
+analyticsWorkflow.recover();
+const engageWorkflow=new EngageWorkflow({
+ changed:account=>broadcast({type:'content.changed',account,area:'engage'}),
+ submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});},
+});
+engageWorkflow.recover();
+
+const copyWorkflow = new CopyWorkflow({
+  changed: account => broadcast({type:'content.changed',account,area:'notes'}),
+  submit: task => {
+    const account=store.getAccount(task.accountId);
+    if(!account)throw new Error('账号不存在');
+    bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
+  },
+});
+copyWorkflow.recover();
+const coverWorkflow = new CoverWorkflow({
+  changed: account => broadcast({type:'content.changed',account,area:'notes'}),
+  submit: task => {
+    const account=store.getAccount(task.accountId);
+    if(!account)throw new Error('账号不存在');
+    bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
+  },
+});
+coverWorkflow.recover();
+
 bridge.on('claimed', ({ taskId }) => {
+  topicWorkflow.progress(taskId, 'agent 正在处理');
+  engageWorkflow.progress(taskId);
+  analyticsWorkflow.progress(taskId);
+  copyWorkflow.progress(taskId);
+  coverWorkflow.progress(taskId);
   const { session, msg } = lookupTask(taskId);
   if (!msg) return;
   msg.status = 'running';
@@ -169,6 +324,11 @@ bridge.on('delta', ({ taskId, text }) => {
 });
 
 bridge.on('tool', ({ taskId, name, detail }) => {
+  engageWorkflow.progress(taskId);
+  analyticsWorkflow.progress(taskId);
+  copyWorkflow.progress(taskId);
+  coverWorkflow.progress(taskId);
+  topicWorkflow.progress(taskId, ({Read:'读取资料',Write:'保存生成结果',Edit:'整理生成结果',Bash:'处理任务'})[name] || 'agent 正在处理');
   const { session, msg } = lookupTask(taskId);
   if (!msg) return;
   msg.status = 'running';
@@ -178,17 +338,28 @@ bridge.on('tool', ({ taskId, name, detail }) => {
 });
 
 bridge.on('session', ({ taskId, agentSessionId }) => {
-  const { session } = lookupTask(taskId);
+  const { session, ref } = lookupTask(taskId);
   if (!session) return;
   session.agentSessionId = agentSessionId;
-  session.agentAdapterId = bridge.config()?.adapter?.id || null;
+  session.agentAdapterId = ref.adapterId;
+  session.agentAccountId = ref.accountId;
+  session.agentModelTier = 'normal';
+  session.agentModelKey = ref.modelKey;
 });
 
 bridge.on('done', ({ taskId, text, agentSessionId }) => {
+  engageWorkflow.finish(taskId);
+  analyticsWorkflow.finish(taskId);
+  topicWorkflow.finish(taskId);
+  copyWorkflow.finish(taskId);
+  coverWorkflow.finish(taskId);
   scheduler.onTaskFinished(taskId, true);
+  for (const a of store.listAccounts()) flushBenchmarkCheckpoints(a.id);
+  collectionQueue.finish(taskId, text);
   const { session, msg } = lookupTask(taskId);
   taskIndex.delete(taskId);
   if (!msg) return;
+  flushBenchmarkCheckpoints(session.accountId);
   if (text) msg.text = text;
   if (agentSessionId) session.agentSessionId = agentSessionId;
   msg.status = 'done';
@@ -198,25 +369,48 @@ bridge.on('done', ({ taskId, text, agentSessionId }) => {
 });
 
 bridge.on('error', ({ taskId, message }) => {
+  engageWorkflow.finish(taskId, message);
+  analyticsWorkflow.finish(taskId, message);
+  topicWorkflow.finish(taskId, message);
+  copyWorkflow.finish(taskId, message);
+  coverWorkflow.finish(taskId, message);
   scheduler.onTaskFinished(taskId, false, message);
+  for (const a of store.listAccounts()) flushBenchmarkCheckpoints(a.id);
+  collectionQueue.finish(taskId, message);
   const { session, msg } = lookupTask(taskId);
   taskIndex.delete(taskId);
   if (!msg) return;
+  flushBenchmarkCheckpoints(session.accountId);
+  collectionQueue.block(session.accountId, message);
   msg.status = 'error';
-  msg.error = message;
+  msg.error = /超时/.test(message) ? `${message}。已落盘的结果会保留；未写入的数据无法从浏览器记录自动恢复。` : message;
   msg.finishedAt = new Date().toISOString();
   saveNow(session);
   broadcast({ type: 'chat.done', sessionId: session.id, msg });
 });
 
-function sendChat({ sessionId, accountId, text }) {
+function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
+  const account = store.getAccount(accountId);
+  if (!account || (accountId && account.id !== accountId)) throw store.httpError(404, '账号不存在');
+  let benchmark = null;
+  if (taskKind !== undefined) {
+    if (!['benchmark.verify', 'browser.prepare'].includes(taskKind)) throw store.httpError(400, '任务类型不支持');
+    const worker = workerInfo();
+    if (!worker.enabled || !worker.available || !worker.compatible) throw store.httpError(409, '后台有头读取尚未就绪，请在设置页开启并安装组件，或使用原 agent 路径');
+    if (taskKind === 'benchmark.verify') {
+      if (!/^b_[\w-]+$/.test(benchmarkId || '')) throw store.httpError(400, '对标 id 不合法');
+      benchmark = content.benchmarkDetail(account.id, benchmarkId).item;
+      text = `只读核实对标账号「${benchmark.name}」的主页`;
+    } else text = `在可见浏览器中检查「${account.name}」的登录账号`;
+  }
   text = String(text || '').trim();
   if (!text) throw store.httpError(400, '消息不能为空');
   const cfg = bridge.config();
   if (!cfg) throw store.httpError(409, '尚未完成连接设置，请回到你的 agent 里说「运行小红书工作台连接自检」');
 
-  const account = store.getAccount(accountId);
   let session = sessionId ? getSession(sessionId) : null;
+  // 切换账号时新建对话，不能把另一个账号的历史消息带入当前提示词。
+  if (session && session.accountId !== account.id) session = null;
   if (!session) {
     session = {
       id: store.newId('chat_'),
@@ -231,6 +425,14 @@ function sendChat({ sessionId, accountId, text }) {
   }
   if (isBusy(session)) throw store.httpError(409, '上一条消息还在处理中');
   session.accountId = account.id;
+  // 只读任务没有进入 agent 的会话；下一条普通消息必须带上其结果重新构造上下文。
+  if (taskKind) {
+    session.agentSessionId = null;
+    session.agentAdapterId = null;
+    session.agentAccountId = null;
+    session.agentModelTier = null;
+    session.agentModelKey = null;
+  }
 
   const now = new Date().toISOString();
   const userMsg = { id: store.newId('m_'), role: 'user', text, createdAt: now };
@@ -238,7 +440,9 @@ function sendChat({ sessionId, accountId, text }) {
 
   // CLI 模式下能续接同一个 agent 会话时，不必重复塞历史
   const canResume =
-    cfg.mode === 'cli' && cfg.adapter.resumeArgs && session.agentSessionId && session.agentAdapterId === cfg.adapter.id;
+    !taskKind && cfg.mode === 'cli' && cfg.adapter.resumeArgs && session.agentSessionId
+    && session.agentAdapterId === cfg.adapter.id && session.agentAccountId === account.id
+    && session.agentModelTier === 'normal' && session.agentModelKey === normalModelKey(cfg.adapter);
   const prompt = buildPrompt({ session, account, text, includeHistory: !canResume });
 
   const asstMsg = {
@@ -253,9 +457,13 @@ function sendChat({ sessionId, accountId, text }) {
   saveNow(session);
 
   const taskId = asstMsg.id;
-  taskIndex.set(taskId, { sessionId: session.id, msgId: asstMsg.id });
+  taskIndex.set(taskId, { sessionId: session.id, msgId: asstMsg.id, accountId: account.id,
+    adapterId: cfg.adapter?.id || null, modelKey: normalModelKey(cfg.adapter) });
   try {
-    bridge.submit({ id: taskId, sessionId: session.id, accountId: account.id, prompt, agentSessionId: canResume ? session.agentSessionId : null });
+    bridge.submit({ id: taskId, sessionId: session.id, accountId: account.id, prompt,
+      agentSessionId: canResume ? session.agentSessionId : null, kind: taskKind,
+      account, benchmark, timeoutMs: taskKind === 'benchmark.verify' ? 180_000 : undefined,
+      fastModel: taskKind === 'benchmark.verify' ? workerInfo().fastModel : '' });
   } catch (err) {
     taskIndex.delete(taskId);
     asstMsg.status = 'error';
@@ -264,6 +472,39 @@ function sendChat({ sessionId, accountId, text }) {
   }
   return { session };
 }
+
+const collectionQueue = new BenchmarkQueue({
+  accounts: store.listAccounts,
+  detail: content.benchmarkDetail,
+  busy: (account) => bridge.activeProfiles.has(account)
+    || [...bridge.running.values(), ...bridge.tasks.values()].some(t => t.accountId === account)
+    || bridge.cliQueue.some(t => t.task.accountId === account),
+  changed: (account) => broadcast({ type: 'content.changed', account, area: 'benchmarks' }),
+  dispatch: (accountId, benchmarkId, id) => {
+    const account = store.getAccount(accountId);
+    if (!account?.xhsId) throw new Error('请先设置当前账号的小红书号并完成本人登录');
+    const benchmark = content.benchmarkDetail(accountId, benchmarkId).item;
+    const worker = workerInfo();
+    const cfg = bridge.config();
+    const useWorker = worker.enabled && worker.available && worker.compatible;
+    if (!useWorker && (!cfg?.browser || cfg.browser === 'none' || cfg.adapter?.headless
+      || cfg.mode === 'inbox' && !bridge.status().inboxOnline)) {
+      throw new Error('浏览器能力不可用或 agent 未连接；准备好有头浏览器后点击整体继续');
+    }
+    const text = `按 playbooks/benchmark.md 自动接续对标资料采集，仅处理 id=${benchmarkId}。读取已登记目标，实时核对当前登录账号与目标身份；同一次浏览器占用内保存头像元素局部 PNG、主页字段、最多五篇可见笔记。先写 verified，再逐篇写独立 observation 检查点并写收尾；不要只回复文字。已有有效笔记保留，仅补缺项。登录/风控立即停止并报告原因。`;
+    bridge.submit({ id, accountId, account, benchmark, timeoutMs: 180_000,
+      kind: useWorker ? 'benchmark.verify' : undefined,
+      prompt: buildPrompt({ session: { messages: [] }, account, text, includeHistory: false }) });
+    if (cfg?.mode === 'inbox') setTimeout(() => {
+      if (bridge.tasks.has(id)) bridge.cancel(id);
+    }, 180_000).unref();
+  },
+});
+collectionQueue.recover();
+setInterval(() => {
+  for (const account of store.listAccounts()) flushBenchmarkCheckpoints(account.id);
+  collectionQueue.tick();
+}, 1000).unref();
 
 function cancelChat(sessionId) {
   const session = getSession(sessionId);
@@ -401,13 +642,13 @@ async function handleApi(req, res, url) {
         version: VERSION,
         workspace: WORKSPACE,
         skillDir: SKILL_DIR,
-        bridge: bridge.status(),
+        bridge: { ...bridge.status(), browserWorker: workerInfo() },
         accounts: store.getAccounts(),
       });
 
     // ----- 连接 -----
     case 'GET /api/bridge':
-      return sendJson(res, 200, { status: bridge.status(), config: bridge.config() });
+      return sendJson(res, 200, { status: { ...bridge.status(), browserWorker: workerInfo() }, config: bridge.config() });
     case 'GET /api/bridge/detect':
       if (q.get('refresh')) detectedCache = null;
       return sendJson(res, 200, { adapters: detected() });
@@ -424,6 +665,8 @@ async function handleApi(req, res, url) {
       const body = await readBody(req);
       const prev = bridge.config() || {};
       if (body.mode === 'inbox') {
+        if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请稍后切换连接');
+        await bridge.closeBrowsers();
         store.saveBridgeConfig({ ...prev, mode: 'inbox', testedAt: new Date().toISOString() });
         broadcast({ type: 'bridge.changed' });
         return sendJson(res, 200, { ok: true });
@@ -434,6 +677,8 @@ async function handleApi(req, res, url) {
       const adapter = { ...base, command: found.command };
       const result = await pingAdapter(adapter);
       if (!result.ok) return sendJson(res, 200, result);
+      if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请稍后切换连接');
+      await bridge.closeBrowsers();
       store.saveBridgeConfig({ ...prev, mode: 'cli', adapter, testedAt: new Date().toISOString() });
       broadcast({ type: 'bridge.changed' });
       return sendJson(res, 200, result);
@@ -489,16 +734,40 @@ async function handleApi(req, res, url) {
       broadcast({ type: 'chats.changed' });
       return sendJson(res, 200, session);
     }
+    case 'POST /api/browser/worker': {
+      const body = await readBody(req);
+      const previous = store.readJson(P.settings, {});
+      const next = { ...previous };
+      if (body.enabled !== undefined) {
+        if (typeof body.enabled !== 'boolean') throw store.httpError(400, '启停设置不合法');
+        if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请完成或取消后切换');
+        if (body.enabled && (!workerInfo().available || !workerInfo().compatible)) throw store.httpError(409, '请先安装后台组件并配置有头 Playwright 浏览器');
+        next.backgroundBrowser = body.enabled;
+        if (!body.enabled) await bridge.closeBrowsers();
+      }
+      if (body.fastModel !== undefined) {
+        if (typeof body.fastModel !== 'string' || (body.fastModel && !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,79}$/.test(body.fastModel))) {
+          throw store.httpError(400, '快速模型名称不合法');
+        }
+        if (body.fastModel && bridge.config()?.adapter?.id !== 'claude-code') throw store.httpError(400, '当前 agent 不支持工作台指定快速模型');
+        next.fastReadModel = body.fastModel;
+      }
+      store.writeJson(P.settings, next);
+      broadcast({ type: 'bridge.changed' });
+      return sendJson(res, 200, { ...workerInfo() });
+    }
     case 'POST /api/bridge/headless': {
       const b = await readBody(req);
       const cfg = bridge.config();
       if (!cfg || cfg.mode !== 'cli' || !cfg.adapter) throw store.httpError(409, '尚未配置 CLI 连接');
+      if (b.on && workerInfo().enabled) throw store.httpError(409, '请先关闭后台有头读取，再切换到无头模式');
+      if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请稍后切换');
       cfg.adapter.headless = !!b.on;
-      // 无论是否无头，都优先用系统真实浏览器（真实二进制指纹更干净；无头也只是同一浏览器的无头版）
+      // 保留用户选择的浏览器 channel，不对风控效果作保证。
       if (!cfg.adapter.browserChannel) cfg.adapter.browserChannel = detectRealBrowser() || 'chromium';
       store.saveBridgeConfig(cfg);
       broadcast({ type: 'bridge.changed' });
-      return { ok: true, headless: !!cfg.adapter.headless };
+      return sendJson(res, 200, { ok: true, headless: !!cfg.adapter.headless });
     }
     case 'POST /api/chat/cancel':
       return sendJson(res, 200, { ok: cancelChat((await readBody(req)).sessionId) });
@@ -531,12 +800,27 @@ async function handleContentApi(route, q, req) {
   const acc = q.get('account');
   const body = () => readBody(req);
   switch (route) {
-    case 'GET /api/benchmarks':
-      return { items: content.listBenchmarks(acc) };
+    case 'GET /api/benchmarks': {
+      const items = content.listBenchmarks(acc);
+      return { items, checkpointIssues: content.benchmarkCheckpointIssues(acc), collection: collectionStatus(acc) };
+    }
+    case 'POST /api/benchmarks/collection': {
+      const { action } = await body();
+      if (!['fill', 'pause', 'resume'].includes(action)) throw store.httpError(400, '采集动作不合法');
+      const items = content.listBenchmarks(acc);
+      const ids = action === 'fill' ? items.filter(b => !observationComplete(content.benchmarkDetail(acc, b.id).observation)).map(b => b.id) : [];
+      return collectionQueue.control(acc, action, ids);
+    }
     case 'GET /api/benchmarks/detail':
       return content.benchmarkDetail(acc, q.get('id'));
     case 'POST /api/benchmarks':
       return content.saveBenchmark(acc, await body());
+    case 'POST /api/benchmarks/avatar': {
+      const b = await body();
+      const path = content.uploadBenchmarkAvatar(acc, b.id, b.filename, b.data);
+      broadcast({ type: 'content.changed', account: acc, area: 'benchmarks' });
+      return { path, kind: 'manual' };
+    }
     case 'POST /api/benchmarks/upload': {
       const b = await body();
       return { path: content.uploadBenchmarkShot(acc, b.id, b.filename, b.data) };
@@ -550,13 +834,40 @@ async function handleContentApi(route, q, req) {
     }
 
     case 'GET /api/topics':
-      return { items: content.listTopics(acc) };
+      return { items: content.listTopics(acc), jobs: topicWorkflow.jobs(acc), sources: topicSources(acc).map(({id,name,basis,notes})=>({id,name,basis,noteCount:notes.length})) };
+    case 'POST /api/topics/generate':
+      return topicWorkflow.generate(acc, await body());
+    case 'POST /api/topics/write':
+      return topicWorkflow.write(acc, await body());
+    case 'POST /api/topics/retry':
+      return topicWorkflow.retry(acc, (await body()).id);
     case 'POST /api/topics':
       return content.saveTopic(acc, await body());
     case 'DELETE /api/topics':
       content.deleteTopic(acc, q.get('id'));
       return { ok: true };
 
+    case 'GET /api/covers/state':
+      return coverWorkflow.state(acc,q.get('noteId'));
+    case 'GET /api/covers/jobs':
+      return {items:coverWorkflow.jobs(acc,q.get('noteId'))};
+    case 'POST /api/covers/run':
+      return coverWorkflow.start(acc,await body());
+    case 'POST /api/covers/retry':
+      return coverWorkflow.retry(acc,(await body()).id);
+    case 'POST /api/covers/render':
+      return coverWorkflow.renderCard(acc,await body());
+    case 'POST /api/covers/render-error': {
+      const b=await body();return coverWorkflow.renderError(acc,b.id,b.error);
+    }
+    case 'POST /api/covers/save':
+      return coverWorkflow.saveCover(acc,await body());
+    case 'GET /api/notes/jobs':
+      return {items:copyWorkflow.jobs(acc,q.get('noteId'))};
+    case 'POST /api/notes/run':
+      return copyWorkflow.start(acc,await body());
+    case 'POST /api/notes/retry':
+      return copyWorkflow.retry(acc,(await body()).id);
     case 'GET /api/notes':
       return { items: content.listNotes(acc) };
     case 'GET /api/notes/detail':
@@ -650,6 +961,8 @@ async function handleOpsApi(route, q, req) {
       return { ok: true };
     }
     case 'POST /api/backups/restore': {
+      if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务运行中，请完成或取消后恢复');
+      await bridge.closeBrowsers();
       const result = backup.restoreBackup((await body()).name);
       sessions.clear(); // 对话缓存作废，下次从恢复后的文件读取
       startWatchers();
@@ -672,6 +985,12 @@ async function handleOpsApi(route, q, req) {
     case 'POST /api/automation':
       return ops.saveAutomation(acc, await body());
 
+    case 'POST /api/schedule/check':
+      return ops.preflight(acc, (await body()).noteId, {persist:true});
+    case 'POST /api/schedule/draft':
+      return ops.scheduleDraft(acc, await body());
+    case 'POST /api/schedule/draft/cancel':
+      return ops.cancelDraft(acc, (await body()).id);
     case 'GET /api/schedule':
       return { items: ops.listSchedule(acc) };
     case 'POST /api/schedule':
@@ -682,11 +1001,31 @@ async function handleOpsApi(route, q, req) {
       ops.deleteSchedule(acc, q.get('id'));
       return { ok: true };
 
+    case 'GET /api/engage/workflow':
+      return engageWorkflow.state(acc);
+    case 'POST /api/engage/review':
+      return engageWorkflow.start(acc,await body());
+    case 'POST /api/engage/review/retry':
+      return engageWorkflow.retry(acc,(await body()).id);
+    case 'POST /api/engage/review/edit':
+      return engageWorkflow.edit(acc,await body());
+    case 'POST /api/engage/review/confirm':
+      return engageWorkflow.confirm(acc,await body());
+    case 'POST /api/engage/review/revoke':
+      return engageWorkflow.revoke(acc,await body());
     case 'GET /api/engage':
       return { items: ops.listEngage(acc) };
     case 'POST /api/engage':
       return ops.saveEngage(acc, await body());
 
+    case 'GET /api/analytics/workflow':
+      return analyticsWorkflow.state(acc);
+    case 'POST /api/analytics/review':
+      return analyticsWorkflow.start(acc,await body());
+    case 'POST /api/analytics/review/retry':
+      return analyticsWorkflow.retry(acc,(await body()).id);
+    case 'POST /api/analytics/review/topic':
+      return analyticsWorkflow.addTopic(acc,await body());
     case 'GET /api/analytics':
       return ops.getAnalytics(acc);
     case 'GET /api/analytics/report':
@@ -829,7 +1168,11 @@ store.writeJson(P.serverInfo, info);
 log(`工作台已启动 ${info.url}（pid ${process.pid}）`);
 console.log(`工作台已启动：${info.openUrl}`);
 
-function shutdown() {
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await bridge.closeBrowsers().catch((err) => log(`关闭浏览器失败：${err.message}`));
   try {
     const cur = store.readJson(P.serverInfo, null);
     if (cur && cur.pid === process.pid) fs.unlinkSync(P.serverInfo);

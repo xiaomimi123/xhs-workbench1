@@ -32,6 +32,7 @@ export function buildPrompt({ session, account, text, includeHistory }) {
     '## 规则',
     '- 用中文回复，使用 Markdown；回复会直接显示在网页对话框里，保持简洁。',
     '- 产出物（文案、拆解、知识沉淀等）写成文件存到数据目录对应位置，并在回复中写明文件路径；工作台会自动刷新显示。',
+    '- 推荐、核实或已经打开浏览器抓取对标时，按 playbooks/benchmark.md 自动接续：candidate → verified → 头像元素局部 PNG 与主页 observation → 最多五篇可见笔记逐篇 observation → 收尾；每阶段立即独立落盘，不要求用户逐卡点击。已经在当前浏览器访问时就地完成，不另开 worker 重复访问。无浏览器能力、登录或风控阻塞须说明原因，不能声称完成。',
     '- 不要删除文件；需要删除时移入数据目录下的 .trash/。',
     '- 涉及登录、验证码、支付、账号安全时停下来，请用户本人操作。',
   ];

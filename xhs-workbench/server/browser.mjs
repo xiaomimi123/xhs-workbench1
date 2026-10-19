@@ -1,6 +1,6 @@
 // 单账号浏览器资料：一份 Playwright 配置，与用户日常浏览器登录态隔离。
-// 优先用系统安装的真实浏览器（Edge / Chrome）——真实浏览器二进制的指纹和真人无差，
-// 比无头 / 内置 Chromium 的封号风险低得多；都没装时才用 Playwright 内置 Chromium。
+// 优先用系统安装的 Edge / Chrome；浏览器二进制并不能保证规避平台风控。
+// 都没装时才用 Playwright 内置 Chromium。
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -10,9 +10,21 @@ import { readJson, writeJson, ensureDir, getAccounts } from './store.mjs';
 export const PROFILES_DIR = path.join(WORKSPACE, 'browser-profiles');
 const LEGACY_PROFILE = path.join(WORKSPACE, 'browser-profile'); // v0.3 只有一份资料
 
+/** Chromium 的 SingletonLock 可能是指向不存在目标的符号链接，existsSync 会误判为无锁。 */
+export function profileHasLock(profile) {
+  try {
+    fs.lstatSync(path.join(profile, 'SingletonLock'));
+    return true;
+  } catch (err) {
+    if (err.code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
 /** 旧版单一浏览器资料迁移到默认账号名下（v0.3 只能登一个号，登的就是默认账号） */
 export function migrateLegacyProfile() {
   if (!fs.existsSync(LEGACY_PROFILE)) return null;
+  if (profileHasLock(LEGACY_PROFILE)) throw new Error('旧版浏览器资料正在被使用；请先关闭使用该资料的浏览器再迁移');
   const { defaultAccountId, accounts } = getAccounts();
   const id = defaultAccountId || (accounts[0] && accounts[0].id);
   if (!id) return null;
@@ -45,7 +57,7 @@ export function detectRealBrowser() {
   if (process.platform !== 'win32') {
     for (const bin of ['microsoft-edge', 'microsoft-edge-stable', 'google-chrome', 'google-chrome-stable']) {
       const r = spawnSync('which', [bin], { encoding: 'utf8' });
-      if (r.status === 0 && r.stdout.trim()) return name;
+      if (r.status === 0 && r.stdout.trim()) return bin.startsWith('microsoft-edge') ? 'msedge' : 'chrome';
     }
   }
   return null;

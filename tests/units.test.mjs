@@ -43,7 +43,7 @@ test('数据换算：万 / k / 千分位', () => {
   assert.equal(num('1.2万'), 12000);
   assert.equal(num('3,450'), 3450);
   assert.equal(num('2k'), 2000);
-  assert.equal(num(''), 0);
+  assert.equal(num(''), null);
   assert.equal(num(88), 88);
 });
 

@@ -162,6 +162,7 @@ function blankAccount(id, name) {
 
 function ensureAccountDirs(id) {
   for (const sub of ACCOUNT_SUBDIRS) ensureDir(path.join(accountDir(id), sub));
+  ensureDir(path.join(accountDir(id), 'benchmarks', 'checkpoints', 'pending'));
 }
 
 export function listAccounts() {

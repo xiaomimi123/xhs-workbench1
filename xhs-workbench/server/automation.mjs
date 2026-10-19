@@ -5,6 +5,8 @@ import path from 'node:path';
 import { readJson, writeJson, httpError, listAccounts } from './store.mjs';
 import { accRoot, readItems, upsertItem, removeItem, listFiles, saveUpload, noteDetail, saveNote, listBenchmarks, IMAGE_EXTS } from './content.mjs';
 
+import {preflight} from './preflight.mjs';
+export {preflight};
 const now = () => new Date().toISOString();
 const MISSED_AFTER_MS = 2 * 3600_000; // 超过计划时间 2 小时还没执行，视为错过，不再自动发布
 const STUCK_AFTER_MS = 60 * 60_000; // 自动任务运行超过 1 小时没有结果，提醒用户检查
@@ -54,7 +56,7 @@ export function saveAutomation(acc, patch) {
 
 // ---------- 发布排期 ----------
 
-const SCHEDULE_FIELDS = ['noteId', 'title', 'publishAt', 'mode', 'status', 'taskId', 'publishedUrl', 'publishedAt', 'error', 'startedAt'];
+const SCHEDULE_FIELDS = ['noteId', 'title', 'publishAt', 'mode', 'status', 'taskId', 'publishedUrl', 'publishedAt', 'error', 'startedAt', 'nonExecuting', 'timezone', 'preflight'];
 const ACTIVE = ['scheduled', 'due', 'running', 'check', 'published'];
 
 function scheduleFile(acc) {
@@ -74,7 +76,7 @@ const dayKey = (d) => {
 function checkLimits(acc, publishAt, ignoreId) {
   const { publish } = getAutomation(acc);
   const t = new Date(publishAt).getTime();
-  const others = listSchedule(acc).filter((s) => s.id !== ignoreId && ACTIVE.includes(s.status));
+  const others = listSchedule(acc).filter((s) => s.mode !== 'draft' && !s.nonExecuting && s.id !== ignoreId && ACTIVE.includes(s.status));
   const sameDay = others.filter((s) => dayKey(s.publishedAt || s.publishAt) === dayKey(publishAt));
   if (sameDay.length >= publish.dailyLimit) throw httpError(400, `当天已安排 ${sameDay.length} 篇，达到每日上限 ${publish.dailyLimit} 篇（可在排期设置里调整）`);
   const gap = publish.minIntervalMin * 60_000;
@@ -83,6 +85,7 @@ function checkLimits(acc, publishAt, ignoreId) {
 }
 
 export function scheduleNote(acc, { noteId, publishAt, mode }) {
+  if(mode==='draft')throw httpError(400,'请使用排期草案接口');
   const note = noteDetail(acc, noteId);
   const t = new Date(publishAt);
   if (Number.isNaN(t.getTime())) throw httpError(400, '发布时间无效');
@@ -105,6 +108,7 @@ export function scheduleNote(acc, { noteId, publishAt, mode }) {
 export function updateSchedule(acc, input) {
   const item = listSchedule(acc).find((s) => s.id === input.id);
   if (!item) throw httpError(404, '排期不存在');
+  if(item.mode==='draft'||item.nonExecuting)throw httpError(400,'排期草案只能通过草案接口改期或取消');
   const patch = { id: item.id };
   if (input.publishAt && input.publishAt !== item.publishAt) {
     const t = new Date(input.publishAt);
@@ -300,6 +304,7 @@ export class Scheduler {
 
     // 1. 发布排期
     for (const s of listSchedule(acc)) {
+      if(s.mode==='draft'||s.nonExecuting)continue;
       const at = new Date(s.publishAt).getTime();
       if (s.status === 'scheduled' && at <= t) {
         if (t - at > MISSED_AFTER_MS) {
@@ -387,4 +392,24 @@ export function needsAwake() {
     }
   }
   return false;
+}
+
+export function scheduleDraft(acc,input){
+ const items=listSchedule(acc);let item=input.id?items.find(s=>s.id===input.id):null;
+ if(input.id&&(!item||item.mode!=='draft'||item.status!=='planned'))throw httpError(400,'可编辑的草案不存在');
+ const noteId=item?.noteId||input.noteId;
+ const t=new Date(input.publishAt);
+ if(!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(input.publishAt||'')||!Number.isFinite(t.getTime())||t.getTime()<=Date.now())throw httpError(400,'计划时间无效或已过期，请使用明确时区');
+ const wall=new Date(input.publishAt.slice(0,19)+'Z');
+ if(!Number.isFinite(wall.getTime())||wall.toISOString().slice(0,19)!==input.publishAt.slice(0,19))throw httpError(400,'计划时间日期无效');
+ const report=preflight(acc,noteId);
+ if(!report.ok)throw httpError(400,report.errors.join('；'));
+ if(report.fingerprint!==input.fingerprint)throw httpError(409,'内容或素材发生变化，请重新检查');
+ item ||= items.find(s=>s.noteId===noteId&&s.mode==='draft'&&s.status==='planned');
+ return upsertItem(scheduleFile(acc),'s_',{...(item?{id:item.id}:{}),noteId,title:report.title,publishAt:t.toISOString(),mode:'draft',status:'planned',nonExecuting:true,timezone:'Asia/Shanghai',preflight:report},SCHEDULE_FIELDS);
+}
+export function cancelDraft(acc,id){
+ const item=listSchedule(acc).find(s=>s.id===id&&s.mode==='draft');
+ if(!item)throw httpError(404,'草案不存在');
+ return upsertItem(scheduleFile(acc),'s_',{id,status:'cancelled'},SCHEDULE_FIELDS);
 }

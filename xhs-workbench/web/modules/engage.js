@@ -1,3 +1,4 @@
+import {renderEngageReview,reviewBusy} from '../engage-review.js';
 // 评论私信：agent 抓取新评论 / 私信并起草回复 → 用户修改确认 → agent 发送
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
@@ -16,21 +17,26 @@ const STATUS = { new: ['新消息', 'warn'], drafted: ['已起草', ''], approve
 const V = { items: [], cfg: null, filter: 'todo', type: 'all', showSettings: false, editing: new Set() };
 
 async function load() {
-  const [list, cfg] = await Promise.all([api('GET', `/api/engage?${acc()}`), api('GET', `/api/automation?${acc()}`)]);
+  const account=S.accountId,sequence=V.sequence=(V.sequence||0)+1;
+  const [list, cfg, workflow] = await Promise.all([api('GET', `/api/engage?${acc()}`), api('GET', `/api/automation?${acc()}`),api('GET', `/api/engage/workflow?${acc()}`)]);
+  if(account!==S.accountId||S.view!=='engage'||sequence!==V.sequence)return false;
+  V.workflow=workflow;
   V.items = list.items;
   V.cfg = cfg;
+  return true;
 }
 
 export async function render(main) {
+  const account=S.accountId;
   if (V.accountId !== S.accountId) {
     V.accountId = S.accountId;
     V.editing.clear();
   }
   main.innerHTML = '<div class="empty">加载中…</div>';
   try {
-    await load();
+    if(!await load())return;
   } catch (err) {
-    main.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    if(S.view==='engage'&&account===S.accountId)main.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
     return;
   }
   draw(main);
@@ -41,8 +47,9 @@ export function canLeave() {
 }
 
 export async function onContent(ev) {
+  if(reviewBusy()||document.activeElement?.closest('[data-local-draft]'))return;
   if (!['engage', 'automation'].includes(ev.area) || V.editing.size) return;
-  await load();
+  if(!await load())return;
   draw($('#main'));
 }
 
@@ -98,17 +105,20 @@ function settingsHtml() {
 }
 
 function draw(main) {
+  if(S.view!=='engage')return;
   const count = (f) => V.items.filter((e) => (f === 'all' ? true : f === 'todo' ? ['new', 'drafted', 'failed'].includes(e.status) : e.status === f)).length;
   const list = V.items.filter(matches);
   const undrafted = V.items.filter((e) => e.status === 'new' && !e.draft).length;
   const approved = count('approved');
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">${icon("chat")} 评论私信</h1><div class="muted">agent 抓取新评论和私信、按知识库口径起草回复，你确认后再发送。</div></div>
+      <div><h1 class="page-title">${icon("chat")} 评论私信</h1><div class="muted">整理历史消息，生成独立回复草稿；本地审核不发送、不修改历史状态。</div></div>
       <div class="spacer"></div>
       <button class="btn" data-act="toggle-settings">${icon("sliders")} 设置</button>
       <button class="btn" data-act="fetch">让 agent 检查新消息</button>
     </div>
+    <div id="local-reply-review" class="card" style="margin-bottom:16px"></div>
+    <details><summary>原消息与正式发送操作（独立于本地审核）</summary>
     ${V.showSettings ? settingsHtml() : ''}
     <div class="row action-bar">
       <button class="btn small" data-act="draft-all" ${undrafted ? '' : 'disabled'}>让 agent 起草 ${undrafted} 条回复</button>
@@ -123,15 +133,16 @@ function draw(main) {
     ${list.length ? `<div class="engage-list">${list.map(itemHtml).join('')}</div>` : `<div class="card empty-card">
       <p>${V.items.length ? '这个分类下没有消息。' : '还没有抓取过评论和私信。'}</p>
       <p class="muted">点「让 agent 检查新消息」，agent 会打开创作者中心读取新评论和私信（需要浏览器控制能力；没有的话可以把评论截图发给 agent）。</p>
-    </div>`}`;
+    </div>`}</details>`;
   bind(main);
+  renderEngageReview(main.querySelector('#local-reply-review'),V.workflow,async()=>{try{if(await load())draw(main);}catch(err){if(S.view==='engage')toast(err.message);}});
 }
 
 async function save(id, data) {
   try {
     await api('POST', `/api/engage?${acc()}`, { id, ...data });
     V.editing.delete(id);
-    await load();
+    if(!await load())return;
     draw($('#main'));
   } catch (err) {
     toast(err.message);
@@ -207,7 +218,7 @@ function bind(main) {
     try {
       await api('POST', `/api/automation?${acc()}`, { engage: { checkEveryHours: Number(d.checkEveryHours), autoSend: d.autoSend === 'true', maxPerRun: Number(d.maxPerRun) } });
       toast('设置已保存');
-      await load();
+      if(!await load())return;
       draw(main);
     } catch (err) {
       toast(err.message);

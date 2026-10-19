@@ -13,10 +13,11 @@ const STATUSES = [
 const STATUS_NAME = Object.fromEntries(STATUSES);
 const SCORE_NAMES = { heat: '热度', fit: '契合度', competition: '竞争空间', ease: '易产出' };
 
-const V = { items: [], filter: 'active', form: null };
+const V = { items: [], jobs: [], sources: [], filter: 'active', form: null };
 
 async function load() {
-  V.items = (await api('GET', `/api/topics?${acc()}`)).items;
+  const data=await api('GET', `/api/topics?${acc()}`);
+  V.items=data.items; V.jobs=data.jobs||[]; V.sources=data.sources||[];
 }
 
 export async function render(main) {
@@ -56,7 +57,7 @@ function topicCard(t) {
     : '';
   const keywords = Array.isArray(t.keywords) ? t.keywords : String(t.keywords || '').split(/[,，]/).filter(Boolean);
   return `<div class="card topic${t.status === 'discarded' ? ' faded' : ''}">
-    <div class="score ${scoreClass(score)}" title="综合评分">${score || '–'}</div>
+    <div class="score ${scoreClass(score)}" title="综合评分">${score || '待评估'}</div>
     <div class="topic-body">
       <div class="topic-title">${esc(t.title)}</div>
       ${t.angle ? `<div class="topic-angle">${esc(t.angle)}</div>` : ''}
@@ -65,6 +66,8 @@ function topicCard(t) {
         ${t.source ? `<span class="muted">来源：${esc(t.source)}</span>` : ''}
         ${subs}
       </div>
+      ${t.basis ? `<div class="muted">${t.basis==='review' ? '依据：复盘报告与冻结证据' : t.basis === 'analyzed' ? '依据：已完成的对标拆解' : '依据：已采集资料，尚未完成拆解'} · 实时热度未核实</div>` : ''}
+      ${Array.isArray(t.sources) ? t.sources.map(ref => { let u; try { u = new URL(ref.url); } catch { return ''; } return u.protocol === 'https:' && u.hostname === 'www.xiaohongshu.com' ? `<a href="${esc(u.href)}" target="_blank" rel="noopener noreferrer">来源：${esc(ref.benchmarkName || '对标笔记')}</a>` : ''; }).join(' · ') : ''}
       ${t.reason ? `<div class="muted topic-reason">${esc(t.reason)}</div>` : ''}
     </div>
     <div class="topic-actions">
@@ -86,18 +89,24 @@ function draw(main) {
   const list = visible();
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">${icon("flame")} 选题热点</h1><div class="muted">agent 结合热点、对标拆解和你的账号定位生成选题并打分，选中后一键写成笔记。</div></div>
+      <div><h1 class="page-title">${icon("flame")} 选题热点</h1><div class="muted">结合已采集资料与账号定位生成有来源的选题，区分资料观察与拆解结论，选中后一键写成草稿。</div></div>
       <div class="spacer"></div>
       <button class="btn" data-act="hot">让 agent 找热点选题</button>
       <button class="btn" data-act="add">手动添加</button>
     </div>
+    <div class="card row" style="margin-bottom:16px;gap:12px">
+      <label>从已采集对标生成 <select id="topic-source">${V.sources.map(b=>opt(b.id, `${b.name} · ${b.noteCount}篇 · ${b.basis==='analyzed'?'已拆解':'仅采集'}`, V.sourceId || V.sources[0]?.id)).join('')}</select></label>
+      <button class="btn primary" data-act="generate" ${V.sources.length?'':'disabled'}>生成 3 个有来源的选题</button>
+      <span class="muted">${V.sources.length?'复用本地资料，不重复抓取。未核实热度不打分。':'先采集至少一个对标账号的笔记。'}</span>
+    </div>
+    ${V.jobs.length ? `<div class="card" style="margin-bottom:16px"><h3>生成任务</h3>${V.jobs.slice(0,6).map(j=>`<div class="row" style="margin:10px 0"><span>${j.kind==='generate'?'生成选题':'写成笔记'} · ${{queued:'排队中',running:'处理中',done:'已完成',error:'未完成'}[j.status]||j.status}</span><span class="muted">${esc(j.error||j.progress||'等待 agent')}</span>${j.status==='error'?`<button class="btn small" data-retry="${esc(j.id)}">重试</button>`:''}${j.noteId?`<button class="btn small" data-open-note="${esc(j.noteId)}">打开草稿</button>`:''}</div>`).join('')}</div>`:''}
     ${V.form ? formHtml(V.form) : ''}
     <div class="chips">
       ${filters.map(([id, name]) => `<button class="chip${V.filter === id ? ' active' : ''}" data-filter="${id}">${name}${counts[id] !== undefined ? ` ${counts[id]}` : ''}</button>`).join('')}
     </div>
     ${list.length ? `<div class="topic-list">${list.map(topicCard).join('')}</div>` : `<div class="card empty-card">
       <p>${V.items.length ? '这个分类下没有选题。' : '选题池还是空的。'}</p>
-      <p class="muted">点「让 agent 找热点选题」，或者先去「竞品对标」拆解几个账号，再从拆解结果生成选题。</p>
+      <p class="muted">已有对标资料时，可在上方直接生成选题；也可以手动添加或让 agent 找热点。</p>
     </div>`}`;
   bind(main);
 }
@@ -118,23 +127,21 @@ function formHtml(f) {
 
 async function writeNote(topic) {
   try {
-    const note = await api('POST', `/api/notes?${acc()}`, { create: true, title: topic.title.slice(0, 20), topicId: topic.id });
-    go('copywriting', { id: note.id });
-    ask(
-      `请按 playbooks/copywriting.md 把选题写成一篇小红书笔记。选题：「${topic.title}」${topic.angle ? `，切入角度：${topic.angle}` : ''}（选题 id：${topic.id}）。` +
-        `笔记已建好，id：${note.id}，文件在 ${accDirRel()}/notes/${note.id}/，写好后更新 meta.json 和 content.md。`,
-      true,
-    );
-  } catch (err) {
-    toast(err.message);
-  }
+    const job=await api('POST', `/api/topics/write?${acc()}`, {topicId:topic.id});
+    if(job.status==='done')go('copywriting',{id:job.noteId});
+    else toast(job.status==='error'?'此前任务未完成，请在任务列表重试':'写稿已排队，完成后打开草稿');
+    await load(); if(S.view==='topics')draw($('#main'));
+  } catch(err){toast(err.message);}
 }
 
 function bind(main) {
   main.onclick = async (e) => {
-    const t = e.target.closest('[data-act],[data-filter],[data-write],[data-open-note],[data-edit],[data-del]');
+    const t = e.target.closest('[data-act],[data-filter],[data-write],[data-open-note],[data-edit],[data-del],[data-retry]');
     if (!t) return;
     const find = (id) => V.items.find((x) => x.id === id);
+    if (t.dataset.retry) {
+      try { await api('POST', `/api/topics/retry?${acc()}`, {id:t.dataset.retry}); await load(); draw(main); } catch(err){toast(err.message);} return;
+    }
     if (t.dataset.filter) {
       V.filter = t.dataset.filter;
       return draw(main);
@@ -153,6 +160,8 @@ function bind(main) {
       return draw(main);
     }
     switch (t.dataset.act) {
+      case 'generate':
+        try { V.sourceId=main.querySelector('#topic-source')?.value; const job=await api('POST', `/api/topics/generate?${acc()}`, {benchmarkId:V.sourceId}); toast(job.status==='done'?'这批资料已生成选题，结果已在选题池':'任务已登记，可在下方查看进度'); await load(); draw(main); } catch(err){toast(err.message);} return;
       case 'hot':
         return ask(`请按 playbooks/topics.md，结合最近的热点和我的账号定位、知识库，生成 10 个选题并打分，写入选题池（${accDirRel()}/topics/topics.json）。`, true);
       case 'add':

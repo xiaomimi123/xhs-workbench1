@@ -30,7 +30,7 @@
 ~/XHS-Workbench/
 ├── config/            accounts.json（账号）、bridge.json（连接）、settings.json
 ├── accounts/<账号id>/
-│   ├── benchmarks/    对标账号（index.json + 每个账号的 report.md / notes.json / screenshots/）
+│   ├── benchmarks/    对标账号（index.json + checkpoints/ 逐条检查点 + <对标id>/snapshot.json、头像、report.md / notes.json / screenshots/）
 │   ├── topics/        选题池 topics.json
 │   ├── notes/         笔记，每篇一个目录（meta.json + content.md + images/ + cover.png）
 │   ├── schedule.json  发布排期
@@ -45,7 +45,7 @@
 
 ## JSON 文件写入约定
 
-- 修改 JSON 时先读取原文件，只改需要的字段，保留其他字段，写回合法 JSON。
+- 修改 JSON 时先读取原文件，只改需要的字段，保留其他字段，写回合法 JSON。对标观察例外：按 `benchmark.md` 写各阶段独立检查点，由服务校验并合并 `snapshot.json`，不要直接覆盖观察文件。
 - 直接用读写文件的工具编辑，不要为此专门写脚本（无界面模式下执行命令可能被禁止）。
 - 不要删除条目和文件；用户在界面上删除时会自动移入回收站。
 
