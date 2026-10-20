@@ -14,6 +14,7 @@ import { mcpConfigFor, codexBrowserArgs } from './browser.mjs';
 
 const IS_WIN = process.platform === 'win32';
 const INBOX_ONLINE_MS = 45_000;
+const INBOX_WORKING_MS = 15 * 60_000;
 
 // ---------- 命令探测 ----------
 
@@ -253,7 +254,8 @@ export class Bridge extends EventEmitter {
       hostAgent: cfg && cfg.mode === 'inbox' && cfg.hostAgent ? { id: cfg.hostAgent.id, name: cfg.hostAgent.name } : null,
       testedAt: cfg ? cfg.testedAt : null,
       browser: cfg ? cfg.browser || null : null,
-      inboxOnline: Date.now() - this.lastPoll < INBOX_ONLINE_MS,
+      // agent 领到任务后在处理（可能几分钟不再轮询），这段时间也算在线，否则界面会误报“离线”
+      inboxOnline: Date.now() - this.lastPoll < INBOX_ONLINE_MS || inboxTasks.some((t) => t.state === 'claimed' && Date.now() - new Date(t.lastReplyAt || t.claimedAt).getTime() < INBOX_WORKING_MS),
       lastPollAt: this.lastPoll ? new Date(this.lastPoll).toISOString() : null,
       pending: inboxTasks.filter((t) => t.state === 'pending').length + this.cliQueue.length,
       running: this.running.size + inboxTasks.filter((t) => t.state === 'claimed').length,
@@ -497,6 +499,7 @@ export class Bridge extends EventEmitter {
     this.lastPoll = Date.now();
     const t = this.tasks.get(taskId);
     if (!t) return false;
+    t.lastReplyAt = new Date().toISOString();
     if (error) {
       if (t.state === 'claimed') this.activeProfiles.delete(t.accountId);
       this.tasks.delete(taskId);

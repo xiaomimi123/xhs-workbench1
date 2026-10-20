@@ -36,6 +36,7 @@ import { runDoctor, formatDoctor } from '../server/doctor.mjs';
 import { VERSION } from '../server/version.mjs';
 import { readVersionRecord, installPackage, ensureWorkspaceStamped, DATA_VERSION } from '../server/upgrade.mjs';
 import { createBackup } from '../server/backup.mjs';
+import { decodeText, writeTaskFile } from '../server/inbox-files.mjs';
 import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -479,6 +480,10 @@ const commands = {
       return;
     }
     console.log(`TASK_ID: ${task.id}`);
+    // 任务正文另存为 UTF-8（带 BOM）文件：Windows 终端/PowerShell 常按 GBK 或 UTF-16 解读输出，中文会变成乱码，以文件为准
+    const taskFile = writeTaskFile(task, { dir: path.join(P.run, 'inbox') });
+    console.log(`TASK_FILE: ${taskFile}`);
+    console.log('（任务正文是 UTF-8 中文。若下面的内容在你的终端里显示为乱码，请用读文件的工具读取 TASK_FILE，以文件为准。）');
     console.log('----- 任务内容开始 -----');
     console.log(task.prompt);
     console.log('----- 任务内容结束 -----');
@@ -489,8 +494,9 @@ const commands = {
     const taskId = flags._[0];
     if (!taskId) fail('缺少 taskId');
     let text = '';
-    if (typeof flags.file === 'string') text = fs.readFileSync(flags.file, 'utf8');
-    else if (!process.stdin.isTTY) text = fs.readFileSync(0, 'utf8');
+    // 回写正文自动识别 UTF-8 / UTF-16 / GBK（PowerShell 的重定向默认写 UTF-16，管道常是 GBK）
+    if (typeof flags.file === 'string') text = decodeText(fs.readFileSync(flags.file));
+    else if (!process.stdin.isTTY) text = decodeText(fs.readFileSync(0));
     text = text.trim();
     const error = typeof flags.error === 'string' ? flags.error : '';
     if (!text && !error && !flags.final) fail('回复内容为空');
