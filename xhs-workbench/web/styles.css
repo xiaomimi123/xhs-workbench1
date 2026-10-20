@@ -594,3 +594,15 @@ mark { background: #ffe58a; color: inherit; border-radius: 2px; padding: 0 1px; 
 .video-description-result{padding:14px;margin-top:12px;border:1px solid var(--border,#e5e5eb);border-radius:10px;min-width:0}
 .video-description-text{white-space:pre-wrap;overflow-wrap:anywhere}
 .video-description-result details{margin-bottom:12px}
+
+/* 文案编辑器：操作分组；更多菜单；图片/视频创作的折叠区 */
+.note-actions { margin-top: 12px; display: grid; gap: 8px; }
+.action-group { gap: 8px; flex-wrap: wrap; align-items: center; }
+.action-group > .muted { min-width: 5.5em; font-size: 12px; }
+.more-menu { position: relative; }
+.more-menu > summary { list-style: none; cursor: pointer; }
+.more-menu > summary::-webkit-details-marker { display: none; }
+.more-menu-body { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, .12); white-space: nowrap; }
+.creation-advanced, .video-notice { margin: 12px 0; }
+.creation-advanced > summary, .video-notice > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.warn-line { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); font-size: 13px; }

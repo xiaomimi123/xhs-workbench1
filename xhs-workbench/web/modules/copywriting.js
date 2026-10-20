@@ -169,6 +169,8 @@ function draw(main) {
           <div class="spacer"></div>
           <button class="btn small" data-act="schedule-draft">发布前检查</button><button class="btn small" data-act="preview">${V.preview ? '编辑' : '手机预览'}</button>
           <button class="btn small primary" data-act="save">保存</button>
+          <details class="more-menu"><summary class="btn small ghost" aria-label="更多操作">更多</summary>
+            <div class="more-menu-body"><button class="btn small ghost danger" data-act="delete">删除这篇笔记（移到回收站）</button></div></details>
         </div>
         ${V.preview ? previewHtml(data) : `
         <label class="field">标题
@@ -182,14 +184,14 @@ function draw(main) {
           <input type="text" id="note-tags" value="${esc(data.tags.join(' '))}">
         </label>`}
         <label class="field">改写要求（可选）<input id="copy-instruction" maxlength="2000" value="${esc(V.instruction)}" placeholder="例如：开头更直接，保留步骤，减少套话"></label>
-        <div class="row" style="margin-top:12px">
-          <button class="btn small" data-act="write">${data.content.trim() ? '让 agent 改写' : '让 agent 写正文'}</button>
-          <button class="btn small" data-act="titles">生成标题备选</button>
-          <button class="btn small" data-act="agent-check">让 agent 深度检查</button>
-          <button class="btn small" data-act="video-script">${icon("video")} ${n.videoScript && n.videoScript.trim() ? '改视频脚本' : '写视频脚本'}</button>
-          <button class="btn small" data-act="cover">${icon("palette")} 生成图片</button>
-          <div class="spacer"></div>
-          <button class="btn small ghost danger" data-act="delete">删除</button>
+        <div class="note-actions">
+          <div class="row action-group"><span class="muted">让 agent 帮忙</span>
+            <button class="btn small primary" data-act="write">${data.content.trim() ? '改写正文' : '写正文'}</button>
+            <button class="btn small" data-act="titles">生成标题备选</button>
+            <button class="btn small" data-act="agent-check">深度检查</button></div>
+          <div class="row action-group"><span class="muted">配套内容</span>
+            <button class="btn small" data-act="video-script">${icon("video")} ${n.videoScript && n.videoScript.trim() ? '改视频脚本' : '写视频脚本'}</button>
+            <button class="btn small" data-act="cover">${icon("palette")} 生成图片</button></div>
         </div>
       </div>
       ${n.topicId?`<div class="muted">关联选题：${esc(n.topicId)}</div>`:''}

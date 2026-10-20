@@ -168,13 +168,7 @@ function draw(main) {
       <button class="btn" data-act="recommend">让 agent 推荐对标账号</button>
       <button class="btn primary" data-act="add">添加对标账号</button>
     </div>
-    <div class="card" style="margin-bottom:12px">
-      <div class="row"><strong>按需资料采集</strong><span>已完成 ${V.collection?.items.filter(x => x.state === 'complete').length || 0} · 待处理 ${V.collection?.items.filter(x => ['pending', 'running', 'blocked', 'partial'].includes(x.state)).length || 0}</span>
-      <button class="btn small" data-act="collect-fill">补齐缺失的已登记对标</button>
-      <button class="btn small" data-act="prepare-browser">核对登录账号</button><button class="btn small" data-act="resume-access">恢复普通暂停</button><button class="btn small" data-act="lock-restriction">报告平台限制</button><button class="btn small" data-act="resolve-restriction">确认限制已解除</button><button class="btn small" data-act="collect-pause">停止自动访问</button><button class="btn small" data-act="collect-resume">启动现有待办</button></div>
-      <p class="muted">${esc((V.access?.kind !== 'open' ? V.access?.reason : '') || V.collection?.reason || '推荐只登记待办。先核对登录账号，再明确启动本次采集；随机等待不保证免风控。')}</p>
-      ${(V.collection?.items || []).filter(x => ['running', 'partial', 'blocked'].includes(x.state)).map(x => `<div>${esc(V.items.find(b => b.id === x.id)?.name || x.id)}：${x.state === 'running' ? '采集中' : '未完整采集'} · 尝试 ${x.attempts} 次 ${esc(x.reason || '')}</div>`).join('')}
-    </div>
+    ${collectionCardHtml()}
     ${V.issues?.rejected ? `<div class="card" style="margin-bottom:12px">${icon('warning')} ${V.issues.rejected} 个对标检查点有冲突，未导入；请查看数据目录的 checkpoints/rejected/ 和原因文件。</div>` : ''}
     ${V.issues?.incomplete ? `<div class="muted" style="margin-bottom:12px">${V.issues.incomplete} 个检查点尚未完整写入，未作为结果显示。</div>` : ''}
     ${V.showRadar && V.cfg ? radarFormHtml() : ''}
@@ -184,6 +178,38 @@ function draw(main) {
         <p class="muted">添加一个你想学习的账号（主页链接或名字都行），或者让 agent 根据你的账号定位推荐。</p>
       </div>`}`;
   bind(main);
+}
+
+// 资料采集卡片：没有对标账号时不显示；只露出当前状态下用得上的操作，其余收进“遇到验证码或访问受限时”
+function collectionCardHtml() {
+  const items = V.collection?.items || [];
+  const done = items.filter((x) => x.state === 'complete').length;
+  const todo = items.filter((x) => ['pending', 'running', 'blocked', 'partial'].includes(x.state)).length;
+  const running = items.some((x) => x.state === 'running');
+  const kind = V.access?.kind || 'open';
+  if (!V.items.length && !items.length && kind === 'open') return '';
+  const reason = (kind !== 'open' ? V.access?.reason : '') || V.collection?.reason || '';
+  const statusLine = kind === 'restriction' ? '已暂停自动访问：遇到了平台限制，处理好之前不会再自动访问。'
+    : kind === 'login' ? '已暂停自动访问：需要先确认登录账号。'
+    : kind === 'paused' ? '自动访问已暂停。'
+    : '';
+  const main = [
+    todo ? `<button class="btn small primary" data-act="collect-resume" ${kind !== 'open' ? 'disabled' : ''}>开始采集待办（${todo}）</button>` : '',
+    `<button class="btn small" data-act="collect-fill" ${kind !== 'open' ? 'disabled' : ''}>补齐已登记对标的缺失资料</button>`,
+    `<button class="btn small" data-act="prepare-browser" ${kind === 'restriction' ? 'disabled' : ''}>先核对登录账号</button>`,
+    running ? '<button class="btn small" data-act="collect-pause">暂停采集</button>' : '',
+    kind === 'paused' ? '<button class="btn small" data-act="resume-access">恢复自动访问</button>' : '',
+    kind === 'restriction' ? '<button class="btn small" data-act="resolve-restriction">我已在小红书确认限制解除</button>' : '',
+  ].filter(Boolean).join('');
+  return `<div class="card" style="margin-bottom:12px">
+      <div class="row"><strong>补齐对标资料</strong><span class="muted">已完成 ${done} · 待处理 ${todo}</span></div>
+      ${statusLine ? `<p style="margin:6px 0">${icon('warning')} ${esc(statusLine)}${reason ? `<span class="muted"> · ${esc(reason)}</span>` : ''}</p>` : (reason ? `<p class="muted" style="margin:6px 0">${esc(reason)}</p>` : '<p class="muted" style="margin:6px 0">先核对登录账号，再点“开始采集待办”。采集会随机等待、逐个访问，但不能保证不触发平台风控。</p>')}
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px">${main}</div>
+      ${kind !== 'restriction' ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">遇到验证码或访问受限时</summary>
+        <p class="muted" style="margin:6px 0">如果你在小红书看到验证码、账号异常提示，点下面的按钮立刻停止所有自动访问，避免继续触发风控。</p>
+        <button class="btn small" data-act="lock-restriction">遇到验证码/受限，立刻暂停自动访问</button></details>` : ''}
+      ${items.filter((x) => ['running', 'partial', 'blocked'].includes(x.state)).map((x) => `<div>${esc(V.items.find((b) => b.id === x.id)?.name || x.id)}：${x.state === 'running' ? '采集中' : '未完整采集'} · 尝试 ${x.attempts} 次 ${esc(x.reason || '')}</div>`).join('')}
+    </div>`;
 }
 
 function radarFormHtml() {
