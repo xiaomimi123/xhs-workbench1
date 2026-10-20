@@ -1,0 +1,46 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {WORKSPACE} from './paths.mjs';
+import {httpError} from './store.mjs';
+const BASE='https://api.apimart.ai';
+const DEFAULTS={defaultProvider:'current-agent',baseUrl:BASE,model:'gpt-image-2',size:'16:9',resolution:'2k'};
+const SIZES=['1:1','16:9','9:16','4:3','3:4','3:2','2:3','5:4','4:5','2:1','1:2','3:1','1:3','21:9','9:21'];
+export function validateImageOptions(input){
+ if(!['current-agent','apimart'].includes(input.defaultProvider)||!['gpt-image-2','gpt-image-2-ext'].includes(input.model)||!SIZES.includes(input.size)||!['1k','2k','4k'].includes(input.resolution))throw httpError(400,'生图服务、模型、比例或清晰度无效');
+ return input;
+}
+export class ImageService {
+ constructor({file=path.join(WORKSPACE,'.secrets','image-service.json'),fetchImpl=globalThis.fetch}={}){this.file=file;this.fetch=fetchImpl;}
+ read(){try{return {...DEFAULTS,...JSON.parse(fs.readFileSync(this.file,'utf8')),baseUrl:BASE};}catch(e){if(e.code!=='ENOENT')throw httpError(500,'无法读取本机生图设置');return {...DEFAULTS};}}
+ settings(){const {apiKey,...s}=this.read();return {...s,hasKey:!!apiKey,keyMasked:apiKey?'••••••••':''};}
+ save(input={}){
+ const s=this.read();for(const k of ['defaultProvider','model','size','resolution'])if(input[k]!==undefined)s[k]=input[k];validateImageOptions(s);
+ if(input.apiKey!==undefined&&(typeof input.apiKey!=='string'||input.apiKey.length>4096||/[\r\n]/.test(input.apiKey)))throw httpError(400,'API Key格式无效');
+ if(input.deleteKey===true)delete s.apiKey;else if(input.apiKey?.trim())s.apiKey=input.apiKey.trim();
+ fs.mkdirSync(path.dirname(this.file),{recursive:true,mode:0o700});const tmp=this.file+'.'+crypto.randomUUID()+'.tmp';fs.writeFileSync(tmp,JSON.stringify(s),{mode:0o600,flag:'wx'});fs.renameSync(tmp,this.file);fs.chmodSync(this.file,0o600);return this.settings();
+ }
+ requireKey(){const key=this.read().apiKey;if(!key)throw httpError(400,'请先在设置中保存APIMart API Key');return key;}
+ async request(route,{method='GET',body,key}={}){
+ const token=key||this.requireKey();let res;
+ try{res=await this.fetch(BASE+route,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(45000)});}catch{throw httpError(502,'APIMart连接中断，远端状态待核对');}
+ if(!res.ok)throw httpError(502,`APIMart请求未成功（HTTP ${res.status}）`);
+ try{return await res.json();}catch{throw httpError(502,'APIMart响应格式无效');}
+ }
+ async testConnection(){
+ const key=this.requireKey();try{const r=await this.fetch(BASE+'/v1/models',{headers:{Authorization:`Bearer ${key}`},redirect:'error',signal:AbortSignal.timeout(15000)});return {connected:true,authenticated:r.ok?true:[401,403].includes(r.status)?false:null,status:r.status,generationTested:false,message:r.ok?'连接和鉴权通过；未调用生图，未验证模型权限或余额。':[401,403].includes(r.status)?'服务可连接，但鉴权失败，请检查API Key。':'服务可连接，但无法确认鉴权；未调用生图。'};}catch{return {connected:false,authenticated:null,generationTested:false,message:'无法连接APIMart；未调用生图。'};}
+ }
+ async submit(input,key){const body={model:input.model,prompt:input.prompt,n:1,size:input.size,resolution:input.resolution,official_fallback:false};if(input.image_urls?.length)body.image_urls=input.image_urls;const data=await this.request('/v1/images/generations',{method:'POST',body,key});const id=data?.data?.[0]?.task_id;if(typeof id!=='string'||!/^[-\w]{1,200}$/.test(id))throw httpError(502,'提交结果缺少任务编号，远端状态待核对');return id;}
+ async poll(id){if(!/^[-\w]{1,200}$/.test(id))throw httpError(400,'远端任务编号无效');return (await this.request('/v1/tasks/'+encodeURIComponent(id))).data;}
+ async download(value){
+ let u;try{u=new URL(value);}catch{throw httpError(502,'图片下载地址无效');}
+ if(u.protocol!=='https:'||!['upload.apimart.ai','getapib.org'].includes(u.hostname)||u.port||u.username||u.password)throw httpError(502,'图片下载地址不在可信APIMart CDN范围');
+ let res;try{res=await this.fetch(u.href,{redirect:'manual',signal:AbortSignal.timeout(45000)});}catch{throw httpError(502,'图片下载失败，可再次刷新已有任务');}
+ if(!res.ok||res.status>=300||Number(res.headers.get('content-length'))>20*1024*1024)throw httpError(502,'图片下载响应或大小无效');
+ const chunks=[];let length=0;try{for await(const chunk of res.body){length+=chunk.length;if(length>20*1024*1024)throw Error();chunks.push(Buffer.from(chunk));}}catch{throw httpError(502,'图片下载中断或超过20MB');}return Buffer.concat(chunks);
+ }
+}
+export const imageService=new ImageService();
+export const getImageServiceSettings=()=>imageService.settings();
+export const saveImageServiceSettings=input=>imageService.save(input);
+export const testImageServiceConnection=()=>imageService.testConnection();

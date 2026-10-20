@@ -1,3 +1,12 @@
+import {VideoDescriptionWorkflow} from './video-description-workflow.mjs';
+import {VideoRetrieval} from './video-retrieval.mjs';
+import {videoService} from './video-service.mjs';
+import {VideoWorkflow} from './video-workflow.mjs';
+import { getImageServiceSettings, saveImageServiceSettings, testImageServiceConnection } from './image-service.mjs';
+import {browserAccessStatus, assertBrowserAccess, lockBrowserAccess, resumeBrowserAccess, resolveBrowserRestriction} from './access-policy.mjs';
+import {LiveTransferService} from './live-transfer.mjs';
+import {LivePhotoWorkflow} from './live-photo-workflow.mjs';
+import {ImageWorkflow} from './image-workflow.mjs';
 import {EngageWorkflow} from './engage-workflow.mjs';
 import {AnalyticsWorkflow} from './analytics-workflow.mjs';
 import {CoverWorkflow} from './cover-workflow.mjs';
@@ -62,9 +71,9 @@ function workerInfo() {
   const enabled = !!store.readJson(P.settings, {}).backgroundBrowser;
   return { enabled, available: runtime.available,
     compatible: cfg?.mode === 'cli' && cfg.browser === 'playwright' && !!cfg.adapter?.playwrightMcp
-      && cfg.adapter?.args?.includes('{mcpConfig}') && !cfg.adapter?.headless,
+      && (cfg.adapter?.args?.includes('{mcpConfig}') || (cfg.adapter?.id==='codex' && cfg.adapter?.browserTransport==='codex')) && !cfg.adapter?.headless,
     fastModel: cfg?.adapter?.id === 'claude-code' ? store.readJson(P.settings, {}).fastReadModel || '' : '',
-    accounts: browserWorker.status() };
+    accounts: browserWorker.status(), access: Object.fromEntries(store.listAccounts().map(a=>[a.id,browserAccessStatus(a.id)])) };
 }
 
 function writeVerifiedCheckpoint(task, result) {
@@ -291,6 +300,15 @@ const copyWorkflow = new CopyWorkflow({
   },
 });
 copyWorkflow.recover();
+const videoWorkflow = new VideoWorkflow({changed:account=>broadcast({type:'content.changed',account,area:'videos'})});
+const videoDescriptions = new VideoDescriptionWorkflow({references:videoWorkflow.videoReferences,changed:account=>broadcast({type:'content.changed',account,area:'videos'}),submit:task=>bridge.submitLocalDescription(task)});
+videoDescriptions.recover();
+const videoRetrieval = new VideoRetrieval({workflow:videoWorkflow,accounts:store.listAccounts});
+setInterval(()=>videoRetrieval.tick().catch(()=>{}),5000).unref();
+const imageWorkflow = new ImageWorkflow({changed:account=>broadcast({type:'content.changed',account,area:'notes'})});
+const livePhotoWorkflow = new LivePhotoWorkflow({images:imageWorkflow,changed:account=>broadcast({type:'content.changed',account,area:'live'})});
+livePhotoWorkflow.recover();
+const liveTransfer = new LiveTransferService({live:livePhotoWorkflow});
 const coverWorkflow = new CoverWorkflow({
   changed: account => broadcast({type:'content.changed',account,area:'notes'}),
   submit: task => {
@@ -306,6 +324,7 @@ bridge.on('claimed', ({ taskId }) => {
   engageWorkflow.progress(taskId);
   analyticsWorkflow.progress(taskId);
   copyWorkflow.progress(taskId);
+  videoDescriptions.progress(taskId);
   coverWorkflow.progress(taskId);
   const { session, msg } = lookupTask(taskId);
   if (!msg) return;
@@ -327,6 +346,7 @@ bridge.on('tool', ({ taskId, name, detail }) => {
   engageWorkflow.progress(taskId);
   analyticsWorkflow.progress(taskId);
   copyWorkflow.progress(taskId);
+  videoDescriptions.progress(taskId);
   coverWorkflow.progress(taskId);
   topicWorkflow.progress(taskId, ({Read:'读取资料',Write:'保存生成结果',Edit:'整理生成结果',Bash:'处理任务'})[name] || 'agent 正在处理');
   const { session, msg } = lookupTask(taskId);
@@ -352,6 +372,7 @@ bridge.on('done', ({ taskId, text, agentSessionId }) => {
   analyticsWorkflow.finish(taskId);
   topicWorkflow.finish(taskId);
   copyWorkflow.finish(taskId);
+  videoDescriptions.finish(taskId);
   coverWorkflow.finish(taskId);
   scheduler.onTaskFinished(taskId, true);
   for (const a of store.listAccounts()) flushBenchmarkCheckpoints(a.id);
@@ -373,6 +394,7 @@ bridge.on('error', ({ taskId, message }) => {
   analyticsWorkflow.finish(taskId, message);
   topicWorkflow.finish(taskId, message);
   copyWorkflow.finish(taskId, message);
+  videoDescriptions.finish(taskId, message);
   coverWorkflow.finish(taskId, message);
   scheduler.onTaskFinished(taskId, false, message);
   for (const a of store.listAccounts()) flushBenchmarkCheckpoints(a.id);
@@ -395,6 +417,7 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
   let benchmark = null;
   if (taskKind !== undefined) {
     if (!['benchmark.verify', 'browser.prepare'].includes(taskKind)) throw store.httpError(400, '任务类型不支持');
+    assertBrowserAccess(account.id);
     const worker = workerInfo();
     if (!worker.enabled || !worker.available || !worker.compatible) throw store.httpError(409, '后台有头读取尚未就绪，请在设置页开启并安装组件，或使用原 agent 路径');
     if (taskKind === 'benchmark.verify') {
@@ -487,10 +510,7 @@ const collectionQueue = new BenchmarkQueue({
     const worker = workerInfo();
     const cfg = bridge.config();
     const useWorker = worker.enabled && worker.available && worker.compatible;
-    if (!useWorker && (!cfg?.browser || cfg.browser === 'none' || cfg.adapter?.headless
-      || cfg.mode === 'inbox' && !bridge.status().inboxOnline)) {
-      throw new Error('浏览器能力不可用或 agent 未连接；准备好有头浏览器后点击整体继续');
-    }
+    if (!useWorker) throw new Error('只读采集组件不可用；不会自动改用 agent 浏览器');
     const text = `按 playbooks/benchmark.md 自动接续对标资料采集，仅处理 id=${benchmarkId}。读取已登记目标，实时核对当前登录账号与目标身份；同一次浏览器占用内保存头像元素局部 PNG、主页字段、最多五篇可见笔记。先写 verified，再逐篇写独立 observation 检查点并写收尾；不要只回复文字。已有有效笔记保留，仅补缺项。登录/风控立即停止并报告原因。`;
     bridge.submit({ id, accountId, account, benchmark, timeoutMs: 180_000,
       kind: useWorker ? 'benchmark.verify' : undefined,
@@ -581,6 +601,9 @@ const MIME = {
   '.heic': 'image/heic',
   '.mov': 'video/quicktime',
   '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
   '.ico': 'image/x-icon',
 };
 
@@ -679,7 +702,7 @@ async function handleApi(req, res, url) {
       if (!result.ok) return sendJson(res, 200, result);
       if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请稍后切换连接');
       await bridge.closeBrowsers();
-      store.saveBridgeConfig({ ...prev, mode: 'cli', adapter, testedAt: new Date().toISOString() });
+      store.saveBridgeConfig({ ...prev, mode: 'cli', adapter, browser: 'none', testedAt: new Date().toISOString() });
       broadcast({ type: 'bridge.changed' });
       return sendJson(res, 200, result);
     }
@@ -802,14 +825,23 @@ async function handleContentApi(route, q, req) {
   switch (route) {
     case 'GET /api/benchmarks': {
       const items = content.listBenchmarks(acc);
-      return { items, checkpointIssues: content.benchmarkCheckpointIssues(acc), collection: collectionStatus(acc) };
+      return { items, checkpointIssues: content.benchmarkCheckpointIssues(acc), collection: collectionStatus(acc), access: browserAccessStatus(acc) };
     }
     case 'POST /api/benchmarks/collection': {
       const { action } = await body();
       if (!['fill', 'pause', 'resume'].includes(action)) throw store.httpError(400, '采集动作不合法');
       const items = content.listBenchmarks(acc);
       const ids = action === 'fill' ? items.filter(b => !observationComplete(content.benchmarkDetail(acc, b.id).observation)).map(b => b.id) : [];
-      return collectionQueue.control(acc, action, ids);
+      const result = collectionQueue.control(acc, action, ids);
+      if(action==='pause') bridge.cancelAccount(acc);
+      return result;
+    }
+    case 'POST /api/browser/access': {
+      const {action,confirmed}=await body();
+      if(action==='pause'||action==='restriction'){ const state=lockBrowserAccess(acc,action==='restriction'?'restriction':'paused',action==='restriction'?'用户报告平台处罚，等待人工确认解除':'用户暂停自动访问'); bridge.cancelAccount(acc); return state; }
+      if(action==='resume')return resumeBrowserAccess(acc);
+      if(action==='resolve-restriction')return resolveBrowserRestriction(acc,confirmed);
+      throw store.httpError(400,'访问锁动作不合法');
     }
     case 'GET /api/benchmarks/detail':
       return content.benchmarkDetail(acc, q.get('id'));
@@ -847,6 +879,60 @@ async function handleContentApi(route, q, req) {
       content.deleteTopic(acc, q.get('id'));
       return { ok: true };
 
+    case 'GET /api/live/receive/options':
+      return {addresses:liveTransfer.addresses()};
+    case 'POST /api/live/receive':
+      return await liveTransfer.create(acc,await body());
+    case 'GET /api/live/receive':
+      return liveTransfer.status(acc,q.get('id'));
+    case 'POST /api/live/receive/revoke':
+      return liveTransfer.revoke(acc,(await body()).id);
+    case 'GET /api/live/jobs':
+      return {items:livePhotoWorkflow.list(acc)};
+    case 'POST /api/live/start':
+      return livePhotoWorkflow.start(acc,await body());
+    case 'POST /api/live/confirm':
+      return livePhotoWorkflow.confirm(acc,await body());
+    case 'GET /api/videos/service': return videoService.settings();
+    case 'PUT /api/videos/service': return videoService.save(await body());
+    case 'POST /api/videos/service/test': return await videoService.test();
+    case 'GET /api/videos/reference-videos': return {items:videoWorkflow.videoReferences.list(acc)};
+    case 'POST /api/videos/reference-videos': return await videoWorkflow.videoReferences.upload(acc,await body());
+    case 'GET /api/videos/descriptions': return {items:videoDescriptions.jobs(acc)};
+    case 'POST /api/videos/descriptions': return await videoDescriptions.start(acc,await body());
+    case 'GET /api/videos/jobs': return {items:videoWorkflow.jobs(acc)};
+    case 'GET /api/videos/sources': return {items:videoWorkflow.sources(acc)};
+    case 'POST /api/videos/start': return videoWorkflow.start(acc,await body());
+    case 'POST /api/videos/refresh': return await videoWorkflow.refresh(acc,(await body()).id);
+    case 'POST /api/videos/references': {
+      const b=await body();
+      if(typeof b.data!=='string'||b.data.length>14000000)throw store.httpError(400,'视频参考图不能超过10MB');
+      return imageWorkflow.uploadReference(acc,{...b,role:'product'});
+    }
+    case 'GET /api/images/service':
+      return getImageServiceSettings();
+    case 'PUT /api/images/service': {
+      const result = saveImageServiceSettings(await body());
+      broadcast({type:'config.changed'}); return result;
+    }
+    case 'POST /api/images/service/test':
+      return await testImageServiceConnection();
+    case 'POST /api/images/refresh':
+      return await imageWorkflow.refresh(acc, (await body()).id);
+    case 'GET /api/images/references':
+      return {items:imageWorkflow.references(acc)};
+    case 'POST /api/images/references':
+      return imageWorkflow.uploadReference(acc,await body());
+    case 'POST /api/images/library':
+      return imageWorkflow.saveToLibrary(acc,await body());
+    case 'GET /api/images/jobs':
+      return {items:imageWorkflow.jobs(acc,q.get('noteId'))};
+    case 'POST /api/images/start':
+      return imageWorkflow.start(acc,await body());
+    case 'POST /api/images/complete':
+      return imageWorkflow.complete(acc,(await body()).id);
+    case 'POST /api/images/apply':
+      return imageWorkflow.apply(acc,await body());
     case 'GET /api/covers/state':
       return coverWorkflow.state(acc,q.get('noteId'));
     case 'GET /api/covers/jobs':
@@ -1111,7 +1197,7 @@ function createServer(port) {
     if (pathname.startsWith('/api/')) {
       // 所有接口都要求令牌；自定义请求头让跨站请求无法通过预检
       // EventSource 和 <img> 无法带请求头，这两个只读接口允许用查询参数传令牌
-      const queryTokenOk = ['/api/events', '/api/files', '/api/notes/bundle', '/api/backup/download', '/api/analytics/export'].includes(pathname);
+      const queryTokenOk = ['/api/events', '/api/files', '/api/notes/bundle', '/api/backup/download', '/api/analytics/export', '/api/live/bundle'].includes(pathname);
       const given = req.headers['x-workbench-token'] || (queryTokenOk ? url.searchParams.get('t') : null);
       if (given !== token) return sendJson(res, 401, { error: '令牌无效，请让 agent 重新打开工作台' });
 
@@ -1121,6 +1207,11 @@ function createServer(port) {
         sseClients.add(res);
         req.on('close', () => sseClients.delete(res));
         return;
+      }
+      if (pathname === '/api/live/bundle') {
+        try {const data=livePhotoWorkflow.bundle(url.searchParams.get('account'),url.searchParams.get('id'),url.searchParams.get('format'));
+        res.writeHead(200,{'Content-Type':'application/zip','Content-Length':data.length,'Content-Disposition':url.searchParams.get('format')==='pvt'?'attachment; filename=Live-Photo.pvt.zip':'attachment; filename=Live-Photo.zip','Cache-Control':'no-store'});return res.end(data);
+        }catch(err){return sendJson(res,err.status||500,{error:err.message});}
       }
       if (pathname === '/api/files') return serveAccountFile(res, url.searchParams);
       if (pathname === '/api/notes/bundle') return serveNoteBundle(res, url.searchParams);
@@ -1172,6 +1263,7 @@ let shuttingDown = false;
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
+  await liveTransfer.close();
   await bridge.closeBrowsers().catch((err) => log(`关闭浏览器失败：${err.message}`));
   try {
     const cur = store.readJson(P.serverInfo, null);

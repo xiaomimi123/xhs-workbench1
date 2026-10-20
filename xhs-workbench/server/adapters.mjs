@@ -17,7 +17,7 @@ export const ADAPTERS = [
     id: 'codex',
     name: 'Codex CLI',
     bins: ['codex'],
-    args: ['exec', '--skip-git-repo-check', '--full-auto', '-'],
+    args: ['exec', '--skip-git-repo-check', '--sandbox', 'workspace-write', '-'],
     promptVia: 'stdin',
     parser: 'text',
   },

@@ -251,8 +251,8 @@ const commands = {
     if (!cfg) fail('请先运行 bridge-test 完成连接设置');
     if (readJson(P.settings, {}).backgroundBrowser) fail('请先在设置页关闭后台有头读取，再修改 agent 浏览器配置');
     const engine = flags.engine === 'chrome' ? 'chrome' : 'playwright';
-    if (cfg.mode !== 'cli' || !cfg.adapter || cfg.adapter.id !== 'claude-code') {
-      console.log('当前不是 Claude Code 的 CLI 模式，无法自动配置。');
+    if (cfg.mode !== 'cli' || !cfg.adapter || !['claude-code','codex'].includes(cfg.adapter.id)) {
+      console.log('当前不是 Claude Code / Codex 的 CLI 模式，无法自动配置。');
       console.log('- 收件箱模式：你（agent）在自己的会话里用自带的浏览器 / 电脑控制能力完成任务即可，无需配置。');
       console.log('- 其他 CLI agent：参考 adapters/ 下对应说明，为它接入 Playwright MCP（npx @playwright/mcp）后重新运行 bridge-test。');
       return;
@@ -277,7 +277,7 @@ const commands = {
       plan.push('启用 Claude in Chrome：直接使用你日常 Chrome 里的登录状态（需要已安装 Claude 浏览器扩展）。注意：这种方式所有账号共用一个浏览器，多账号时请用 Playwright');
     }
     const adapter = applyBrowser(cfg.adapter, engine, pkg);
-    const tools = adapter.args[adapter.args.indexOf('--allowedTools') + 1];
+    const tools = adapter.id==='codex'?'Playwright MCP':adapter.args[adapter.args.indexOf('--allowedTools') + 1];
     plan.push(`允许 agent 在无界面模式下使用浏览器工具（${tools.split(',').join(', ')}）`);
 
     console.log('将进行以下修改：');
@@ -286,6 +286,7 @@ const commands = {
       console.log('\n这会让工作台调用的 agent 无需逐次确认就能操作浏览器。请先向用户说明并征得同意，然后加 --yes 重新运行。');
       return;
     }
+    if(engine==='playwright'){adapter.headless=!!flags.headless;adapter.browserChannel=adapterBrowserChannel;}
     process.stdout.write('测试连接 … ');
     const r = await pingAdapter(adapter, 300_000);
     if (!r.ok) {

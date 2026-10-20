@@ -1,8 +1,8 @@
 import {renderDraft,draftBusy} from '../schedule-draft.js';
-// 发布排期：安排发布时间 → 到点提醒手动发布（附发布助手）或交给 agent 自动发布
+// 发布排期：安排发布时间 → 到点提醒手动发布（附发布助手）
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
-import { S, $, api, acc, toast, fmtTime, ask, opt, accDirRel } from '../core.js';
+import { S, $, api, acc, toast, fmtTime, opt } from '../core.js';
 
 export const CREATOR_URL = 'https://creator.xiaohongshu.com/publish/publish';
 
@@ -10,14 +10,14 @@ const STATUS = {
   planned: ['草案（不执行）',''],
   scheduled: ['已排期', ''],
   due: ['待手动发布', 'warn'],
-  running: ['agent 发布中', 'warn'],
+  running: ['历史任务待核对', 'warn'],
   check: ['待确认', 'warn'],
   published: ['已发布', 'brand'],
   failed: ['失败', 'bad'],
   missed: ['已错过', 'bad'],
   cancelled: ['已取消', ''],
 };
-const MODE = { draft: '草案（不发布）', remind: '到点提醒我', auto: 'agent 自动发布' };
+const MODE = { draft: '草案（不发布）', remind: '到点提醒我', auto: '到点提醒我（旧排期）' };
 const ATTENTION = ['due', 'missed', 'failed', 'check'];
 
 const V = { items: [], notes: [], cfg: null, showSettings: false, helper: null };
@@ -81,13 +81,13 @@ function settingsHtml() {
     <h3 style="margin-top:0">发布设置（当前账号）</h3>
     <form class="form" id="publish-settings">
       <label>默认发布方式
-        <select name="defaultMode">${opt('remind', '到点提醒我手动发布（推荐）', p.defaultMode)}${opt('auto', 'agent 控制浏览器自动发布', p.defaultMode)}</select>
+        <select name="defaultMode">${opt('remind', '到点提醒我手动发布（推荐）', p.defaultMode)}</select>
       </label>
       <div class="row" style="align-items:stretch">
         <label style="flex:1">每天最多发布（篇）<input type="text" name="dailyLimit" value="${esc(p.dailyLimit)}"></label>
         <label style="flex:1">两次发布至少间隔（分钟）<input type="text" name="minIntervalMin" value="${esc(p.minIntervalMin)}"></label>
       </div>
-      <p class="muted" style="margin:0;font-size:12px">自动发布需要你的 agent 具备浏览器控制能力，并在它打开的浏览器里登录过小红书创作者中心，详见「连接与设置」。频率限制用来避免触发平台风控。</p>
+      <p class="muted" style="margin:0;font-size:12px">所有笔记由你手动发布。频率限制用于安排提醒时间。</p>
       <div class="row"><button class="btn primary" type="submit">保存设置</button><button class="btn ghost" type="button" data-act="toggle-settings">收起</button></div>
     </form>
   </div>`;
@@ -143,7 +143,6 @@ function attentionCard(s) {
       <span class="muted" style="font-size:12px">计划 ${fmtTime(s.publishAt)} · ${MODE[s.mode] || s.mode}</span>
       <div class="spacer"></div>
       ${s.status !== 'due' ? `<button class="btn small" data-act="helper" data-id="${esc(s.id)}">手动发布</button>` : ''}
-      <button class="btn small" data-act="agent-now" data-id="${esc(s.id)}">让 agent 现在发布</button>
       ${['failed', 'missed', 'check'].includes(s.status) ? `<button class="btn small" data-act="retry" data-id="${esc(s.id)}">重新排期</button>` : ''}
       <button class="btn small ghost" data-act="cancel" data-id="${esc(s.id)}">取消</button>
     </div>
@@ -161,19 +160,19 @@ function draw(main) {
   if(S.view!=='schedule')return;
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">${icon("calendar")} 发布排期</h1><div class="muted">安排好发布时间，到点提醒你手动发，或交给 agent 自动发。</div></div>
+      <div><h1 class="page-title">${icon("calendar")} 发布排期</h1><div class="muted">安排好发布时间，到点提醒你手动发布。</div></div>
       <div class="spacer"></div>
       <button class="btn" data-act="toggle-settings">${icon("sliders")} 发布设置</button>
     </div>
     ${V.showSettings ? settingsHtml() : ''}
     ${attention.length ? `<h3 class="section-title">需要处理（${attention.length}）</h3>${attention.map(attentionCard).join('')}` : ''}
     <div class="card" id="draft-panel" style="margin:16px 0"></div>
-    <details><summary>正式发布排期（会提醒或执行发布）</summary><div class="card" style="margin:16px 0">
+    <details><summary>手动发布提醒排期</summary><div class="card" style="margin:16px 0">
       <h3 style="margin-top:0">安排发布</h3>
       ${candidates.length ? `<form class="row" id="schedule-form" style="align-items:flex-end">
         <label class="stack" style="flex:2;min-width:200px">笔记<select name="noteId">${candidates.map((n) => opt(n.id, `${n.title || '（无标题）'}${n.hasCover ? '' : '（无封面）'}`, '')).join('')}</select></label>
         <label class="stack" style="flex:1;min-width:180px">发布时间<input type="datetime-local" name="publishAt" value="${nextHour()}"></label>
-        <label class="stack" style="flex:1;min-width:150px">方式<select name="mode">${opt('remind', MODE.remind, V.cfg.publish.defaultMode)}${opt('auto', MODE.auto, V.cfg.publish.defaultMode)}</select></label>
+        <label class="stack" style="flex:1;min-width:150px">方式<select name="mode">${opt('remind', MODE.remind, V.cfg.publish.defaultMode)}</select></label>
         <button class="btn primary" type="submit">加入排期</button>
       </form>` : '<div class="muted">没有可以排期的笔记。先去「文案」写一篇吧。</div>'}
     </div>
@@ -187,7 +186,7 @@ function draw(main) {
         <td>${s.publishedUrl ? `<a href="${esc(s.publishedUrl)}" target="_blank" rel="noopener">${esc(s.title)}</a>` : esc(s.title)}</td>
         <td>${MODE[s.mode] || esc(s.mode)}</td>
         <td>${badge(s.status)}</td>
-        <td class="row-actions">${s.mode!=='draft'&&!s.nonExecuting&&s.status === 'scheduled' ? `<button class="btn small ghost" data-act="retime" data-id="${esc(s.id)}">改时间</button><button class="btn small ghost" data-act="switch-mode" data-id="${esc(s.id)}">改为${s.mode === 'auto' ? '提醒' : '自动'}</button><button class="btn small ghost" data-act="cancel" data-id="${esc(s.id)}">取消</button>` : ''}
+        <td class="row-actions">${s.mode!=='draft'&&!s.nonExecuting&&s.status === 'scheduled' ? `<button class="btn small ghost" data-act="retime" data-id="${esc(s.id)}">改时间</button><button class="btn small ghost" data-act="cancel" data-id="${esc(s.id)}">取消</button>` : ''}
           ${['published', 'cancelled'].includes(s.status) ? `<button class="btn small ghost danger" data-act="delete" data-id="${esc(s.id)}">删除</button>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : '<div class="muted">还没有排期。</div>'}`;
   if(main._draftUpdated)main.removeEventListener('draft-updated',main._draftUpdated);
@@ -249,15 +248,11 @@ function bind(main) {
       case 'helper':
         V.helper = V.helper === s.id ? null : s.id;
         return draw(main);
-      case 'agent-now':
-        return ask(`请按 playbooks/publish.md 现在发布笔记 ${s.noteId}（文件在 ${accDirRel()}/notes/${s.noteId}/），排期 id：${s.id}。完成后更新 ${accDirRel()}/schedule.json 中该条目的状态。`, true);
       case 'retry':
         return update({ id: s.id, status: 'scheduled' });
       case 'cancel':
         if (!confirm(`取消「${s.title}」的排期？`)) return;
         return update({ id: s.id, status: 'cancelled' });
-      case 'switch-mode':
-        return update({ id: s.id, mode: s.mode === 'auto' ? 'remind' : 'auto' });
       case 'retime': {
         const v = prompt('新的发布时间（格式：2026-10-20 20:00）', fmtTime(s.publishAt));
         if (!v) return;

@@ -1,3 +1,5 @@
+import {findAdapter} from './adapters.mjs';
+import {assertBrowserAccess, lockBrowserAccess, warningKind} from './access-policy.mjs';
 // Agent 桥接层
 // - CLI 模式：本地服务直接以 headless 方式调用 agent 命令行，流式读取输出
 // - 收件箱模式：任务进入队列，由 agent 在自己的会话里轮询领取、回写结果
@@ -8,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SKILL_DIR, WORKSPACE } from './paths.mjs';
 import { getBridgeConfig } from './store.mjs';
-import { mcpConfigFor } from './browser.mjs';
+import { mcpConfigFor, codexBrowserArgs } from './browser.mjs';
 
 const IS_WIN = process.platform === 'win32';
 const INBOX_ONLINE_MS = 45_000;
@@ -66,6 +68,7 @@ export function runCli(adapter, prompt, opts = {}) {
   // 每个账号用自己的浏览器资料（登录状态隔离）
   if ((adapter.args || []).includes('{mcpConfig}')) vars.mcpConfig = mcpConfigFor(opts.accountId, adapter.playwrightMcp, { headless: !!adapter.headless, browser: adapter.browserChannel });
   let args = (adapter.args || []).map((a) => fill(a, vars));
+  if(adapter.id==='codex' && adapter.browserTransport==='codex')args=[...codexBrowserArgs(adapter,opts.accountId),...args];
   if (agentSessionId && adapter.resumeArgs) args = args.concat(adapter.resumeArgs.map((a) => fill(a, vars)));
   const command = adapter.command || adapter.bins[0];
 
@@ -205,6 +208,18 @@ export function suggestIdentity(adapter, model, name, candidates) {
 
 // ---------- 桥接调度 ----------
 
+// A dedicated local-file path: never attach the account's platform browser.
+export function localFileAdapter(cfg){
+ if(cfg?.mode!=='cli'||!cfg.adapter)throw new Error('描述助手需要 CLI Agent 连接，请在连接与设置中配置');
+ const configured=cfg.adapter,known=findAdapter(configured.id);
+ if(!known){if(cfg.browser&&cfg.browser!=='none'||configured.browserTransport||(configured.args||[]).includes('{mcpConfig}'))throw new Error('当前 Agent 不支持独立的本地文件分析');return {...configured,resumeArgs:undefined};}
+ if(!['codex','claude-code'].includes(known.id))throw new Error('描述助手目前支持 Codex CLI 或 Claude Code');
+ const adapter={...known,command:configured.command,resumeArgs:undefined,args:[...known.args]};
+ if(known.id==='codex')adapter.args=['-c','mcp_servers.playwright.command="node"','-c','mcp_servers.playwright.enabled=false',...adapter.args];
+ if(known.id==='claude-code')adapter.args=['-p','--output-format','stream-json','--verbose','--permission-mode','acceptEdits','--tools','Read,Write','--allowedTools','Read,Write','--strict-mcp-config'];
+ return adapter;
+}
+
 export class Bridge extends EventEmitter {
   constructor({ browserWorker = null, onBenchmarkVerified = null, onBenchmarkObservation = null, onBrowserPrepared = null } = {}) {
     super();
@@ -248,12 +263,25 @@ export class Bridge extends EventEmitter {
   submit(task) {
     const cfg = this.config();
     if (!cfg) throw new Error('尚未完成连接设置，请让 agent 运行连接自检');
+    if (cfg.mode === 'inbox' && cfg.browser && cfg.browser !== 'none') throw new Error('收件箱不支持可撤销的浏览器任务，请切换 CLI 只读组件；收件箱仅可用于本地资料任务');
+    if (task.kind || cfg.browser && cfg.browser !== 'none' || cfg.mode === 'inbox') assertBrowserAccess(task.accountId);
     if (task.kind === 'benchmark.verify' || task.kind === 'browser.prepare') {
       if (!this.browserWorker || (task.kind === 'benchmark.verify' && !this.onBenchmarkVerified)) throw new Error('后台浏览器未启用');
       return this.#schedule(cfg, task, true);
     }
     if (cfg.mode === 'cli') return this.#schedule(cfg, task, !!cfg.browser && cfg.browser !== 'none' || (cfg.adapter.args || []).includes('{mcpConfig}'));
     this.#queueInboxTask(task);
+  }
+
+  submitLocalDescription(task) {
+    if(!/^vdesc_[\w-]+$/.test(task.id)||task.kind||task.agentSessionId)throw new Error('本地描述任务无效');
+    const cfg=this.config(),adapter=localFileAdapter(cfg);
+    return this.#schedule({...cfg,browser:'none',adapter},task,false);
+  }
+
+  cancelAccount(accountId) {
+    const ids = [...this.cliQueue.filter(e=>e.task.accountId===accountId).map(e=>e.task.id), ...[...this.tasks.values()].filter(t=>t.accountId===accountId).map(t=>t.id), ...[...this.running].filter(([,r])=>r.accountId===accountId).map(([id])=>id)];
+    for(const id of ids)this.cancel(id);
   }
 
   cancel(taskId) {
@@ -279,6 +307,9 @@ export class Bridge extends EventEmitter {
   }
 
   #schedule(cfg, task, exclusive) {
+    if (exclusive || task.kind) {
+      try { assertBrowserAccess(task.accountId); } catch (err) { this.emit('error', {taskId:task.id,message:err.message}); return; }
+    }
     if (exclusive && this.activeProfiles.has(task.accountId)) {
       this.cliQueue.push({ cfg, task, exclusive });
       return;
@@ -313,7 +344,6 @@ export class Bridge extends EventEmitter {
               onProgress: (name, detail) => this.emit('tool', { taskId: task.id, name, detail }),
               onVerified: async (profile) => {
                 if (cancelled || timedOut) throw new Error('已取消');
-                await this.onBrowserPrepared?.(task, { xhsId: task.account.xhsId });
                 await this.onBenchmarkVerified(task, profile);
                 profileSaved = true;
                 const saved = await this.onBenchmarkObservation?.(task, { ...profile, state: 'profile', observedAt: profile.observedAt });
@@ -332,6 +362,8 @@ export class Bridge extends EventEmitter {
                   : summary);
               },
             });
+          const blockedKind = warningKind(result.reason);
+          if (blockedKind) lockBrowserAccess(task.accountId, blockedKind, result.reason);
           if (cancelled || timedOut) throw new Error(timedOut ? '超时' : '已取消');
           let text;
           if (task.kind === 'browser.prepare') {
@@ -406,13 +438,15 @@ export class Bridge extends EventEmitter {
   // ----- 收件箱模式 -----
 
   #queueInboxTask(task) {
-    this.tasks.set(task.id, { ...task, state: 'pending', createdAt: new Date().toISOString() });
+    this.tasks.set(task.id, { ...task, prompt: task.prompt + '\n\n【收件箱执行范围】只处理本地文件与资料；不得打开浏览器、访问平台或发布。外部收件箱执行端无法由工作台强制中断。', state: 'pending', createdAt: new Date().toISOString() });
     this.#wakeWaiter();
   }
 
   #takePending() {
     for (const t of this.tasks.values()) {
       if (t.state === 'pending' && (!t.accountId || !this.activeProfiles.has(t.accountId))) {
+        if(this.config()?.browser && this.config().browser!=='none'){this.tasks.delete(t.id);this.emit('error',{taskId:t.id,message:'收件箱浏览器任务已禁用，请使用 CLI 只读组件'});continue;}
+        try { assertBrowserAccess(t.accountId); } catch (err) { this.tasks.delete(t.id); this.emit('error',{taskId:t.id,message:err.message}); continue; }
         if (t.accountId) this.activeProfiles.add(t.accountId);
         t.state = 'claimed';
         t.claimedAt = new Date().toISOString();

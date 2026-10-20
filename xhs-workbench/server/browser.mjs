@@ -2,6 +2,7 @@
 // 优先用系统安装的 Edge / Chrome；浏览器二进制并不能保证规避平台风控。
 // 都没装时才用 Playwright 内置 Chromium。
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { P, WORKSPACE } from './paths.mjs';
@@ -13,7 +14,16 @@ const LEGACY_PROFILE = path.join(WORKSPACE, 'browser-profile'); // v0.3 只有�
 /** Chromium 的 SingletonLock 可能是指向不存在目标的符号链接，existsSync 会误判为无锁。 */
 export function profileHasLock(profile) {
   try {
-    fs.lstatSync(path.join(profile, 'SingletonLock'));
+    const lock=path.join(profile,'SingletonLock');
+    const stat=fs.lstatSync(lock);
+    // Never remove a lock. Only let Chromium handle a proven-dead local owner.
+    if(stat.isSymbolicLink()){
+      const target=fs.readlinkSync(lock),prefix=os.hostname()+'-';
+      const pidText=target.startsWith(prefix)?target.slice(prefix.length):'';
+      if(/^[1-9][0-9]*$/.test(pidText)&&Number.isSafeInteger(Number(pidText))){
+        try{process.kill(Number(pidText),0);}catch(e){if(e.code==='ESRCH')return false;}
+      }
+    }
     return true;
   } catch (err) {
     if (err.code === 'ENOENT') return false;
@@ -92,6 +102,12 @@ export function browserStatus(accountId) {
  * engine: 'playwright' | 'chrome' | null（去掉）
  */
 export function applyBrowser(adapter, engine, pkg) {
+  if(adapter.id==='codex'){
+    if(engine && engine!=='playwright')throw new Error('Codex 仅支持 Playwright 浏览器连接');
+    const next={...adapter,args:[...adapter.args]};delete next.playwrightMcp;delete next.browserTransport;
+    if(engine==='playwright'){if(!pkg)throw new Error('浏览器控制配置不完整');next.playwrightMcp=pkg;next.browserTransport='codex';}
+    return next;
+  }
   const args = [...adapter.args];
   const drop = (flag, withValue) => {
     const i = args.indexOf(flag);
@@ -118,4 +134,13 @@ export function applyBrowser(adapter, engine, pkg) {
   args[args.indexOf('--allowedTools') + 1] = tools.join(',');
   next.args = args;
   return next;
+}
+
+/** Per-process Codex overrides; never modify global config or login data. */
+export function codexBrowserArgs(adapter,accountId){
+ const file=mcpConfigFor(accountId,adapter.playwrightMcp,{headless:!!adapter.headless,browser:adapter.browserChannel});
+ const config=readJson(file,null).mcpServers.playwright;
+ return ['-c',`mcp_servers.playwright.command=${JSON.stringify(config.command)}`,'-c',`mcp_servers.playwright.args=${JSON.stringify(config.args)}`,'-c', 'mcp_servers.playwright.enabled=true',
+ '-c','mcp_servers.playwright.enabled_tools=["browser_navigate","browser_snapshot","browser_take_screenshot","browser_wait_for"]',
+ ...['browser_navigate','browser_snapshot','browser_take_screenshot','browser_wait_for'].flatMap(tool=>['-c',`mcp_servers.playwright.tools.${tool}.approval_mode="approve"`])];
 }

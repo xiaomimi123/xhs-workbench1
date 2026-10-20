@@ -1,5 +1,6 @@
 // 持久复用的只读有头浏览器。Bridge 保证与同账号 MCP 任务互斥；这里不接收任意 URL/脚本。
 import path from 'node:path';
+import { assertBrowserAccess, lockBrowserAccess, warningKind } from './access-policy.mjs';
 import { recognizeScreenshot, corroborateProfile, downloadAvatar } from './visual-capture.mjs';
 import { PROFILES_DIR, detectRealBrowser, migrateLegacyProfile, profileHasLock } from './browser.mjs';
 import { loadPlaywright } from './browser-runtime.mjs';
@@ -12,8 +13,9 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const interrupted = (signal) => { if (signal?.aborted) throw new Error('已取消'); };
 
 export class BrowserWorker {
-  constructor({ load = loadPlaywright, profileRoot = PROFILES_DIR, detect = detectRealBrowser, onState = () => {}, delay = pause, recognize = recognizeScreenshot, download = downloadAvatar } = {}) {
+  constructor({ load = loadPlaywright, profileRoot = PROFILES_DIR, detect = detectRealBrowser, onState = () => {}, delay = pause, recognize = recognizeScreenshot, download = downloadAvatar, now = Date.now, random = Math.random, proofTtlMs = 15 * 60_000, assertAccess = assertBrowserAccess, lockAccess = lockBrowserAccess } = {}) {
     this.load = load;
+    Object.assign(this, { now, random, proofTtlMs, assertAccess, lockAccess });
     this.recognize = recognize;
     this.download = download;
     this.profileRoot = profileRoot;
@@ -126,19 +128,57 @@ export class BrowserWorker {
     }
   }
 
+  async #pace(signal, min = 900, max = 1800) {
+    interrupted(signal);
+    let remaining = min + Math.floor(Math.max(0, Math.min(1, this.random())) * (max - min));
+    while (remaining > 0) {
+      const step = Math.min(100, remaining);
+      await this.delay(step);
+      interrupted(signal);
+      remaining -= step;
+    }
+  }
+
+  async #ready(page, kind, signal) {
+    interrupted(signal);
+    await page.waitForFunction((kind) => {
+      const visible = el => el && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+      if (/AI不规范|商业权益|流量曝光|验证码|安全验证|操作频繁|访问受限|异常访问|风险提示|滑块验证|扫码登录|手机号登录|请先登录|当前笔记暂时无法浏览|请打开小红书App扫码查看/.test(document.body?.innerText || '') || /\/login(?:\/|\?|$)/.test(location.href)) return true;
+      if (kind === 'profile') return [...document.querySelectorAll('.user-info, .user-profile, [class*="profile-info"]')].some(el => visible(el) && /小红书号/.test(el.innerText)) && !!document.querySelector('[class*="note-list"], [class*="noteList"], [class*="feeds-container"], [class*="user-posts"]');
+      if (kind === 'search') return [...document.querySelectorAll('a[href*="/user/profile/"]')].some(visible);
+      if (kind === 'creator') return /小红书(?:账号|号)/.test(document.querySelector('header, [class*="header"], .personal .base')?.innerText || '') || [...document.querySelectorAll('.personal .base')].some(el => visible(el) && /小红书(?:账号|号)/.test(el.innerText));
+      return [...document.querySelectorAll('[class*="note-detail"], [class*="note-container"], [class*="note-scroller"], [class*="noteDetail"]')].some(el => visible(el) && (el.querySelector('[class*="title"], h1, #detail-desc, .desc, .note-text')?.textContent || '').trim());
+    }, kind, { timeout: 8000, polling: 200 });
+    interrupted(signal);
+  }
+
+  async #returnToProfile(accountId, page, url, signal) {
+    interrupted(signal);
+    this.assertAccess(accountId);
+    const close = page.locator('[class*="note-detail"] [aria-label="关闭"]:visible, .close-circle:visible, .close-box:visible, button[aria-label="关闭"]:visible').first();
+    if (await close.count()) await close.click({ timeout: 5000 });
+    else await page.goBack({ waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
+    await this.#ready(page, 'profile', signal);
+    if (canonicalProfileUrl(page.url()) !== url) throw new Error('无法返回原主页，已停止采集');
+    const warning = pageWarning(await page.locator('body').innerText({ timeout: 5000 }), page.url());
+    if (warning) throw new Error(warning);
+  }
+
+  #warning(accountId, reason) {
+    const kind = warningKind(reason);
+    if (!kind) return;
+    const instance = this.instances.get(accountId);
+    if (instance) delete instance.proof;
+    this.lockAccess(accountId, kind, reason);
+  }
+
   async #goto(accountId, page, url, signal) {
+    this.assertAccess(accountId);
     interrupted(signal);
     if (!isXhsPage(url)) throw new Error('只允许访问小红书页面');
-    try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
-    } catch (err) {
-      if (signal?.aborted || this.status(accountId).window !== 'minimized' || !/timeout/i.test(err.message)) throw err;
-      await this.#window(accountId, 'visible');
-      this.#set(accountId, { windowNote: '最小化时页面加载超时，已退回可见有头窗口；可能影响焦点' });
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
-    }
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
     if (!isXhsPage(page.url())) throw new Error('页面跳转到非小红书域名，已停止');
-    await this.delay(1300);
+
     interrupted(signal);
   }
 
@@ -146,6 +186,7 @@ export class BrowserWorker {
     const { page } = await this.#open(accountId);
     this.#set(accountId, { phase: 'checking-login' });
     await this.#goto(accountId, page, CREATOR, signal);
+    await this.#ready(page, 'creator', signal).catch(err => { if (signal?.aborted) throw err; });
     let snapshot;
     for (let i = 0; i < 3; i++) {
       interrupted(signal);
@@ -159,14 +200,18 @@ export class BrowserWorker {
       const identity = readCreatorIdentity(snapshot);
       if (identity.state === 'ready') return { page, identity };
       if (identity.state !== 'needsLogin' && (i > 0 || /验证码|访问限制|操作频繁/.test(identity.reason))) return { page, identity };
-      if (i < 2) await this.delay(5_000);
+      if (i < 2) await this.#pace(signal, 500, 1000);
     }
     return { page, identity: readCreatorIdentity(snapshot) };
   }
 
   async prepare(account, { signal } = {}) {
+    this.assertAccess(account.id);
+    const existing = this.instances.get(account.id);
+    if (existing) delete existing.proof;
     const { identity } = await this.#creator(account.id, signal);
     if (identity.state !== 'ready') {
+      this.#warning(account.id, identity.reason);
       await this.#window(account.id, 'visible');
       this.#set(account.id, { phase: identity.state, reason: identity.reason });
       return identity;
@@ -178,6 +223,7 @@ export class BrowserWorker {
       this.#set(account.id, { phase: 'needsReview', reason });
       return { state: 'needsReview', reason };
     }
+    this.instances.get(account.id).proof = { xhsId: identity.xhsId, checkedAt: this.now() };
     await this.#window(account.id, 'minimized');
     this.#set(account.id, { phase: 'ready', reason: '' });
     return { state: 'ready', xhsId: identity.xhsId, window: this.status(account.id).window };
@@ -185,12 +231,18 @@ export class BrowserWorker {
 
   async verify(account, benchmark, { signal, onProgress = () => {}, onVerified = async () => {}, onNote = async () => {}, onFinish = async () => {} } = {}) {
     const started = Date.now();
-    onProgress('账号核对', '正在打开创作者中心并核对登录账号');
-    const prepared = await this.prepare(account, { signal });
-    if (prepared.state !== 'ready') return { ...prepared, elapsedMs: Date.now() - started };
-    const { page } = this.instances.get(account.id);
+    this.assertAccess(account.id);
+    const instance = this.instances.get(account.id);
+    const proof = instance?.proof;
+    if (!proof || proof.xhsId !== account.xhsId?.trim() || this.now() - proof.checkedAt >= this.proofTtlMs) {
+      const reason = '请先显式准备浏览器并核对登录账号；准备凭据不存在或已过期';
+      this.#set(account.id, { phase: 'needsReview', reason });
+      return { state: 'needsReview', reason, elapsedMs: Date.now() - started };
+    }
+    const { page } = instance;
     try {
       const review = async (result) => {
+        this.#warning(account.id, result.reason);
         await this.#window(account.id, 'visible');
         this.#set(account.id, { phase: result.state, reason: result.reason, lastElapsedMs: Date.now() - started });
         return { ...result, elapsedMs: Date.now() - started };
@@ -203,6 +255,7 @@ export class BrowserWorker {
         const term = String(benchmark.xhsId || benchmark.name || '').trim().slice(0, 80);
         if (!term) return review({ state: 'needsReview', reason: '候选账号缺少名称或小红书号' });
         await this.#goto(account.id, page, `${SEARCH}${encodeURIComponent(term)}&source=web_explore_feed`, signal);
+        await this.#ready(page, 'search', signal);
         const rows = await page.evaluate(() => [...document.querySelectorAll('a[href*="/user/profile/"]')].slice(0, 30).map((a) => ({
           url: a.href, name: (a.querySelector('[class*="name"], [class*="Name"]')?.textContent || a.innerText?.split('\n').find((line) => line.trim()))?.trim()?.slice(0, 120) || '',
           text: a.innerText?.slice(0, 400) || '',
@@ -212,12 +265,13 @@ export class BrowserWorker {
         const found = chooseSearchProfile(rows, benchmark);
         if (found.state !== 'ready') return review(found);
         url = found.url;
-        await this.delay(2800);
+        await this.#pace(signal);
       }
-      if (benchmark.url) await this.delay(2800);
+      if (benchmark.url) await this.#pace(signal);
       this.#set(account.id, { phase: 'reading-profile' });
       onProgress('读取主页', '只读昵称、小红书号、可见指标和头像元素');
       await this.#goto(account.id, page, url, signal);
+      await this.#ready(page, 'profile', signal);
       const snapshot = await page.evaluate(() => {
         const info = document.querySelector('.user-info, .user-profile, [class*="user-info"], [class*="profile-info"]');
         const name = info?.querySelector('.user-name, [class*="user-name"], h1') || document.querySelector('.user-name, [class*="user-name"], h1');
@@ -281,14 +335,14 @@ export class BrowserWorker {
         onProgress('读取可见笔记', `${i + 1}/${visible.length} · 只读取页面上的标题和互动字段`);
         let note;
         try {
-          await this.delay(2600);
-          if (i > 0) await this.#goto(account.id, page, url, signal);
+          await this.#pace(signal);
           const noteId = visible[i].url.split('/').pop();
           const card = page.locator(`a[href*="/explore/${noteId}"]:visible, a[href*="/discovery/item/${noteId}"]:visible, a.cover[href*="/${noteId}"]:visible`).first();
           const warningBefore = pageWarning(await page.locator('body').innerText({ timeout: 5000 }), page.url());
           if (warningBefore) { failures.push(warningBefore); break; }
+          this.assertAccess(account.id);
           await card.click({ timeout: 8000 });
-          await this.delay(1600);
+          await this.#ready(page, 'note', signal);
           interrupted(signal);
           const notePage = await page.evaluate(() => {
             const detail = document.querySelector('[class*="note-detail"], [class*="note-container"], [class*="note-scroller"], [class*="noteDetail"]');
@@ -323,13 +377,24 @@ export class BrowserWorker {
         await onNote({ ...result, noteEvidence, note: { ...note, title: note.title || visible[i].title, position: i },
           observedAt: new Date().toISOString(), attemptedCount: i + 1 });
         captured++;
+        try { await this.#returnToProfile(account.id, page, url, signal); }
+        catch (err) {
+          if (signal?.aborted) throw err;
+          this.#warning(account.id, err.message);
+          failures.push(`无法返回主页：${err.message.slice(0, 120)}`);
+          break;
+        }
       }
       interrupted(signal);
-      const reason = failures.join('；').slice(0, 240);
+      // Classify each complete failure before shortening the display summary.
+      // Earlier OCR/screenshot diagnostics must never hide a later access warning.
+      for (const failure of failures) this.#warning(account.id, failure);
+      const fullReason = failures.join('；');
+      const reason = fullReason.slice(0, 240);
       await onFinish({ ...result, observedAt: new Date().toISOString(),
         state: failures.length ? 'partial' : 'complete', reason, captured, attemptedCount: attempted });
-      if (!/登录|验证|访问限制|无法浏览|扫码查看/.test(reason)) await this.#window(account.id, 'minimized');
-      this.#set(account.id, { phase: /登录/.test(reason) ? 'needsLogin' : /验证|访问限制|无法浏览/.test(reason) ? 'needsReview' : 'ready', reason, reused: true, lastElapsedMs: Date.now() - started });
+      if (!/登录|验证|访问限制|无法浏览|扫码查看/.test(fullReason)) await this.#window(account.id, 'minimized');
+      this.#set(account.id, { phase: /登录/.test(fullReason) ? 'needsLogin' : /验证|访问限制|无法浏览/.test(fullReason) ? 'needsReview' : 'ready', reason, reused: true, lastElapsedMs: Date.now() - started });
       return { ...result, captureState: failures.length ? 'partial' : 'complete', captured, reason, elapsedMs: Date.now() - started };
     } catch (err) {
       await this.#window(account.id, 'visible');

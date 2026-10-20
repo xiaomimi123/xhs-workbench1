@@ -1,6 +1,7 @@
 // 内联 SVG 线性图标：替代 UI 里的彩色 emoji，跨平台（macOS / Windows / Linux）渲染一致，
 // 颜色跟随文字（currentColor），跟品牌风格统一。图标形状参考 lucide（ISC 许可）。
 const PATHS = {
+  video: '<rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/>',
   home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/>',
   book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>',

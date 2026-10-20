@@ -31,6 +31,7 @@ export function getAutomation(acc) {
   const saved = readJson(automationFile(acc), {});
   const out = { ...DEFAULT_AUTOMATION, ...saved, lastRuns: { ...(saved.lastRuns || {}) } };
   for (const k of ['publish', 'engage', 'analytics', 'radar', 'curator']) out[k] = { ...DEFAULT_AUTOMATION[k], ...(saved[k] || {}) };
+  out.publish.defaultMode = 'remind';
   return out;
 }
 
@@ -42,7 +43,7 @@ export function saveAutomation(acc, patch) {
   // 基本取值校验
   cur.publish.dailyLimit = Math.max(1, Math.min(20, Number(cur.publish.dailyLimit) || 3));
   cur.publish.minIntervalMin = Math.max(0, Math.min(1440, Number(cur.publish.minIntervalMin) || 0));
-  cur.publish.defaultMode = cur.publish.defaultMode === 'auto' ? 'auto' : 'remind';
+  cur.publish.defaultMode = 'remind';
   cur.engage.maxPerRun = Math.max(1, Math.min(100, Number(cur.engage.maxPerRun) || 20));
   cur.engage.checkEveryHours = Math.max(0, Math.min(72, Number(cur.engage.checkEveryHours) || 0));
   cur.engage.autoSend = !!cur.engage.autoSend;
@@ -64,7 +65,7 @@ function scheduleFile(acc) {
 }
 
 export function listSchedule(acc) {
-  return readItems(scheduleFile(acc), 's_').sort((a, b) => String(a.publishAt).localeCompare(String(b.publishAt)));
+  return readItems(scheduleFile(acc), 's_').map((s) => s.mode === 'auto' ? { ...s, mode: 'remind' } : s).sort((a, b) => String(a.publishAt).localeCompare(String(b.publishAt)));
 }
 
 const dayKey = (d) => {
@@ -98,7 +99,7 @@ export function scheduleNote(acc, { noteId, publishAt, mode }) {
     noteId,
     title: note.title || '（无标题）',
     publishAt: t.toISOString(),
-    mode: mode === 'auto' ? 'auto' : mode === 'remind' ? 'remind' : getAutomation(acc).publish.defaultMode,
+    mode: 'remind',
     status: 'scheduled',
   }, SCHEDULE_FIELDS);
   if (note.status === 'draft') saveNote(acc, { id: noteId, status: 'ready' });
@@ -109,7 +110,7 @@ export function updateSchedule(acc, input) {
   const item = listSchedule(acc).find((s) => s.id === input.id);
   if (!item) throw httpError(404, '排期不存在');
   if(item.mode==='draft'||item.nonExecuting)throw httpError(400,'排期草案只能通过草案接口改期或取消');
-  const patch = { id: item.id };
+  const patch = { id: item.id, mode: 'remind' };
   if (input.publishAt && input.publishAt !== item.publishAt) {
     const t = new Date(input.publishAt);
     if (Number.isNaN(t.getTime())) throw httpError(400, '发布时间无效');
@@ -118,7 +119,6 @@ export function updateSchedule(acc, input) {
     patch.status = 'scheduled';
     patch.error = '';
   }
-  if (input.mode) patch.mode = input.mode === 'auto' ? 'auto' : 'remind';
   if (input.status) patch.status = input.status;
   if (input.status === 'published') {
     patch.publishedAt = input.publishedAt || now();
@@ -249,16 +249,10 @@ export function alerts() {
 // ---------- 定时调度器 ----------
 
 const PROMPTS = {
-  publish: (acc, s) =>
-    `【自动任务 · 定时发布】请按 playbooks/publish.md 发布笔记 ${s.noteId}（文件在 accounts/${acc}/notes/${s.noteId}/），排期 id：${s.id}。` +
-    `完成后按手册更新 accounts/${acc}/schedule.json 中该条目的 status、publishedUrl 或 error。`,
   engage: (acc, cfg) =>
     `【自动任务 · 检查评论私信】请按 playbooks/engage.md 检查新的评论和私信，写入 accounts/${acc}/engage/items.json 并起草回复` +
     (cfg.autoSend ? `，然后直接发送回复（本次最多 ${cfg.maxPerRun} 条，用户已开启自动发送）。` : '，只起草、不要发送（等用户在工作台确认）。'),
   analytics: (acc) => `【自动任务 · 数据抓取】请按 playbooks/analytics.md 抓取最新的笔记数据和账号数据，更新 accounts/${acc}/analytics/ 下的 notes.json 和 account.json。`,
-  radar: (acc) =>
-    `【自动任务 · 对标追踪】请按 playbooks/benchmark.md 的「追踪检查」检查开启追踪的对标账号（accounts/${acc}/benchmarks/index.json 里 tracking 为 true 的），` +
-    `把新发现的笔记追加到各自的 notes.json，并更新 index.json 里的 newCount、radarNote、lastCheckedAt。`,
   curator: (acc) =>
     `【自动任务 · 知识库管家】请按 playbooks/knowledge.md 的「知识库管家」整理知识库：把最近新增的拆解 / 复盘材料归档到位、` +
     `合并重复内容、补全 frontmatter、维护「知识库地图.md」索引，完成后汇报改动清单。`,
@@ -310,15 +304,9 @@ export class Scheduler {
         if (t - at > MISSED_AFTER_MS) {
           updateSchedule(acc, { id: s.id, status: 'missed' });
           this.notify({ type: 'alert', account: acc, text: `「${s.title}」错过了发布时间` });
-        } else if (s.mode === 'auto') {
-          const taskId = this.#run(acc, 'publish', PROMPTS.publish(acc, s), s.id);
-          if (taskId) {
-            upsertItem(scheduleFile(acc), 's_', { id: s.id, status: 'running', taskId, startedAt: now() }, SCHEDULE_FIELDS);
-            this.notify({ type: 'alert', account: acc, text: `agent 开始发布「${s.title}」` });
-          }
         } else {
           updateSchedule(acc, { id: s.id, status: 'due' });
-          this.notify({ type: 'alert', account: acc, text: `到点了：请发布「${s.title}」`, urgent: true });
+          this.notify({ type: 'alert', account: acc, text: `到点了：请手动发布「${s.title}」`, urgent: true });
         }
       } else if (s.status === 'running' && s.startedAt && t - new Date(s.startedAt).getTime() > STUCK_AFTER_MS && !this.tasks.has(s.taskId)) {
         upsertItem(scheduleFile(acc), 's_', { id: s.id, status: 'check', error: '自动发布超过 1 小时没有结果，请检查是否已发布' }, SCHEDULE_FIELDS);
@@ -347,7 +335,8 @@ export class Scheduler {
     if (cfg.radar.everyHours > 0) {
       const last = cfg.lastRuns.radar ? new Date(cfg.lastRuns.radar).getTime() : 0;
       if (t - last >= cfg.radar.everyHours * 3600_000 && listBenchmarks(acc).some((b) => b.tracking)) {
-        if (this.#run(acc, 'radar', PROMPTS.radar(acc))) saveAutomation(acc, { lastRuns: { radar: now() } });
+        saveAutomation(acc, { lastRuns: { radar: now() } });
+        this.notify({ type: 'alert', kind: 'radar', account: acc, text: '对标追踪提醒：请按需手动启动检查，本次未访问主页或采集笔记。' });
       }
     }
 

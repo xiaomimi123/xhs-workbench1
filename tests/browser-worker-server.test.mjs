@@ -30,9 +30,9 @@ const log = (line) => fs.appendFileSync(trace, line + '\\n');
 export const chromium = { async launchPersistentContext(dir, opts) {
   if (opts.headless !== false) throw new Error('worker 必须有头');
   log('launch:' + dir);
-  const page = { current: '', on() {}, url() { return this.current; },
-    async goto(url) { this.current = url; log('goto:' + url); },
-    locator(selector) { const loc = { click: async () => { page.current = 'https://www.xiaohongshu.com/explore/' + /note[0-9]+abcd/.exec(selector)[0]; log('click:' + page.current); }, evaluate: async () => '', innerText: async () => '搜索结果', first() { return { click: this.click, count: async () => 1, screenshot: async () => {
+  const page = { current: '', profile: '', on() {}, async waitForFunction() {}, async goBack() { this.current=this.profile; log('back'); }, url() { return this.current; },
+    async goto(url) { this.current = url; if(url.includes('/user/profile/')) this.profile=url; log('goto:' + url); },
+    locator(selector) { const loc = { click: async () => { page.current = 'https://www.xiaohongshu.com/explore/' + /note[0-9]+abcd/.exec(selector)[0]; log('click:' + page.current); }, evaluate: async () => '', innerText: async () => '搜索结果', first() { return { click: this.click, count: async () => selector.includes('close') ? 0 : 1, screenshot: async () => {
       if (selector.includes('avatar') && fs.existsSync(path.join(process.env.XHS_WORKSPACE, 'run', 'invalid-avatar'))) { const bad = Buffer.alloc(24); bad.writeUInt32BE(1, 16); bad.writeUInt32BE(1, 20); return bad; }
       return Buffer.from('${PNG_1PX.toString('base64')}', 'base64');
     } }; } }; return { ...loc, ...loc.first() }; },
@@ -123,6 +123,8 @@ await test('后台核实 HTTP/SSE、逐条检查点与无模型调用', async ()
     assert.equal(badType.status, 400);
     const missing = await api('POST', '/api/chat/send', { accountId: 'default', text: 'x', taskKind: 'benchmark.verify', benchmarkId: 'b_missing' });
     assert.equal(missing.status, 404);
+    const prepared = await api('POST', '/api/chat/send', { accountId: 'default', taskKind: 'browser.prepare' });
+    await completed(prepared.body.id);
     const sent = await api('POST', '/api/chat/send', { accountId: 'default', text: '别读这个文本', taskKind: 'benchmark.verify', benchmarkId: b.id });
     assert.equal(sent.status, 200);
     const done = await completed(sent.body.id);
@@ -145,9 +147,12 @@ await test('后台核实 HTTP/SSE、逐条检查点与无模型调用', async ()
     assert.ok((await portrait.arrayBuffer()).byteLength > 20);
     assert.equal(store.readJson(path.join(WS, 'accounts', 'default', 'browser.json'), {}).xhsId, 'my-account');
     assert.equal(events().filter((e) => e.startsWith('launch:')).length, 1);
-    // 一次推荐任务落下候选/核实检查点，服务必须自动接续，无单卡操作。
+    // 推荐仅进入待办；显式准备并恢复后才采集。
     const recommendation = await api('POST', '/api/chat/send', { accountId: 'default', text: 'BENCHMARK_AUTO_FIXTURE 推荐并采集' });
     await completed(recommendation.body.id);
+    assert.notEqual((await api('GET', '/api/benchmarks/detail?account=default&id=b_auto')).body.observation?.state, 'complete');
+    const reprepare=await api('POST','/api/chat/send',{accountId:'default',taskKind:'browser.prepare'});await completed(reprepare.body.id);
+    assert.equal((await api('POST','/api/benchmarks/collection?account=default',{action:'resume'})).status,200);
     await waitFor(async () => {
       const d = await api('GET', '/api/benchmarks/detail?account=default&id=b_auto');
       return d.body.observation?.state === 'complete';
@@ -187,6 +192,7 @@ await test('后台核实 HTTP/SSE、逐条检查点与无模型调用', async ()
     await completed(cli.body.id);
     assert.equal(audits().length, 2);
     assert.ok(events().some((line) => line.startsWith('close:')));
+    const prepareAgain=await api('POST','/api/chat/send',{accountId:'default',taskKind:'browser.prepare'});await completed(prepareAgain.body.id);
     const workerInChat = await api('POST', '/api/chat/send', { sessionId: cli.body.id, accountId: 'default',
       taskKind: 'benchmark.verify', benchmarkId: b.id });
     await completed(workerInChat.body.id);
@@ -195,6 +201,7 @@ await test('后台核实 HTTP/SSE、逐条检查点与无模型调用', async ()
     assert.equal(audits().length, 3);
     assert.ok(!audits()[2].args.includes('--resume'));
     assert.ok(audits()[2].prompt.includes('已核实主页'));
+    assert.equal((await api('POST', '/api/browser/access?account='+extra.id, {action:'resume'})).status,200);
     const second = await api('POST', '/api/chat/send', { sessionId: follow.body.id, accountId: extra.id, text: '切换账号后的任务' });
     await completed(second.body.id);
     assert.equal(audits().length, 4);

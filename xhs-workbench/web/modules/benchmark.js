@@ -93,6 +93,7 @@ async function load() {
   V.items = listing.items;
   V.issues = listing.checkpointIssues;
   V.collection = listing.collection;
+  V.access = listing.access;
   V.cfg = await api('GET', `/api/automation?${acc()}`);
   if (V.current) {
     V.detail = V.items.some((b) => b.id === V.current) ? await api('GET', `/api/benchmarks/detail?${acc(`id=${V.current}`)}`) : null;
@@ -161,17 +162,17 @@ function draw(main) {
 
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">${icon("target")} 竞品对标</h1><div class="muted">录入值得学习的账号，让 agent 拆解它们的选题、标题、封面和结构规律；开启追踪后新笔记会自动提醒。</div></div>
+      <div><h1 class="page-title">${icon("target")} 竞品对标</h1><div class="muted">录入值得学习的账号，让 agent 拆解它们的选题、标题、封面和结构规律；开启追踪后会定时提醒你手动启动检查。</div></div>
       <div class="spacer"></div>
       <button class="btn" data-act="toggle-radar">${icon("radar")} 追踪设置${V.cfg && V.cfg.radar.everyHours > 0 ? `（每 ${V.cfg.radar.everyHours} 小时）` : '（关）'}</button>
       <button class="btn" data-act="recommend">让 agent 推荐对标账号</button>
       <button class="btn primary" data-act="add">添加对标账号</button>
     </div>
     <div class="card" style="margin-bottom:12px">
-      <div class="row"><strong>自动资料采集</strong><span>已完成 ${V.collection?.items.filter(x => x.state === 'complete').length || 0} · 待处理 ${V.collection?.items.filter(x => ['pending', 'running', 'blocked', 'partial'].includes(x.state)).length || 0}</span>
+      <div class="row"><strong>按需资料采集</strong><span>已完成 ${V.collection?.items.filter(x => x.state === 'complete').length || 0} · 待处理 ${V.collection?.items.filter(x => ['pending', 'running', 'blocked', 'partial'].includes(x.state)).length || 0}</span>
       <button class="btn small" data-act="collect-fill">补齐缺失的已登记对标</button>
-      <button class="btn small" data-act="collect-pause">暂停队列</button><button class="btn small" data-act="collect-resume">已准备登录，整体继续</button></div>
-      <p class="muted">${esc(V.collection?.reason || '任务期间逐篇保存；登录或受限时暂停。批量补齐将打开当前账号的有头浏览器。')}</p>
+      <button class="btn small" data-act="prepare-browser">核对登录账号</button><button class="btn small" data-act="resume-access">恢复普通暂停</button><button class="btn small" data-act="lock-restriction">报告平台限制</button><button class="btn small" data-act="resolve-restriction">确认限制已解除</button><button class="btn small" data-act="collect-pause">停止自动访问</button><button class="btn small" data-act="collect-resume">启动现有待办</button></div>
+      <p class="muted">${esc((V.access?.kind !== 'open' ? V.access?.reason : '') || V.collection?.reason || '推荐只登记待办。先核对登录账号，再明确启动本次采集；随机等待不保证免风控。')}</p>
       ${(V.collection?.items || []).filter(x => ['running', 'partial', 'blocked'].includes(x.state)).map(x => `<div>${esc(V.items.find(b => b.id === x.id)?.name || x.id)}：${x.state === 'running' ? '采集中' : '未完整采集'} · 尝试 ${x.attempts} 次 ${esc(x.reason || '')}</div>`).join('')}
     </div>
     ${V.issues?.rejected ? `<div class="card" style="margin-bottom:12px">${icon('warning')} ${V.issues.rejected} 个对标检查点有冲突，未导入；请查看数据目录的 checkpoints/rejected/ 和原因文件。</div>` : ''}
@@ -192,7 +193,7 @@ function radarFormHtml() {
     <form class="form" id="radar-form">
       <label>检查间隔（小时，0 表示不自动检查）<input type="number" name="everyHours" min="0" max="168" step="1" value="${r.everyHours}"></label>
       <label>新笔记点赞达到多少算「可能爆了」<input type="number" name="likesThreshold" min="1" step="1" value="${r.likesThreshold}"></label>
-      <p class="muted" style="margin:0;font-size:12px">开启追踪的对标账号会按这个间隔让 agent 检查新笔记，超过阈值的会顶栏提醒你。${V.cfg.lastRuns.radar ? `上次检查：${fmtTime(V.cfg.lastRuns.radar)}。` : ''}需要 agent 能控制浏览器、工作台保持运行。</p>
+      <p class="muted" style="margin:0;font-size:12px">开启追踪后只按这个间隔提醒，不会自动访问主页或采集笔记。${V.cfg.lastRuns.radar ? `上次提醒：${fmtTime(V.cfg.lastRuns.radar)}。` : ''}提醒需要工作台保持运行。</p>
       <div class="row"><button class="btn primary" type="submit">保存设置</button><button class="btn ghost" type="button" data-act="toggle-radar">收起</button></div>
     </form>
   </div>`;
@@ -261,7 +262,7 @@ function drawDetail(main) {
       ${b.summary && b.status === 'analyzed' ? `<div class="summary">${esc(b.summary)}</div>` : ''}
       <div class="row benchmark-actions">
         <button class="btn primary small" data-act="verify">${b.observation ? '刷新主页与近 5 篇笔记' : '补齐头像和主页数据'}</button>
-        ${S.bridge?.browserWorker?.enabled ? '<button class="btn small ghost" data-act="verify-agent">改用 agent 采集</button>' : ''}
+
         <label class="btn small upload-btn">手动上传头像<input type="file" accept="image/png,image/jpeg,image/webp" id="avatar-input" hidden></label>
         <button class="btn small" data-act="analyze">${b.status === 'analyzed' ? '让 agent 重新拆解' : '让 agent 拆解'}</button>
         <button class="btn small" data-act="check-now" ${b.tracking ? '' : 'disabled'} title="检查这个账号有没有新笔记">立即检查新笔记</button>
@@ -302,7 +303,7 @@ function bind(main) {
         const item = V.items.find((x) => x.id === id);
         if (item) item.tracking = t.dataset.act === 'track-on';
         if (V.detail && V.detail.item.id === id) V.detail.item.tracking = item.tracking;
-        toast(item && item.tracking ? '已开启追踪，agent 会按设置间隔检查新笔记' : '已停止追踪');
+        toast(item && item.tracking ? '已开启追踪提醒，到点需你手动启动检查' : '已停止追踪');
       } catch (err) {
         toast(err.message);
       }
@@ -339,14 +340,22 @@ function bind(main) {
       case 'collect-resume':
         await api('POST', `/api/benchmarks/collection?${acc()}`, { action: t.dataset.act.slice(8) });
         await load(); return draw(main);
+      case 'prepare-browser':
+        return ask('独立核对当前登录账号，不采集对标资料', true, {taskKind:'browser.prepare'});
+      case 'resume-access':
+        await api('POST', `/api/browser/access?${acc()}`, {action:'resume'}); await load(); return draw(main);
+      case 'lock-restriction':
+        await api('POST', `/api/browser/access?${acc()}`, {action:'restriction'}); await load(); return draw(main);
+      case 'resolve-restriction':
+        if(!confirm('仅在你已在官方应用确认平台限制解除后继续。此操作不启动采集。确认已解除？')) return;
+        await api('POST', `/api/browser/access?${acc()}`, {action:'resolve-restriction',confirmed:true}); await load(); return draw(main);
       case 'recommend':
-        return ask(`请按 playbooks/benchmark.md 的自动接续流程，根据我的账号定位推荐最多 5-8 个候选，每个候选立即写 ${accDirRel()}/benchmarks/checkpoints/pending/<id>.candidate.json。浏览器可用时在同一次流程核实登录和目标身份，随即保存头像元素局部 PNG、主页字段、最多五篇可见笔记的独立检查点与收尾状态。不要要求逐卡点击，不重复登记；登录、风控或能力不可用时停止并说明原因。`, true);
+        return ask(`根据现有本地资料推荐候选，写入 ${accDirRel()}/benchmarks/checkpoints/pending/ 的 candidate 检查点。只登记待办；不要打开浏览器或自动采集，没有资料时说明缺项。`, true);
       case 'verify':
-      case 'verify-agent':
-        if (t.dataset.act === 'verify' && S.bridge?.browserWorker?.enabled && S.bridge.browserWorker.available && S.bridge.browserWorker.compatible) {
+        if (S.bridge?.browserWorker?.enabled && S.bridge.browserWorker.available && S.bridge.browserWorker.compatible) {
           return ask(`只读核实对标账号「${b.name}」的主页`, true, { taskKind: 'benchmark.verify', benchmarkId: b.id });
         }
-        return ask(`请按 playbooks/benchmark.md 的「主页资料与近 5 篇笔记观察」执行，单独处理对标「${b.name}」（id：${b.id}，已登记主页：${b.url || '未提供'}）。先实时核对登录账号与目标主页身份；未核实时先写 ${accDirRel()}/benchmarks/checkpoints/pending/${b.id}.verified.json。随后用不同文件名逐条写 ${b.id}.observation-<批次8位十六进制>-<步骤0到6>.json 检查点，记录可见简介/指标与最多 5 篇笔记的真实字段；能截取头像元素时保存局部 PNG 并登记文件名。已有核实也要补齐资料，不要只复述旧粉丝数；缺失项说明原因，登录/风控按 playbooks/browser.md 停止。`, true);
+        return toast('只读采集组件不可用，请先在连接设置中配置；不会自动切换采集工具');
       case 'analyze': {
         const shots = V.detail.screenshots.length;
         if (!b.url && !shots) return toast('先核实主页，或上传主页和笔记截图，再拆解');

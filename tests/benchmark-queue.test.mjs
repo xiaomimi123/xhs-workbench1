@@ -13,6 +13,7 @@ test('六目标串行，第三个中断后重启仅恢复未完成项，重复�
   let queue = new BenchmarkQueue(opts);
   const ids = Array.from({ length: 6 }, (_, i) => `b_${i}`);
   enqueueCollection('default', ids); enqueueCollection('default', ids);
+  queue.control('default','resume');
   for (let i = 0; i < 2; i++) {
     queue.tick(); queue.tick(); assert.equal(sent.length, i + 1);
     snapshots.set(ids[i], complete()); queue.finish(sent.at(-1).taskId); busy = false;
@@ -48,7 +49,7 @@ test('浏览器能力缺失准确暂停，不影响另一账号', () => {
   enqueueCollection(a, ['b_fail']);
   const queue = new BenchmarkQueue({ accounts: () => [{ id: a }], busy: () => false,
     detail: () => ({ observation: null }), dispatch() { throw new Error('尚未登录'); }, changed() {} });
-  queue.tick(); queue.tick();
+  queue.control(a,'resume'); queue.tick(); queue.tick();
   assert.equal(collectionStatus(a).items[0].attempts, 1);
   assert.equal(collectionStatus(a).reason, '尚未登录');
   assert.equal(collectionStatus('default').paused, false);
@@ -86,4 +87,14 @@ test('暂停后手动采集完成，整体继续清除旧失败原因且不重�
   snapshot=complete();q.control(a,'resume');q.tick();
   assert.equal(collectionStatus(a).items[0].state,'complete');
   assert.equal(collectionStatus(a).items[0].reason,'');
+});
+
+test('新增推荐仅登记待办；明确启动后才执行且不包含后来新增目标',()=>{
+ const a=store.saveAccount({name:'explicit'}).id;
+ const sent=[];
+ const q=new BenchmarkQueue({accounts:()=>[{id:a}],busy:()=>false,detail:()=>({observation:null}),dispatch:(_,id)=>sent.push(id),changed(){}});
+ enqueueCollection(a,['b_one']);q.tick();assert.deepEqual(sent,[]);
+ q.control(a,'resume');enqueueCollection(a,['b_later']);q.tick();assert.deepEqual(sent,['b_one']);
+ q.finish(collectionStatus(a).items[0].taskId,'没有结果');
+ assert.equal(collectionStatus(a).items[1].authorized,false);
 });

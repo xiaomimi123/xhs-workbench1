@@ -20,3 +20,7 @@ docs/verification/*
 .env.*
 !.env.example
 node_modules/
+
+# Local verification output and generated media
+output/
+xhs-workbench/ios/LiveReceiver/evidence/

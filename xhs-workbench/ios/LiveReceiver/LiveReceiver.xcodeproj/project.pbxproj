@@ -1,0 +1,35 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+D4CDE4D723BAF6CB8E5148A1 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "App/LiveReceiverApp.swift"; sourceTree = "<group>"; };
+5653D9AF206F9A35F2CBFFEA = { isa = PBXBuildFile; fileRef = D4CDE4D723BAF6CB8E5148A1; };
+B6B583D65073D49B69C5E823 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "App/ReceiverModel.swift"; sourceTree = "<group>"; };
+66AE06CC547A88529087F9A9 = { isa = PBXBuildFile; fileRef = B6B583D65073D49B69C5E823; };
+8E115D84109EA44FEFA3E041 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "App/Scanner.swift"; sourceTree = "<group>"; };
+8AF4620B774820D803CAA53B = { isa = PBXBuildFile; fileRef = 8E115D84109EA44FEFA3E041; };
+F4F6ED102569EC7CE34A8DBB = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/ReceiverCore/Protocol.swift"; sourceTree = "<group>"; };
+B5F8A6A1C902AC26C8073139 = { isa = PBXBuildFile; fileRef = F4F6ED102569EC7CE34A8DBB; };
+A8792157CB4F27FB949C035F = { isa = PBXFileReference; explicitFileType = wrapper.application; path = LiveReceiver.app; sourceTree = BUILT_PRODUCTS_DIR; };
+C8D2DC745BFC63C0D67231CE = { isa = PBXGroup; children = (D4CDE4D723BAF6CB8E5148A1,B6B583D65073D49B69C5E823,8E115D84109EA44FEFA3E041,F4F6ED102569EC7CE34A8DBB,0A3E27B8CA818264D75C8D81); sourceTree = "<group>"; };
+0A3E27B8CA818264D75C8D81 = { isa = PBXGroup; children = (A8792157CB4F27FB949C035F); name = Products; sourceTree = "<group>"; };
+878A52FC5FF6A57D50B7B870 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (5653D9AF206F9A35F2CBFFEA,66AE06CC547A88529087F9A9,8AF4620B774820D803CAA53B,B5F8A6A1C902AC26C8073139); runOnlyForDeploymentPostprocessing = 0; };
+E2AA269EB967A8853A258BFA = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+41D311A605520FC7B8B9A980 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+73EBF6644258C120893E685D = { isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; CLANG_ENABLE_MODULES = YES; }; };
+0B0C687DF8B6B8DC790B519C = { isa = XCBuildConfiguration; name = Release; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; CLANG_ENABLE_MODULES = YES; }; };
+76F8DEC3DFE0BDB465198890 = { isa = XCConfigurationList; buildConfigurations = (73EBF6644258C120893E685D,0B0C687DF8B6B8DC790B519C); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+6C7EFF6369083C8E1F2B1994 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.xhsworkbench.LiveReceiver; INFOPLIST_FILE = App/Info.plist; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = NO; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; };
+DD75E2CB1C510A828AC72D96 = { isa = XCBuildConfiguration; name = Release; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.xhsworkbench.LiveReceiver; INFOPLIST_FILE = App/Info.plist; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = NO; SWIFT_OPTIMIZATION_LEVEL = "-O"; }; };
+1B672BF3DA427763BF644BE3 = { isa = XCConfigurationList; buildConfigurations = (6C7EFF6369083C8E1F2B1994,DD75E2CB1C510A828AC72D96); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+34A04005BCAF206EEC990BD9 = { isa = PBXNativeTarget; buildConfigurationList = 1B672BF3DA427763BF644BE3; buildPhases = (878A52FC5FF6A57D50B7B870,E2AA269EB967A8853A258BFA,41D311A605520FC7B8B9A980); buildRules = (); dependencies = (); name = LiveReceiver; productName = LiveReceiver; productReference = A8792157CB4F27FB949C035F; productType = "com.apple.product-type.application"; };
+1140090C2255C89DD3BD6ECD = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UITests/ReceiverUITests.swift"; sourceTree = SOURCE_ROOT; };
+1DF878191E8C9CF8D4B72228 = { isa = PBXBuildFile; fileRef = 1140090C2255C89DD3BD6ECD; };
+5894A492A7BEBE9A5E44FFDC = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (1DF878191E8C9CF8D4B72228); runOnlyForDeploymentPostprocessing = 0; };
+2B208AFF0FD70CBB38FE6B5E = { isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = LiveReceiverUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+5C03E1C8FD0F80820A2953AA = { isa = PBXContainerItemProxy; containerPortal = 244210E48437B6556980A702; proxyType = 1; remoteGlobalIDString = 34A04005BCAF206EEC990BD9; remoteInfo = LiveReceiver; };
+D557C12DCD7DD4CF6FD3CF53 = { isa = PBXTargetDependency; target = 34A04005BCAF206EEC990BD9; targetProxy = 5C03E1C8FD0F80820A2953AA; };
+156F725150A84FCB69393542 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.xhsworkbench.LiveReceiver.UITests; GENERATE_INFOPLIST_FILE = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = LiveReceiver; CODE_SIGN_STYLE = Automatic; }; };
+C23B5A69B2E27C3E5F160FC6 = { isa = XCBuildConfiguration; name = Release; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.xhsworkbench.LiveReceiver.UITests; GENERATE_INFOPLIST_FILE = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = LiveReceiver; CODE_SIGN_STYLE = Automatic; }; };
+F39F41D0F9A1459B523C2622 = { isa = XCConfigurationList; buildConfigurations = (156F725150A84FCB69393542,C23B5A69B2E27C3E5F160FC6); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+16F90C2C0FEA799695F28B00 = { isa = PBXNativeTarget; buildConfigurationList = F39F41D0F9A1459B523C2622; buildPhases = (5894A492A7BEBE9A5E44FFDC); buildRules = (); dependencies = (D557C12DCD7DD4CF6FD3CF53); name = LiveReceiverUITests; productName = LiveReceiverUITests; productReference = 2B208AFF0FD70CBB38FE6B5E; productType = "com.apple.product-type.bundle.ui-testing"; };
+244210E48437B6556980A702 = { isa = PBXProject; attributes = { LastUpgradeCheck = 2700; }; buildConfigurationList = 76F8DEC3DFE0BDB465198890; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en, Base); mainGroup = C8D2DC745BFC63C0D67231CE; productRefGroup = 0A3E27B8CA818264D75C8D81; projectDirPath = ""; projectRoot = ""; targets = (34A04005BCAF206EEC990BD9,16F90C2C0FEA799695F28B00); };
+}; rootObject = 244210E48437B6556980A702; }

@@ -30,7 +30,7 @@ test('排期校验：过去时间、间隔、每日上限、重复排期', () =>
   assert.equal(content.noteDetail(ACC, a.id).status, 'ready'); // 排期后草稿变为待发布
 });
 
-test('调度器：到点提醒、自动发布交给 agent、错过不补发、agent 未回写时待确认', () => {
+test('调度器：旧自动排期到点仅提醒，错过不补发', () => {
   ops.saveAutomation(ACC, { curator: { everyHours: 0 } }); // 只测发布
   for (const s of ops.listSchedule(ACC)) ops.deleteSchedule(ACC, s.id);
   const r = note('提醒'), au = note('自动'), miss = note('错过');
@@ -40,7 +40,7 @@ test('调度器：到点提醒、自动发布交给 agent、错过不补发、ag
   // 改成已经到点 / 早已过点
   const file = path.join(WS, 'accounts', ACC, 'schedule.json');
   const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  for (const s of data.items) s.publishAt = s.id === sm.id ? inMin(-180) : inMin(-1);
+  for (const s of data.items) { s.publishAt = s.id === sm.id ? inMin(-180) : inMin(-1); if (s.id !== sr.id) s.mode = 'auto'; }
   fs.writeFileSync(file, JSON.stringify(data));
 
   const tasks = [];
@@ -49,27 +49,28 @@ test('调度器：到点提醒、自动发布交给 agent、错过不补发、ag
   sch.tick();
   const st = Object.fromEntries(ops.listSchedule(ACC).map((s) => [s.id, s]));
   assert.equal(st[sr.id].status, 'due');
-  assert.equal(st[sa.id].status, 'running');
+  assert.equal(st[sa.id].status, 'due');
+  assert.equal(st[sa.id].mode, 'remind');
   assert.equal(st[sm.id].status, 'missed');
-  assert.equal(tasks.length, 1);
-  assert.match(tasks[0], /自动任务 · 定时发布/);
+  assert.equal(tasks.length, 0);
   assert.ok(events.some((e) => e.urgent));
 
-  sch.onTaskFinished(st[sa.id].taskId, true);
-  assert.equal(ops.listSchedule(ACC).find((s) => s.id === sa.id).status, 'check');
+  sch.tick();
+  assert.equal(tasks.length, 0);
+  assert.equal(ops.listSchedule(ACC).find((s) => s.id === sa.id).status, 'due');
 
   const kinds = ops.alerts().map((a) => a.status);
-  assert.ok(kinds.includes('due') && kinds.includes('missed') && kinds.includes('check'));
+  assert.ok(kinds.includes('due') && kinds.includes('missed'));
 });
 
-test('调度器：会话忙时下次再试', () => {
+test('调度器：手动发布提醒不受会话忙影响', () => {
   for (const s of ops.listSchedule(ACC)) ops.deleteSchedule(ACC, s.id);
   const n = note('忙');
   const s = ops.scheduleNote(ACC, { noteId: n.id, publishAt: inMin(1), mode: 'auto' });
   ops.updateSchedule(ACC, { id: s.id, publishAt: inMin(-1) });
   const sch = new ops.Scheduler({ runTask: () => null, notify: () => {}, log: () => {} });
   sch.tick();
-  assert.equal(ops.listSchedule(ACC).find((x) => x.id === s.id).status, 'scheduled');
+  assert.equal(ops.listSchedule(ACC).find((x) => x.id === s.id).status, 'due');
 });
 
 test('防休眠「自动」模式的判断', () => {
@@ -124,20 +125,24 @@ test('Windows 自启动：VBS 的 cmd 引号与转义', () => {
   assert.match(system.autostartContent('linux'), /WantedBy=default\.target/);
 });
 
-test('爆款雷达：到点派任务、提醒、关闭后不再派', () => {
+test('爆款雷达：到点仅提醒、间隔内不重复、关闭后不再提醒', () => {
   ops.saveAutomation(ACC, { curator: { everyHours: 0 } }); // 只测雷达
   for (const s of ops.listSchedule(ACC)) ops.deleteSchedule(ACC, s.id);
   const b = content.saveBenchmark(ACC, { name: '雷达号', tracking: true });
   ops.saveAutomation(ACC, { radar: { everyHours: 24 } });
 
   const tasks = [];
-  const sch = new ops.Scheduler({ runTask: (acc, text) => (tasks.push(text), `task-${tasks.length}`), notify: () => {}, log: () => {} });
+  const events = [];
+  const sch = new ops.Scheduler({ runTask: (acc, text) => (tasks.push(text), `task-${tasks.length}`), notify: e => events.push(e), log: () => {} });
   sch.tick();
-  assert.equal(tasks.length, 1);
-  assert.match(tasks[0], /对标追踪/);
+  assert.equal(tasks.length, 0);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, 'radar');
+  assert.match(events[0].text, /提醒/);
   assert.ok(ops.getAutomation(ACC).lastRuns.radar);
-  sch.tick(); // 间隔内不重复派
-  assert.equal(tasks.length, 1);
+  sch.tick(); // 间隔内不重复提醒
+  assert.equal(tasks.length, 0);
+  assert.equal(events.length, 1);
 
   // 没有新笔记时没有雷达提醒；agent 回写后提醒出现
   assert.ok(!ops.alerts().some((a) => a.kind === 'radar'));
@@ -151,6 +156,7 @@ test('爆款雷达：到点派任务、提醒、关闭后不再派', () => {
   tasks.length = 0;
   sch.tick();
   assert.equal(tasks.length, 0);
+  assert.equal(events.length, 1);
 
   // 关闭追踪后不派任务；有追踪时防休眠「自动」模式覆盖雷达
   ops.saveAutomation(ACC, { radar: { everyHours: 0 } });
@@ -158,6 +164,7 @@ test('爆款雷达：到点派任务、提醒、关闭后不再派', () => {
   tasks.length = 0;
   sch.tick();
   assert.equal(tasks.length, 0);
+  assert.equal(events.length, 1);
   assert.equal(ops.needsAwake(), false);
   ops.saveAutomation(ACC, { radar: { everyHours: 24 } });
   assert.equal(ops.needsAwake(), true);
@@ -229,4 +236,26 @@ test('浏览器：开启 / 切换 / 关闭浏览器控制参数', () => {
   const off = browser.applyBrowser(ch, null);
   assert.equal(off.args[off.args.indexOf('--allowedTools') + 1], 'WebSearch,WebFetch');
   assert.deepEqual(base.args, ['-p', '--allowedTools', 'WebSearch,WebFetch', '--add-dir', '{skillDir}']); // 不修改原对象
+});
+
+test('Codex浏览器配置不混入Claude参数，复用账号Chrome资料且可关闭',()=>{
+ const base={id:'codex',args:['exec','--sandbox','workspace-write','-']};
+ const pw=browser.applyBrowser(base,'playwright','@playwright/mcp@0.0.83');
+ assert.equal(pw.browserTransport,'codex');assert.equal(pw.playwrightMcp,'@playwright/mcp@0.0.83');assert.deepEqual(pw.args,base.args);
+ assert.throws(()=>browser.applyBrowser(base,'chrome'),/Codex/);
+ const off=browser.applyBrowser(pw,null);assert.equal(off.browserTransport,undefined);assert.equal(off.playwrightMcp,undefined);
+ const profile=path.join(WS,'browser-profiles',ACC);fs.mkdirSync(profile,{recursive:true});fs.writeFileSync(path.join(profile,'keep-login'),'preserved');
+ const args=browser.codexBrowserArgs({...pw,browserChannel:'chrome'},ACC);assert.ok(args.includes('mcp_servers.playwright.command="npx"'));
+ const value=args.find(x=>x.startsWith('mcp_servers.playwright.args='));const mcpArgs=JSON.parse(value.slice(value.indexOf('=')+1));assert.equal(mcpArgs[mcpArgs.indexOf('--user-data-dir')+1],profile);assert.equal(mcpArgs[mcpArgs.indexOf('--browser')+1],'chrome');assert.equal(fs.readFileSync(path.join(profile,'keep-login'),'utf8'),'preserved');
+});
+test('Codex只开放采集验证工具，不自动授权点击/脚本/填表',()=>{const args=browser.codexBrowserArgs({playwrightMcp:'@playwright/mcp@0.0.83',browserChannel:'chrome'},ACC);const tools=JSON.parse(args.find(x=>x.startsWith('mcp_servers.playwright.enabled_tools=')).split('=').slice(1).join('='));assert.deepEqual(tools,['browser_navigate','browser_snapshot','browser_take_screenshot','browser_wait_for']);assert.ok(!args.some(x=>x.includes('browser_click.approval_mode')));});
+
+ test('旧自动设置和新自动请求一律降为手动提醒', () => {
+  const file = path.join(WS, 'accounts', ACC, 'automation.json');
+  fs.writeFileSync(file, JSON.stringify({publish:{defaultMode:'auto'}}));
+  assert.equal(ops.getAutomation(ACC).publish.defaultMode, 'remind');
+  assert.equal(ops.saveAutomation(ACC,{publish:{defaultMode:'auto',minIntervalMin:0,dailyLimit:20}}).publish.defaultMode,'remind');
+  const s=ops.scheduleNote(ACC,{noteId:note('手动限定').id,publishAt:inMin(180),mode:'auto'});
+  assert.equal(s.mode,'remind');
+  assert.equal(ops.updateSchedule(ACC,{id:s.id,mode:'auto'}).mode,'remind');
 });

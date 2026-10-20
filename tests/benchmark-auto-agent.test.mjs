@@ -8,10 +8,10 @@ import { useTempWorkspace, server, SKILL, PNG_1PX } from './helpers.mjs';
 const WS = useTempWorkspace();
 const store = await server('store.mjs'); store.ensureWorkspace();
 store.saveAccount({ id: 'default', xhsId: 'test-owner' });
-store.saveBridgeConfig({ mode: 'inbox', browser: 'builtin' });
+store.saveBridgeConfig({ mode: 'inbox', browser: 'none' });
 const ops = await server('automation.mjs'); ops.saveAutomation('default', { curator: { everyHours: 0 } });
 const wait = async (fn) => { for (let i = 0; i < 150; i++) { const v = await fn(); if (v) return v; await new Promise(r => setTimeout(r, 50)); } throw new Error('等待失败'); };
-test('worker 关闭：一次推荐请求，agent 原任务就地逐篇落盘，服务不重复派发', async () => {
+test('隔离历史检查点逐篇合并；worker 关闭不自动改用 agent', async () => {
   const child = spawn(process.execPath, [path.join(SKILL, 'server/server.mjs')], { env: { ...process.env, XHS_WORKSPACE: WS }, stdio: 'ignore' });
   try {
     const info = await wait(() => store.readJson(path.join(WS, 'run/server.json'), null));
@@ -42,13 +42,12 @@ test('worker 关闭：一次推荐请求，agent 原任务就地逐篇落盘，�
     await api('POST', '/api/agent/reply', { taskId: task.id, final: true, text: '已完成隔离数据观察' });
     await wait(async () => (await api('GET', '/api/benchmarks?account=default')).collection.items[0]?.state === 'complete');
     assert.equal((await api('GET', '/api/agent/next')).task, null);
-    // 批量入口不重采已完成目标；缺项目标自动转入 agent 任务，错误准确暂停。
+    // 明确启动也不能在组件不可用时自动切换采集工具。
     await api('POST', '/api/benchmarks?account=default', { name: '未采集旧目标' });
     await api('POST', '/api/benchmarks/collection?account=default', { action: 'fill' });
-    const next = await wait(async () => (await api('GET', '/api/agent/next')).task);
-    await api('POST', '/api/agent/reply', { taskId: next.id, error: '需要本人登录' });
-    const state = (await api('GET', '/api/benchmarks?account=default')).collection;
-    assert.equal(state.paused, true); assert.equal(state.reason, '需要本人登录');
+    const state = await wait(async()=>{const q=(await api('GET','/api/benchmarks?account=default')).collection;return q.paused?q:null;});
+    assert.equal((await api('GET','/api/agent/next')).task,null);
+    assert.match(state.reason,/只读采集组件不可用/);
     assert.equal(state.items[0].state, 'complete');
     console.log(`隔离演示目录：${WS}；真实页面：未验证`);
   } finally { child.kill(); await new Promise(r => child.once('exit', r)); }

@@ -1,3 +1,4 @@
+import {mountImageStudio,imageBusy} from '../image-studio.js';
 // 封面配图：选模板 / 配色 / 文字 → 实时预览 → 保存为笔记封面。
 // 受控任务校验封面与卡片规格，浏览器渲染并保存 PNG；旧式 cover 自动渲染兼容。
 import { esc } from '../md.js';
@@ -71,6 +72,7 @@ async function loadNote(id, guard=false) {
 }
 
 export async function render(main, params = {}) {
+  V.editorOnly=!!params.editorOnly;
   if (V.accountId !== S.accountId) {
     V.accountId = S.accountId;
     V.note = null;
@@ -84,17 +86,19 @@ export async function render(main, params = {}) {
     main.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
     return;
   }
+  if(params.image&&V.note?.images.includes(params.image)){V.spec=normalizeSpec({...V.spec,template:"photo",image:params.image,title:(params.headline||V.note.title).slice(0,32)});V.dirty=true;V.revision++;}
   draw(main);
 }
 
 export async function onContent(ev) {
-  if(ev.area!=='notes'||!V.note)return;
+  if(ev.area!=='notes'||!V.note||imageBusy(S.accountId,V.note.id))return;
   const account=S.accountId,id=V.note.id,revision=V.revision;
   const notes=(await api('GET',`/api/notes?${acc()}`)).items;
   const state=await api('GET',`/api/covers/state?account=${encodeURIComponent(account)}&noteId=${encodeURIComponent(id)}`).catch(()=>null);
   if(S.view!=='cover'||account!==S.accountId||V.note?.id!==id||!state)return;
   V.jobs=state.jobs;V.notes=notes;
-  if(V.dirty||V.editCard||revision!==V.revision){const panel=$('#cover-jobs');if(panel)panel.innerHTML=jobsHtml();return;}
+  if(imageBusy(account,id))return;
+  if(V.dirty||V.editCard||document.activeElement?.closest('#image-studio')||revision!==V.revision){const panel=$('#cover-jobs');if(panel)panel.innerHTML=jobsHtml();return;}
   if(await loadNote(id,true)&&S.view==='cover')draw($('#main'));
 }
 function jobsHtml(){
@@ -148,13 +152,14 @@ function draw(main) {
   V.options=options;
   main.innerHTML = `
     <div class="row page-head">
-      <div><h1 class="page-title">${icon("palette")} 封面配图</h1><div class="muted">从当前草稿生成封面与内容卡片；模板排版，保存后可逐张预览。</div></div>
+      <div><h1 class="page-title">${icon("palette")} 封面配图</h1><div class="muted">真实生图、参考图生成与可编辑封面；保存后逐张预览。</div></div>
       <div class="spacer"></div>
       <select id="cover-note" aria-label="选择笔记">${V.notes.map((x) => opt(x.id, x.title || '（无标题）', n.id)).join('')}</select>
     </div>
     <div class="card"><strong>${esc(n.title)}</strong><p class="muted">${esc(n.content.slice(0,180))}</p><p class="muted">${(n.sources||[]).map(r=>esc(r.benchmarkName||'对标')).join('、')} · 文案保持不变，图片追加保存，不发布。</p>
     ${V.editCard?`<strong>正在编辑第 ${V.editCard.index+1} 张内容卡片</strong> <button class="btn small" data-act="back-cover">返回封面</button>`:''}
     <button class="btn small" data-act="schedule-draft">发布前检查</button><button class="btn small" data-act="preview-note">完整图文预览</button></div>
+    ${V.editorOnly?'<button class="btn" data-back-creation>返回图片创作</button>':'<div class="card" id="image-studio" style="margin-bottom:16px"></div>'}
     <div class="cover-layout">
       <div class="card cover-side">${formHtml(s, n)}</div>
       <div class="cover-preview">
@@ -178,6 +183,8 @@ function draw(main) {
     </div>
     <div id="cover-jobs">${jobsHtml()}</div>
     ${mediaHtml(n)}`;
+  if(V.editorOnly)main.querySelector('[data-back-creation]').onclick=()=>{go('cover',{id:n.id});};
+  if(!V.editorOnly)mountImageStudio($('#image-studio',main),n,result=>{if(!canLeave())return;V.editCard=null;V.note=result.note;V.spec=normalizeSpec({...V.spec,template:'photo',image:result.file});V.dirty=true;V.revision++;draw(main);toast('底图已套用，可编辑标题后保存封面');});
   redraw();
   options.forEach((o, i) => {
     const c = $(`[data-opt-canvas="${i}"]`, main);

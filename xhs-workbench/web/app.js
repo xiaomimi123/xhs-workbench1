@@ -1,9 +1,12 @@
+import * as video from './modules/video-creation.js';
+import {mountVideoSettings} from './video-service-settings.js';
+import {mountImageServiceSettings} from './image-service-settings.js';
 import { md, esc, stripFrontmatter } from './md.js';
 import { S, $, api, acc, toast, showOverlay, fmtTime, currentAccount, withBusy, setHooks } from './core.js';
 import * as benchmark from './modules/benchmark.js';
 import * as topics from './modules/topics.js';
 import * as copywriting from './modules/copywriting.js';
-import * as cover from './modules/cover.js';
+import * as cover from './modules/image-creation.js';
 import * as schedule from './modules/schedule.js';
 import * as engage from './modules/engage.js';
 import * as analytics from './modules/analytics.js';
@@ -22,7 +25,8 @@ const MODULES = [
   { id: 'benchmark', icon: 'target', name: '竞品对标', module: benchmark },
   { id: 'topics', icon: 'flame', name: '选题热点', module: topics },
   { id: 'copywriting', icon: 'pen', name: '文案', module: copywriting },
-  { id: 'cover', icon: 'palette', name: '封面配图', module: cover },
+  { id: 'cover', icon: 'palette', name: '图片创作', module: cover },
+  { id: 'video', icon: 'video', name: '视频创作', module: video },
   { id: 'materials', icon: 'folder', name: '素材库', module: materials },
   { group: '运营' },
   { id: 'schedule', icon: 'calendar', name: '发布排期', module: schedule },
@@ -174,8 +178,8 @@ const PIPELINE = [
   ['benchmark', '找到值得学的账号，让 agent 拆出爆款规律'],
   ['topics', '结合热点和拆解结果出选题，按分数挑'],
   ['copywriting', '一键写成笔记，检查违禁词、预览效果'],
-  ['cover', '套模板做封面，或让 agent 出方案'],
-  ['schedule', '安排发布时间，到点提醒或自动发布'],
+  ['cover', '自由生图、参考图复刻或根据文案配图'],
+  ['schedule', '安排发布时间，到点提醒你手动发布'],
   ['engage', '起草评论私信回复，确认后发送'],
   ['analytics', '抓数据、写复盘，结论回流知识库'],
 ];
@@ -449,7 +453,7 @@ async function loadCuratorCard() {
   try {
     const cfg = await api('GET', `/api/automation?${acc()}`);
     const opts = [[0, '关闭'], [6, '每 6 小时'], [12, '每 12 小时'], [24, '每天一次'], [48, '每两天一次']];
-    box.innerHTML = `<div class="row"><h3 style="margin:0">📚 知识库管家</h3><div class="spacer"></div>
+    box.innerHTML = `<div class="row"><h3 style="margin:0">${icon("book")} 知识库管家</h3><div class="spacer"></div>
       <label class="muted" style="font-size:13px">整理频率
         <select id="curator-every">${opts.map(([v, n]) => `<option value="${v}"${cfg.curator.everyHours === v ? ' selected' : ''}>${n}</option>`).join('')}</select>
       </label></div>
@@ -463,7 +467,7 @@ async function loadCuratorCard() {
       }
     };
   } catch {
-    box.innerHTML = '📚 知识库管家：加载失败';
+    box.innerHTML = `${icon("book")} 知识库管家：加载失败`;
   }
 }
 
@@ -584,7 +588,7 @@ function workerSettingsHtml(w = {}) {
   const available = w.available && w.compatible;
   return `<div class="card" style="max-width:760px;margin-top:16px">
     <h3 style="margin-top:0">后台有头只读采集（可选）</h3>
-    <p class="muted">同账号复用独立浏览器资料；登录/验证码窗口必须可见，核对成功后尝试最小化。不能保证不抢焦点或避开平台风控；发布、评论仍由原 agent 执行。</p>
+    <p class="muted">同账号复用独立浏览器资料；登录/验证码窗口必须可见，核对成功后尝试最小化。不能保证不抢焦点或避开平台风控；发布由本人在官方应用手动完成。</p>
     <dl class="kv">
       <dt>组件</dt><dd>${w.available ? '已安装' : '未安装'}${w.compatible ? '' : ' · 需要 CLI + 有头 Playwright MCP'}</dd>
       <dt>当前账号</dt><dd>${PHASE[current.phase] || esc(current.phase || '空闲')} · ${current.window === 'minimized' ? '已请求最小化' : current.window === 'visible' ? '可见有头窗口' : current.window === 'unknown' ? '需手动恢复窗口' : '窗口关闭'}${current.lastElapsedMs ? ` · 最近 ${(current.lastElapsedMs / 1000).toFixed(1)} 秒` : ''}${current.reason ? `<br>${esc(current.reason)}` : ''}${current.windowNote ? `<br>${esc(current.windowNote)}` : ''}</dd>
@@ -602,8 +606,8 @@ function viewSettings() {
   const detected = S.detected;
   $('#main').innerHTML = `
     <h1 class="page-title">${icon("plug")} 连接与设置</h1>
-    <p class="page-sub">工作台通过「桥接层」把你的消息交给本地 agent 处理。</p>
-    <div class="card" id="curator-card" style="max-width:760px;margin-bottom:16px">📚 知识库管家：加载中…</div>
+    <p class="page-sub">这里选择工作台实际调用的 Agent；不会自动跟随当前聊天应用切换。</p>
+    <div class="card" id="curator-card" style="max-width:760px;margin-bottom:16px">${icon("book")} 知识库管家：加载中…</div>
     <div class="card" style="max-width:760px">
       <h3 style="margin-top:0">Agent 连接</h3>
       <dl class="kv">
@@ -611,7 +615,7 @@ function viewSettings() {
         ${b.mode === 'cli' && b.adapter ? `<dt>Agent</dt><dd>${esc(b.adapter.name)} <code>${esc(b.adapter.command)}</code></dd>` : ''}
         ${b.mode === 'inbox' ? `<dt>值守状态</dt><dd>${b.inboxOnline ? icon('dot', 'icon-ok') + ' 在线' : icon('dot', 'icon-warn') + ' 离线'}${b.lastPollAt ? `（最近一次 ${fmtTime(b.lastPollAt)}）` : ''}，待领取 ${b.pending} 条</dd>` : ''}
         <dt>上次测试</dt><dd>${b.testedAt ? fmtTime(b.testedAt) : '—'}</dd>
-        ${b.mode === 'cli' ? `<dt>浏览器控制</dt><dd>${b.browser === 'playwright' ? `${icon('check', 'icon-ok')} Playwright（独立浏览器）` : b.browser === 'chrome' ? `${icon('check', 'icon-ok')} Claude in Chrome` : '未开启（自动发布、抓评论、抓数据需要）'}</dd>` : ''}
+        ${b.mode === 'cli' ? `<dt>浏览器控制</dt><dd>${b.browser === 'playwright' ? `${icon('check', 'icon-ok')} Playwright（${b.adapter?.id==='codex'?'只读采集':'独立浏览器'}）` : b.browser === 'chrome' ? `${icon('check', 'icon-ok')} Claude in Chrome` : '未开启（只读采集需要）'}</dd>` : ''}
         ${b.mode === 'cli' && b.browser === 'playwright' ? `<dt>抓取浏览器</dt><dd>${b.adapter && b.adapter.browserChannel && b.adapter.browserChannel !== 'chromium' ? `${icon('check', 'icon-ok')} 系统浏览器（${b.adapter.browserChannel === 'msedge' ? 'Edge' : 'Chrome'}；仍有平台风控风险）` : `${icon('warning', 'icon-warn')} 内置浏览器（建议重新运行 browser-setup，自动切换到系统 Edge/Chrome）`}；${b.adapter && b.adapter.headless ? '无头（后台）' : '有头（弹窗）'}</dd>` : ''}
       </dl>
       <div class="row" style="margin-top:14px">
@@ -625,7 +629,7 @@ function viewSettings() {
         </div>` : ''}
       ${b.mode === 'cli' && !b.browser ? `
         <div class="chat-banner" style="margin:14px 0 0">
-          想让 agent 自动发布、检查评论、抓取数据？回到你的 agent，发送：<br>
+          需要配置只读采集浏览器？回到你的 agent，发送：<br>
           <code>为小红书工作台开启浏览器控制</code>
         </div>` : ''}
       ${b.mode === 'inbox' ? `
@@ -634,6 +638,8 @@ function viewSettings() {
           <code>打开小红书工作台，并进入值守模式</code>
         </div>` : ''}
     </div>
+    <div class="card" id="video-service-settings" style="max-width:760px;margin-top:16px">视频生成服务：加载中…</div>
+    <div class="card" id="image-service-settings" style="max-width:760px;margin-top:16px">图片生成服务：加载中…</div>
     ${workerSettingsHtml(b.browserWorker)}
     <div id="system-panels"></div>
     <div class="card" style="max-width:760px;margin-top:16px">
@@ -645,6 +651,8 @@ function viewSettings() {
       </dl>
     </div>`;
   renderSystem($('#system-panels'));
+  mountImageServiceSettings($('#image-service-settings'));
+  mountVideoSettings($('#video-service-settings'));
   loadCuratorCard();
 }
 

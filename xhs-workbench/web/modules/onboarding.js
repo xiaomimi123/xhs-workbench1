@@ -85,7 +85,7 @@ async function buildSteps() {
     {
       done: schedule.items.length > 0 || notes.items.some((n) => n.status === 'published'),
       name: '安排发布',
-      desc: '把笔记排进日历，到点提醒你手动发布，或让 agent 自动发布。',
+      desc: '把笔记排进日历，到点提醒你在官方应用手动发布。',
       buttons: [['schedule', '去发布排期']],
     },
   ];

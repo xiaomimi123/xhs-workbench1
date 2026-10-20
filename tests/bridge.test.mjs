@@ -96,3 +96,19 @@ test('CLI 模式：开启浏览器隔离后，同一账号的任务排队执行'
   assert.ok(order.indexOf('start:a2') > order.indexOf('done:a1'));
   assert.ok(order.indexOf('start:b1') < order.indexOf('done:a1')); // 不同账号并行
 }));
+
+test('local video description adapter removes browser attachment and resume without unlocking account',async()=>{
+ const {localFileAdapter}=await server('bridge.mjs');
+ const adapter=localFileAdapter({mode:'cli',browser:'codex',adapter:{id:'codex',command:'/usr/local/bin/codex',args:['--dangerously-bypass-approvals-and-sandbox'],browserTransport:'codex',resumeArgs:['resume','x']}});
+ assert.equal(adapter.command,'/usr/local/bin/codex');assert.equal(adapter.browserTransport,undefined);assert.equal(adapter.resumeArgs,undefined);assert.ok(adapter.args.includes('workspace-write'));assert.ok(adapter.args.includes('mcp_servers.playwright.enabled=false'));assert.ok(!adapter.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+ assert.throws(()=>localFileAdapter({mode:'inbox',adapter:{id:'codex'}}));
+});
+
+test('local description runs under account restriction without closing browser or changing lock',withMode('text',async()=>{
+ const {lockBrowserAccess,browserAccessStatus}=await server('access-policy.mjs');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'local-agent-'));const command=path.join(dir,'agent.mjs');fs.copyFileSync(new URL('./fixtures/fake-agent.mjs',import.meta.url),command);fs.chmodSync(command,0o755);
+ store.saveBridgeConfig({mode:'cli',browser:'codex',adapter:{id:'codex',command,browserTransport:'codex',args:['unused']}});
+ lockBrowserAccess('default','restriction','fixture lock');let closes=0;const b=new Bridge({browserWorker:{close:async()=>{closes++;}}});const done=new Promise((resolve,reject)=>{b.once('done',resolve);b.once('error',e=>reject(Error(e.message)));});
+ b.submitLocalDescription({id:'vdesc_locktest',accountId:'default',prompt:'local only'});await done;
+ assert.equal(closes,0);assert.equal(browserAccessStatus('default').kind,'restriction');assert.throws(()=>b.submit({id:'normal',accountId:'default',prompt:'browser'}),/锁定/);
+}));

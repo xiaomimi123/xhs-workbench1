@@ -16,14 +16,14 @@ const url = 'https://www.xiaohongshu.com/user/profile/abc123';
 const account = { id: 'default', xhsId: 'my-account', name: '我的账号' };
 const benchmark = { id: 'b_demo', name: '目标作者', url };
 
-function mockBrowser({ minimizeFails = false, restoreFails = false, creator = 'my-account', profile = '目标作者', resultUrl = url, noteCount = 0, visibleEmpty = false, challengeAt = 0, blankNote = false, avatarSrc = '' } = {}) {
+function mockBrowser({ minimizeFails = false, restoreFails = false, creator = 'my-account', profile = '目标作者', resultUrl = url, noteCount = 0, visibleEmpty = false, challengeAt = 0, blankNote = false, avatarSrc = '', returnFails = false } = {}) {
   let creatorReads = 0;
   const events = [];
   const contexts = [];
   const chromium = { async launchPersistentContext(dir, opts) {
     events.push(['launch', dir, opts]);
     const page = {
-      current: '', on() {}, url() { return this.current; },
+      current: '', on() {}, async waitForFunction() {}, async goBack() { if (returnFails) throw new Error('history unavailable'); this.current = url; events.push(['back']); }, url() { return this.current; },
       async goto(target) { this.current = target.startsWith('https://www.xiaohongshu.com/user/profile/') ? resultUrl : target; events.push(['goto', target]); },
       async evaluate() {
         if (this.current.startsWith('https://creator.')) return { url: this.current,
@@ -38,7 +38,7 @@ function mockBrowser({ minimizeFails = false, restoreFails = false, creator = 'm
           bio: '分享真实经验', noteRows: noteCount || visibleEmpty ? Array.from({ length: noteCount }, (_, i) => ({ url: `https://www.xiaohongshu.com/explore/note${i + 1}abcd`, title: `笔记 ${i + 1}` })) : undefined,
           text: `${profile} 粉丝` };
       },
-      locator(selector) { return { click: async () => { const id = /note\d+abcd/.exec(selector)?.[0]; page.current = `https://www.xiaohongshu.com/explore/${id}`; events.push(['click', page.current]); }, evaluate: async () => avatarSrc, count: async () => 1, screenshot: async () => PNG_1PX, innerText: async () => '用户搜索结果', first() { return this; } }; },
+      locator(selector) { return { click: async () => { const id = /note\d+abcd/.exec(selector)?.[0]; page.current = `https://www.xiaohongshu.com/explore/${id}`; events.push(['click', page.current]); }, evaluate: async () => avatarSrc, count: async () => selector.includes('close') ? 0 : 1, screenshot: async () => PNG_1PX, innerText: async () => '用户搜索结果', first() { return this; } }; },
     };
     const context = { pages: () => [page], on(event, callback) { if (event === 'close') this.closed = callback; }, async route() {}, async newCDPSession() { return { async send(cmd, arg) {
       events.push(['cdp', cmd, arg]);
@@ -54,7 +54,7 @@ function mockBrowser({ minimizeFails = false, restoreFails = false, creator = 'm
 
 const workerFor = (options = {}) => {
   const fake = mockBrowser(options);
-  return { worker: new BrowserWorker({ load: fake.load, profileRoot: fs.mkdtempSync(path.join(WS, 'profiles-')), detect: () => 'chrome', ...(options.download ? {download: options.download} : {}), recognize: async () => ({ engine: 'fixture', text: '分享真实经验\n42 关注\n1.3万 粉丝\n8.6万 获赞与收藏', lines: [] }), delay: async () => {} }), events: fake.events, contexts: fake.contexts };
+  return { worker: new BrowserWorker({ assertAccess: () => {}, lockAccess: () => {}, load: fake.load, profileRoot: fs.mkdtempSync(path.join(WS, 'profiles-')), detect: () => 'chrome', ...(options.download ? {download: options.download} : {}), recognize: async () => ({ engine: 'fixture', text: '分享真实经验\n42 关注\n1.3万 粉丝\n8.6万 获赞与收藏', lines: [] }), delay: async () => {}, ...options.workerOptions }), events: fake.events, contexts: fake.contexts };
 };
 
 test('URL 和字段解析拒绝跨域、登录挑战、缺字段和同名歧义', () => {
@@ -93,6 +93,7 @@ test('有头 worker 只读取前五篇并逐篇回调；挑战页保留已完成
   const observed = [];
   let profile;
   let summary;
+  await complete.worker.prepare(account);
   const result = await complete.worker.verify(account, benchmark, {
     onVerified: async (data) => { profile = data; },
     onNote: async (data) => observed.push(data.note),
@@ -113,6 +114,7 @@ test('有头 worker 只读取前五篇并逐篇回调；挑战页保留已完成
   const challenged = workerFor({ noteCount: 6, challengeAt: 3 });
   const kept = [];
   let partial;
+  await challenged.worker.prepare(account);
   await challenged.worker.verify(account, benchmark, {
     onNote: async (data) => kept.push(data.note), onFinish: async (data) => { partial = data; },
   });
@@ -126,6 +128,7 @@ test('有头 worker 只读取前五篇并逐篇回调；挑战页保留已完成
 test('笔记检查点写入失败不能被当成页面缺字段；取消保留已经回调的笔记', async () => {
   const { worker } = workerFor({ noteCount: 2 });
   let finished = false;
+  await worker.prepare(account);
   await assert.rejects(worker.verify(account, benchmark, {
     onNote: async () => { throw new Error('checkpoint-write-failed'); },
     onFinish: async () => { finished = true; },
@@ -135,6 +138,7 @@ test('笔记检查点写入失败不能被当成页面缺字段；取消保留�
   const cancelled = workerFor({ noteCount: 3 });
   const signal = new AbortController();
   const persisted = [];
+  await cancelled.worker.prepare(account);
   await assert.rejects(cancelled.worker.verify(account, benchmark, {
     signal: signal.signal,
     onNote: async ({ note }) => { persisted.push(note.url); signal.abort(); },
@@ -146,6 +150,7 @@ test('笔记检查点写入失败不能被当成页面缺字段；取消保留�
 
 test('同一账号复用有头资料；CLI 请求前可关闭；不同账号隔离', async () => {
   const { worker, events } = workerFor();
+  await worker.prepare(account);
   assert.equal((await worker.verify(account, benchmark)).state, 'verified');
   assert.equal((await worker.verify(account, benchmark)).state, 'verified');
   assert.equal(events.filter(([type]) => type === 'launch').length, 1);
@@ -172,6 +177,7 @@ test('用户手动关闭工作进程窗口后，下次任务会重新打开资�
 
 test('无法最小化则明确留在可见有头模式；外部锁不删除、不抢占', async () => {
   const { worker } = workerFor({ minimizeFails: true });
+  await worker.prepare(account);
   assert.equal((await worker.verify(account, benchmark)).state, 'verified');
   assert.equal(worker.status('default').window, 'visible');
   assert.match(worker.status('default').windowNote, /可能影响焦点/);
@@ -263,6 +269,7 @@ test('主页明确可见 0～4 篇时只处理实际篇数，不补满五篇', a
   for (const count of [0, 1, 2, 3, 4]) {
     const { worker, events } = workerFor({ noteCount: count, visibleEmpty: true });
     let summary; const notes = [];
+    await worker.prepare(account);
     await worker.verify(account, benchmark, { onNote: async data => notes.push(data.note), onFinish: async data => { summary = data; } });
     assert.equal(summary.state, 'complete'); assert.equal(summary.captured, count);
     assert.equal(notes.length, count);
@@ -301,9 +308,84 @@ test('视频播放器时长不能写入笔记发布时间', () => {
 
 test('空详情不计入成功，头像原图优先于元素截图', async () => {
  const empty=workerFor({noteCount:1,blankNote:true});
+ await empty.worker.prepare(account);
  const result=await empty.worker.verify(account,benchmark);
  assert.equal(result.captured,0);assert.equal(result.captureState,'partial');assert.match(result.reason,/详情/);await empty.worker.closeAll();
  const downloaded=workerFor({visibleEmpty:true,avatarSrc:'https://sns-avatar-qc.xhscdn.com/actual.png',download:async()=>({buffer:PNG_1PX,ext:'.png'})});
+ await downloaded.worker.prepare(account);
  let profile;await downloaded.worker.verify(account,benchmark,{onVerified:async data=>{profile=data;}});
  assert.ok(profile.avatarDownloaded);assert.equal(profile.avatarPng,null);await downloaded.worker.closeAll();
+});
+test('本机确认已退出进程的锁交由Chrome恢复，活动/未知锁仍阻止且不删除',async()=>{const os=await import('node:os');const {spawn}=await import('node:child_process');const child=spawn(process.execPath,['-e','']);await new Promise(r=>child.once('exit',r));const dir=path.join(WS,'stale-profile');fs.mkdirSync(dir);const lock=path.join(dir,'SingletonLock');fs.symlinkSync(`${os.hostname()}-${child.pid}`,lock);assert.equal(profileHasLock(dir),false);assert.ok(fs.lstatSync(lock).isSymbolicLink());fs.unlinkSync(lock);fs.symlinkSync(`${os.hostname()}-${process.pid}`,lock);assert.equal(profileHasLock(dir),true);});
+
+ test('verify requires a live matching preparation proof without opening any page', async () => {
+ const {worker,events}=workerFor();
+ assert.equal((await worker.verify(account,benchmark)).state,'needsReview');
+ assert.equal(events.length,0);
+ await worker.prepare(account);
+ const before=events.filter(e=>e[0]==='goto').length;
+ assert.equal((await worker.verify({...account,xhsId:'different'},benchmark)).state,'needsReview');
+ assert.equal(events.filter(e=>e[0]==='goto').length,before);
+ await worker.closeAll();
+ assert.equal((await worker.verify(account,benchmark)).state,'needsReview');
+ });
+ test('five notes reuse preparation and return through history without profile reloads', async () => {
+ const {worker,events}=workerFor({noteCount:5}); await worker.prepare(account);
+ assert.equal((await worker.verify(account,benchmark)).captured,5);
+ assert.equal(events.filter(e=>e[0]==='goto'&&e[1].startsWith('https://creator.')).length,1);
+ assert.equal(events.filter(e=>e[0]==='goto'&&e[1]===url).length,1);
+ assert.equal(events.filter(e=>e[0]==='back').length,5);
+ await worker.closeAll();
+ });
+
+test('preparation expires and failed return preserves the completed note then stops', async () => {
+ let now=1000; const expired=workerFor({workerOptions:{now:()=>now,proofTtlMs:100}});
+ await expired.worker.prepare(account);now+=100;
+ const before=expired.events.length;
+ assert.equal((await expired.worker.verify(account,benchmark)).state,'needsReview');
+ assert.equal(expired.events.length,before);await expired.worker.closeAll();
+ const blocked=workerFor({noteCount:5,returnFails:true});await blocked.worker.prepare(account);
+ const kept=[];const result=await blocked.worker.verify(account,benchmark,{onNote:async d=>kept.push(d.note)});
+ assert.equal(result.captured,1);assert.equal(kept.length,1);assert.equal(result.captureState,'partial');
+ assert.equal(blocked.events.filter(e=>e[0]==='click').length,1);await blocked.worker.closeAll();
+});
+test('restriction invalidates preparation and locks access; randomized pacing is interruptible', async () => {
+ const locks=[];const restricted=workerFor({noteCount:3,challengeAt:2,workerOptions:{lockAccess:(...args)=>locks.push(args)}});
+ await restricted.worker.prepare(account);assert.equal((await restricted.worker.verify(account,benchmark)).captured,1);
+ assert.equal(locks[0][1],'restriction');
+ assert.equal((await restricted.worker.verify(account,benchmark)).state,'needsReview');await restricted.worker.closeAll();
+ const controller=new AbortController();const paced=workerFor({noteCount:3});await paced.worker.prepare(account);
+ let total=0;paced.worker.delay=async ms=>{total+=ms;controller.abort();};
+ await assert.rejects(paced.worker.verify(account,benchmark,{signal:controller.signal}),/已取消/);
+ assert.ok(total<=100);assert.equal(paced.events.filter(e=>e[0]==='click').length,0);await paced.worker.closeAll();
+});
+
+test('production access policy persists restrictions and blocks prepare without navigation', async () => {
+ const policy=await server('access-policy.mjs');
+ const {worker,events}=workerFor({noteCount:2,challengeAt:1,workerOptions:{assertAccess:policy.assertBrowserAccess,lockAccess:policy.lockBrowserAccess}});
+ await worker.prepare(account);await worker.verify(account,benchmark);
+ assert.equal(policy.browserAccessStatus(account.id).kind,'restriction');const before=events.length;
+ await assert.rejects(worker.prepare(account),/锁定/);assert.equal(events.length,before);
+ await worker.closeAll();policy.resolveBrowserRestriction(account.id,true);
+});
+
+test('long capture errors cannot truncate a later restriction before persistent locking', async () => {
+ const policy=await server('access-policy.mjs');
+ const {worker}=workerFor({noteCount:3,challengeAt:3,workerOptions:{assertAccess:policy.assertBrowserAccess,lockAccess:policy.lockBrowserAccess,recognize:async()=>{throw new Error('x'.repeat(300));}}});
+ await worker.prepare(account);
+ const page=worker.instances.get(account.id).page;const locator=page.locator.bind(page);
+ page.locator=selector=>{const loc=locator(selector);if(selector.includes('avatar'))loc.count=async()=>0;if(selector.includes('note-detail'))loc.screenshot=async()=>{throw new Error('y'.repeat(200));};return loc;};
+ await worker.verify(account,benchmark);
+ assert.equal(policy.browserAccessStatus(account.id).kind,'restriction');
+ assert.equal(worker.instances.get(account.id).proof,undefined);
+ await worker.closeAll();policy.resolveBrowserRestriction(account.id,true);
+});
+
+test('return error restriction is classified before its displayed error is shortened', async () => {
+ const policy=await server('access-policy.mjs');
+ const {worker}=workerFor({noteCount:1,workerOptions:{assertAccess:policy.assertBrowserAccess,lockAccess:policy.lockBrowserAccess}});
+ await worker.prepare(account);worker.instances.get(account.id).page.goBack=async()=>{throw new Error('x'.repeat(200)+'安全验证');};
+ const result=await worker.verify(account,benchmark);assert.equal(result.captured,1);
+ assert.equal(policy.browserAccessStatus(account.id).kind,'restriction');assert.equal(worker.instances.get(account.id).proof,undefined);
+ await worker.closeAll();policy.resolveBrowserRestriction(account.id,true);
 });

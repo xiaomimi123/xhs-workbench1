@@ -22,7 +22,7 @@ export function isXhsPage(value) {
 }
 
 export function pageWarning(text = '', url = '') {
-  if (/验证码|安全验证|操作频繁|访问受限|异常访问|风险提示|滑块验证|当前笔记暂时无法浏览|请打开小红书App扫码查看/.test(String(text).slice(0, 5000))) return '检测到验证码或访问限制，请在有头窗口由本人处理；本次采集已停止';
+  if (/AI不规范|商业权益|流量曝光|验证码|安全验证|操作频繁|访问受限|异常访问|风险提示|滑块验证|当前笔记暂时无法浏览|请打开小红书App扫码查看/.test(String(text).slice(0, 5000))) return '检测到验证码或访问限制，请在有头窗口由本人处理；本次采集已停止';
   if (/\/login(?:\/|\?|$)/i.test(url) || /扫码登录|手机号登录|请先登录/.test(String(text).slice(0, 1200))) return '需要在有头浏览器窗口由本人登录';
   return null;
 }

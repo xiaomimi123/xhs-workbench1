@@ -224,3 +224,65 @@ test('评论私信 HTTP：草稿编辑和本地确认撤回不写发送队列',a
  r=(await api('POST','/api/engage/review/revoke?account=default',payload())).body;assert.equal(r.status,'drafted');assert.ok(fs.readFileSync(file).equals(original));
  const cfg=(await api('GET','/api/automation?account=default')).body;assert.equal(cfg.engage.autoSend,false);
 });
+test('生图 HTTP：交接结果校验、候选访问与重复应用',async()=>{
+ const note=(await api('POST','/api/notes?account=default',{create:true,title:'生图测试',content:'保留正文'})).body;
+ const started=await api('POST','/api/images/start?account=default',{noteId:note.id,prompt:'编辑台插画',count:1});assert.equal(started.status,200);const j=started.body;
+ assert.equal((await api('POST','/api/images/complete?account=default',{id:j.id})).status,400);
+ fs.copyFileSync(new URL('./fixtures/card.png',import.meta.url),path.join(j.outputDir,'candidate.png'));store.writeJson(j.outputFile,{images:[{file:'candidate.png'}]});
+ const done=await api('POST','/api/images/complete?account=default',{id:j.id});assert.equal(done.status,200);assert.equal(done.body.status,'done');
+ const apply=await api('POST','/api/images/apply?account=default',{id:j.id,index:0});assert.equal(apply.status,200);assert.equal((await api('POST','/api/images/apply?account=default',{id:j.id,index:0})).body.file,apply.body.file);assert.equal(apply.body.note.content,'保留正文');assert.equal(apply.body.note.media.length,1);
+});
+test('独立海报 HTTP：参考图、素材库与首图封面',async()=>{
+ const png=fs.readFileSync(new URL('./fixtures/card.png',import.meta.url));const ref=await api('POST','/api/images/references?account=default',{filename:'style.png',data:png.toString('base64'),role:'style',style:'powder'});assert.equal(ref.status,200);
+ const started=await api('POST','/api/images/start?account=default',{prompt:'暖光',outputMode:'poster',headline:'标题',references:[{file:ref.body.file,role:'style',source:'studio'}]});assert.equal(started.status,200);const j=started.body;assert.equal(j.noteId,null);fs.writeFileSync(path.join(j.outputDir,'candidate.png'),png);store.writeJson(j.outputFile,{images:[{file:'candidate.png'}]});assert.equal((await api('POST','/api/images/complete?account=default',{id:j.id})).status,200);
+ const saved=await api('POST','/api/images/library?account=default',{id:j.id,index:0});assert.equal(saved.status,200);assert.equal((await api('POST','/api/images/library?account=default',{id:j.id,index:0})).body.id,saved.body.id);
+ const note=(await api('POST','/api/notes?account=default',{create:true,title:'海报草稿',content:'原正文'})).body;const detail=(await api('GET',`/api/notes/detail?account=default&id=${note.id}`)).body;
+ const applied=await api('POST','/api/images/apply?account=default',{id:j.id,index:0,noteId:note.id,purpose:'cover',expectedCover:[detail.coverHash,detail.coverMode,detail.media.map(m=>m.file)]});assert.equal(applied.status,200);assert.equal(applied.body.note.coverMode,'first');assert.equal(applied.body.note.content,'原正文');
+});
+test('实况HTTP下载错误不终止服务，缺失任务返回404',async()=>{const missing=await api('GET','/api/live/bundle?account=default&id=live_missing');assert.equal(missing.status,404);assert.equal((await api('GET','/api/live/jobs?account=default')).status,200);assert.equal((await api('POST','/api/live/start?account=default',{imageJobId:'missing',index:0})).status,404);});
+test('手机接收管理接口保持工作台鉴权与任务边界',async()=>{const options=await api('GET','/api/live/receive/options?account=default');assert.equal(options.status,200);assert.ok(Array.isArray(options.body.addresses));assert.equal((await api('GET','/api/live/receive?account=default&id=missing')).status,404);assert.equal((await api('POST','/api/live/receive/revoke?account=default',{id:'missing'})).status,404);assert.equal((await api('POST','/api/live/receive?account=default',{id:'live_missing',address:'8.8.8.8'})).status,400);});
+
+test('账号访问锁覆盖手动入口且普通恢复不能解除平台限制', async()=>{
+ const r=await api('POST','/api/browser/access?account=default',{action:'restriction'});
+ assert.equal(r.status,200);assert.equal(r.body.kind,'restriction');
+ assert.equal((await api('POST','/api/benchmarks/collection?account=default',{action:'resume'})).status,409);
+ assert.equal((await api('POST','/api/chat/send',{accountId:'default',taskKind:'browser.prepare'})).status,409);
+ assert.equal((await api('POST','/api/browser/access?account=default',{action:'resolve-restriction',confirmed:false})).status,400);
+ const status=await api('GET','/api/benchmarks?account=default');assert.equal(status.body.access.kind,'restriction');
+ assert.equal((await api('POST','/api/browser/access?account=default',{action:'resolve-restriction',confirmed:true})).status,200);
+ assert.equal((await api('GET','/api/benchmarks?account=default')).body.access.kind,'open');
+});
+
+test('生图服务配置需鉴权，密钥不回传，默认保留 Agent，不凭空生成',async()=>{
+ assert.equal((await api('GET','/api/images/service',null,{'X-Workbench-Token':'wrong'})).status,401);
+ const initial=await api('GET','/api/images/service');assert.equal(initial.status,200);assert.equal(initial.body.defaultProvider,'current-agent');
+ const saved=await api('PUT','/api/images/service',{apiKey:'fixture-secret-never-return',model:'gpt-image-2-ext',size:'16:9',resolution:'2k'});
+ assert.equal(saved.status,200);assert.equal(saved.body.hasKey,true);assert.ok(!JSON.stringify(saved.body).includes('fixture-secret-never-return'));
+ const kept=await api('PUT','/api/images/service',{apiKey:''});assert.equal(kept.body.hasKey,true);
+ const removed=await api('PUT','/api/images/service',{deleteKey:true});assert.equal(removed.body.hasKey,false);
+ const missing=await api('POST','/api/images/start?account=default',{provider:'apimart',prompt:'fixture only',count:1});assert.ok(missing.status>=400);
+ const state=await api('GET','/api/state');assert.ok(!JSON.stringify(state.body).includes('fixture-secret-never-return'));
+});
+
+test('视频配置鉴权、密钥隐藏、未配置不创建任务',async()=>{
+ assert.equal((await api('GET','/api/videos/service',null,{'X-Workbench-Token':'wrong'})).status,401);
+ const before=await api('GET','/api/videos/service');assert.equal(before.body.hasKey,false);
+ const saved=await api('PUT','/api/videos/service',{apiKey:'video-secret-fixture'});assert.equal(saved.body.hasKey,true);assert.equal(JSON.stringify(saved.body).includes('video-secret-fixture'),false);
+ assert.equal((await api('PUT','/api/videos/service',{apiKey:''})).body.hasKey,true);
+ await api('PUT','/api/videos/service',{deleteKey:true});
+ assert.equal((await api('POST','/api/videos/start?account=default',{mode:'t2v',prompt:'test'})).status,400);
+ assert.equal((await api('GET','/api/videos/jobs?account=default')).body.items.length,0);
+ assert.equal((await api('GET','/api/videos/sources?account=default')).status,200);
+});
+
+test('参考视频 HTTP：真实上传抽帧、Agent回调、描述候选与账号隔离，无生成请求',async()=>{
+ const {execFileSync}=await import('node:child_process');const file=path.join(WS,'sample.mp4');const ffmpeg=fs.existsSync('/opt/homebrew/bin/ffmpeg')?'/opt/homebrew/bin/ffmpeg':'ffmpeg';execFileSync(ffmpeg,['-v','error','-f','lavfi','-i','testsrc2=size=128x96:rate=12','-t','1','-c:v','libx264',file]);
+ const up=await api('POST','/api/videos/reference-videos?account=default',{filename:'isolated.mp4',data:fs.readFileSync(file).toString('base64')});assert.equal(up.status,200);assert.equal(up.body.media.width,128);
+ const media=await fetch(`${base}/api/files?account=default&path=${encodeURIComponent(up.body.path)}&t=${token}`);assert.equal(media.status,200);assert.equal(media.headers.get('content-type'),'video/mp4');
+ const other=store.saveAccount({name:'other video account'}).id;assert.equal((await api('POST',`/api/videos/descriptions?account=${other}`,{kind:'generate',sourceVideoId:up.body.id})).status,404);
+ for(const kind of ['generate','optimize']){
+  const start=await api('POST','/api/videos/descriptions?account=default',{kind,sourceVideoId:up.body.id,prompt:'原描述',mode:'rv2v'});assert.equal(start.status,200);
+  const done=await waitFor(async()=>{const j=(await api('GET','/api/videos/descriptions?account=default')).body.items.find(j=>j.id===start.body.id);if(j.status==='error')throw Error(j.error);return j.status==='done'?j:null;});assert.equal(done.originalPrompt,'原描述');assert.match(done.result.prompt,/隔离测试/);assert.equal(done.result.observations.length,12);
+ }
+ assert.equal((await api('GET','/api/videos/jobs?account=default')).body.items.length,0);
+});

@@ -187,7 +187,7 @@ function draw(main) {
           <button class="btn small" data-act="titles">生成标题备选</button>
           <button class="btn small" data-act="agent-check">让 agent 深度检查</button>
           <button class="btn small" data-act="video-script">${icon("video")} ${n.videoScript && n.videoScript.trim() ? '改视频脚本' : '写视频脚本'}</button>
-          <button class="btn small" data-act="cover">${icon("palette")} 做封面</button>
+          <button class="btn small" data-act="cover">${icon("palette")} 生成图片</button>
           <div class="spacer"></div>
           <button class="btn small ghost danger" data-act="delete">删除</button>
         </div>

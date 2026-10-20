@@ -1,3 +1,4 @@
+import {assertBrowserAccess, lockBrowserAccess, resumeBrowserAccess} from './access-policy.mjs';
 // 持久化采集意图。只登记检查点关联目标或用户批量选中的缺项，不扫描触发全部旧账号。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,7 +18,7 @@ export function enqueueCollection(account, ids) {
   let changed = false;
   for (const id of ids) {
     if (!/^b_[\w-]+$/.test(id) || q.items.some(x => x.id === id)) continue;
-    q.items.push({ id, state: 'pending', attempts: 0, queuedAt: new Date().toISOString() });
+    q.items.push({ id, state: 'pending', authorized: false, attempts: 0, queuedAt: new Date().toISOString() });
     changed = true;
   }
   if (changed) writeJson(file(account), q);
@@ -45,6 +46,7 @@ export class BenchmarkQueue {
       for (const item of q.items.filter(x => x.state === 'running')) {
         item.state = 'pending'; delete item.taskId;
       }
+      for (const item of q.items) item.authorized = false;
       q.paused = true; q.reason = '服务中断，已保存结果保留；准备好登录后整体继续';
       this.save(id, q);
     }
@@ -53,12 +55,13 @@ export class BenchmarkQueue {
     enqueueCollection(account, ids);
     const q = collectionStatus(account);
     if (q.reason.includes('队列损坏')) throw new Error(q.reason);
-    if (action === 'pause') { q.paused = true; q.reason = '用户暂停；当前目标结束后停止'; }
+    if (action === 'pause') { lockBrowserAccess(account, 'paused', '用户暂停自动访问'); q.paused = true; q.reason = '用户暂停自动访问'; for(const item of q.items)item.authorized=false; }
     else {
+      resumeBrowserAccess(account);
       q.paused = false; q.reason = '';
       for (const item of q.items) {
         if (['blocked', 'partial'].includes(item.state) || action === 'fill' && ids.includes(item.id) && item.state !== 'running') item.state = 'pending';
-        if (item.state === 'pending') delete item.observationReceived;
+        if (item.state === 'pending' && (action === 'resume' || ids.includes(item.id))) { delete item.observationReceived; item.authorized = true; }
       }
     }
     this.save(account, q);
@@ -80,7 +83,7 @@ export class BenchmarkQueue {
       item.state = observationComplete(snapshot) ? 'complete' : snapshot ? 'partial' : 'blocked';
       item.reason = item.state === 'complete' ? '' : error || snapshot?.reason || '任务结束但没有完整观察检查点；请检查登录、浏览器能力或检查点冲突后继续';
       item.finishedAt = new Date().toISOString();
-      delete item.taskId;
+      delete item.taskId; item.authorized = false;
       if (item.state !== 'complete') { q.paused = true; q.reason = item.reason; }
       this.save(account, q);
     }
@@ -101,6 +104,8 @@ export class BenchmarkQueue {
           item.state = 'partial'; item.reason = snapshot.reason || '本次观察不完整';
           q.paused = true; q.reason = item.reason; dirty = true; break;
         }
+        if (item.authorized !== true) continue;
+        try { assertBrowserAccess(account); } catch (err) { q.paused=true; q.reason=err.message; dirty=true; break; }
         item.state = 'running'; item.attempts++; item.startedAt = new Date().toISOString();
         item.taskId = `collect_${account}_${item.id}_${Date.now()}`;
         this.save(account, q); // 派发前写意图，崩溃不会无记录重放。

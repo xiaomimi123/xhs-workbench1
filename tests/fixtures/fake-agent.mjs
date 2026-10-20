@@ -58,6 +58,13 @@ if(prompt.includes('这是工作台受控回复审核任务')){
  if(inputPath&&outputPath){const input=JSON.parse(fs.readFileSync(inputPath,'utf8'));fs.writeFileSync(outputPath,JSON.stringify({replies:input.messages.map(m=>({itemId:m.itemId,category:'咨询',action:m.incomplete?'human':'reply',reason:'先核对具体问题',draft:'你想了解哪一步？可以补充具体问题。',sourceIds:[m.itemId],unverified:[]}))}));}
 }
 
+// Reference-description integration fixture; no model/network/generation calls.
+if(prompt.includes('执行工作台视频描述任务。')){
+ const inputPath=/读取 (.+?vdesc_[\w-]+\/input\.json)。/.exec(prompt)?.[1];
+ const outputPath=/只写 JSON 到 (.+?vdesc_[\w-]+\/result\.json)：/.exec(prompt)?.[1];
+ if(inputPath&&outputPath){const input=JSON.parse(fs.readFileSync(inputPath,'utf8'));fs.writeFileSync(outputPath,JSON.stringify({prompt:'隔离测试：固定镜头，主体缓慢移动。',observations:input.frames.map(f=>({time:f.time,description:'隔离抽帧占位观察，不代表真实模型分析'})),limitations:['假 Agent 只验证流程']}));}
+}
+
 // 提示词里出现 WRITE_FILE:<相对路径> 时，模拟 agent 写文件
 const m = /WRITE_FILE:(\S+)/.exec(prompt);
 if (m) fs.writeFileSync(m[1], `written by fake agent\n`);
