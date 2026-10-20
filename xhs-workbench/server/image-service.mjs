@@ -23,7 +23,14 @@ export class ImageService {
  requireKey(){const key=this.read().apiKey;if(!key)throw httpError(400,'请先在设置中保存APIMart API Key');return key;}
  // 提交诊断：只记录阶段、HTTP 状态、请求 ID、网络错误码和上游摘要（截断并抹去密钥），不保存完整响应。
  redact(text,token){const key=token||this.read().apiKey||'';return key?String(text||'').split(key).join('***'):String(text||'');}
+ // 上游错误体通常是 {"error":{"message":"… (request id: xxx)"}}：只取 message，并把嵌在里面的请求编号拆出来
+ summarize(upstream){
+  let text=String(upstream||'').trim();try{const j=JSON.parse(text);const m=j?.error?.message??j?.message??j?.error;if(typeof m==='string')text=m;}catch{}
+  const id=/\(request id:\s*([\w-]+)\)/i.exec(text);if(id)text=text.replace(id[0],'').trim();
+  return {text:text.replace(/\s+/g,' '),requestId:id?id[1]:''};
+ }
  failure(stage,{httpStatus=null,networkCode='',requestError='',upstream='',requestId='',token=''}={}){
+  if(stage==='http'&&upstream){const s=this.summarize(upstream);upstream=s.text;requestId=requestId||s.requestId;}
   const err=httpError(502,stage==='connect'?'APIMart连接中断，远端状态待核对':stage==='respond'?'APIMart响应格式无效，远端状态待核对':`APIMart请求未成功（HTTP ${httpStatus}）`);
   err.diag={stage,httpStatus,networkCode:String(networkCode||'').slice(0,80),detail:this.redact(requestError||upstream,token).slice(0,300),
     ...(requestId?{requestId:String(requestId).slice(0,80)}:{}),at:new Date().toISOString()};
@@ -41,7 +48,13 @@ export class ImageService {
  try{return await res.json();}catch(err){throw this.failure('respond',{requestError:err?.message||'',requestId:res.headers?.get?.('x-request-id')||'',token});}
  }
  async testConnection(){
- const key=this.requireKey();try{const r=await this.fetch(BASE+'/v1/models',{headers:{Authorization:`Bearer ${key}`},redirect:'error',signal:AbortSignal.timeout(15000)});return {connected:true,authenticated:r.ok?true:[401,403].includes(r.status)?false:null,status:r.status,generationTested:false,message:r.ok?'连接和鉴权通过；未调用生图，未验证模型权限或余额。':[401,403].includes(r.status)?'服务可连接，但鉴权失败，请检查API Key。':'服务可连接，但无法确认鉴权；未调用生图。'};}catch{return {connected:false,authenticated:null,generationTested:false,message:'无法连接APIMart；未调用生图。'};}
+ const key=this.requireKey();let networkCode='';
+ // 网络偶发抖动很常见：连不上时自动再试一次；仍失败就给出具体的网络错误码，方便排查
+ for(let attempt=0;attempt<2;attempt++){
+  try{const r=await this.fetch(BASE+'/v1/models',{headers:{Authorization:`Bearer ${key}`},redirect:'error',signal:AbortSignal.timeout(15000)});return {connected:true,authenticated:r.ok?true:[401,403].includes(r.status)?false:null,status:r.status,generationTested:false,message:r.ok?'连接和鉴权通过；未调用生图，未验证模型权限或余额。':[401,403].includes(r.status)?'服务可连接，但鉴权失败，请检查API Key。':'服务可连接，但无法确认鉴权；未调用生图。'};}
+  catch(err){networkCode=String(err?.cause?.code||err?.code||err?.name||'').slice(0,40);if(attempt===0)await new Promise((r)=>setTimeout(r,this.retryDelayMs??800));}
+ }
+ return {connected:false,authenticated:null,generationTested:false,networkCode,message:`无法连接APIMart${networkCode?`（${networkCode}）`:''}，已自动重试一次；未调用生图。请检查这台电脑的网络、代理或防火墙后再测试。`};
  }
  async submit(input,key){const body={model:input.model,prompt:input.prompt,n:1,size:input.size,resolution:input.resolution,official_fallback:false};if(input.image_urls?.length)body.image_urls=input.image_urls;const data=await this.request('/v1/images/generations',{method:'POST',body,key});const id=data?.data?.[0]?.task_id;if(typeof id!=='string'||!/^[-\w]{1,200}$/.test(id)){throw this.failure('respond',{requestError:'响应缺少合法任务编号，远端可能已受理',token:key});}return id;}
  async poll(id){if(!/^[-\w]{1,200}$/.test(id))throw httpError(400,'远端任务编号无效');return (await this.request('/v1/tasks/'+encodeURIComponent(id))).data;}

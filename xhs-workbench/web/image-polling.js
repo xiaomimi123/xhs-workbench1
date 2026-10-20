@@ -6,7 +6,7 @@
 const ACTIVE = ['submitting', 'submitted', 'processing'];
 const GIVE_UP_AFTER = 30 * 60 * 1000; // 超过 30 分钟的任务不再自动查询，仍可手动点“查询进度”
 
-export function startImagePolling({ current, jobs, paused = () => false, focused = () => false, refresh, load, draw, now = Date.now, setTimer = typeof setTimeout === 'function' ? setTimeout : null, clearTimer = typeof clearTimeout === 'function' ? clearTimeout : () => {} }) {
+export function startImagePolling({ root = null, formatElapsed = null, current, jobs, paused = () => false, focused = () => false, refresh, load, draw, now = Date.now, setTimer = typeof setTimeout === 'function' ? setTimeout : null, clearTimer = typeof clearTimeout === 'function' ? clearTimeout : () => {} }) {
   if (!setTimer) return () => {}; // 没有定时器的环境（例如测试沙箱）不轮询
   let stopped = false;
   let timer;
@@ -51,6 +51,14 @@ export function startImagePolling({ current, jobs, paused = () => false, focused
       schedule(pending.length || dirty ? delay(failed, pending) : 4000);
     }
   }
+  // 已等待时间每秒走一次，只改文字，不重绘页面
+  let ticker = null;
+  if (root && formatElapsed && typeof setInterval === 'function') {
+    ticker = setInterval(() => {
+      if (stopped || !current()) { clearInterval(ticker); return; }
+      root.querySelectorAll?.('[data-elapsed]').forEach((el) => { const t = Date.parse(el.dataset.elapsed); if (t) el.textContent = formatElapsed(now() - t); });
+    }, 1000);
+  }
   schedule(1500);
-  return () => { stopped = true; clearTimer(timer); };
+  return () => { stopped = true; clearTimer(timer); if (ticker) clearInterval(ticker); };
 }

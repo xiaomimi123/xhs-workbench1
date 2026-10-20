@@ -10,6 +10,17 @@ import {imageService as defaultImageService,validateImageOptions} from './image-
 const hash=v=>crypto.createHash('sha256').update(typeof v==='string'||Buffer.isBuffer(v)?v:JSON.stringify(v)).digest('hex');
 const baseline=n=>hash([n.title,n.content,n.tags,n.status,!!n.video]);
 const plain=(file,max)=>{let parent=path.dirname(file);while(parent!==path.resolve(WORKSPACE)&&parent!==path.dirname(parent)){if(fs.lstatSync(parent).isSymbolicLink())throw Error('文件路径包含软链接');parent=path.dirname(parent);}const s=fs.lstatSync(file);if(!s.isFile()||s.isSymbolicLink()||s.size>max)throw Error('文件类型或大小无效');return fs.readFileSync(file);};
+// 网关明确拒绝（4xx）时，按状态码给出用户能照着做的原因和处理办法
+export const rejectionHint=status=>({
+ 400:'请求参数被拒绝，常见原因是画面要求或参考图没有通过内容审核，改写描述或换一张参考图再试。',
+ 401:'API Key 无效或已失效，请到「连接与设置 → 图片生成服务」重新填写。',
+ 402:'账户余额不足，请先到 APIMart 充值。',
+ 403:'这个 API Key 没有使用该模型的权限，请检查 APIMart 账户的模型权限。',
+ 404:'接口地址或模型不存在，请检查所选模型。',
+ 413:'请求内容太大，请减少或压缩参考图。',
+ 422:'请求参数不符合要求，请检查所选比例、分辨率和参考图。',
+ 429:'请求太频繁，请过几分钟再试。',
+})[status]||'请求被拒绝。';
 export class ImageWorkflow {
  constructor({changed=()=>{},imageService=defaultImageService}={}){this.changed=changed;this.imageService=imageService;this.active=new Map();}
  dir(a){return path.join(content.accRoot(a),'image-jobs');}
@@ -64,7 +75,7 @@ export class ImageWorkflow {
      j.notSubmitted=!!diag&&diag.stage==='http'&&diag.httpStatus>=400&&diag.httpStatus<500&&diag.httpStatus!==408;
      j.status=j.notSubmitted?'error':'needs_review';
      j.error=j.notSubmitted
-      ?`APIMart 明确拒绝提交（HTTP ${diag.httpStatus}）${diag.detail?`：${diag.detail}`:''}；未创建远端任务，可修正后重新发起，无需到控制台核对任务编号。`
+      ?`APIMart 明确拒绝提交（HTTP ${diag.httpStatus}）：${rejectionHint(diag.httpStatus)}${diag.detail?`上游返回：${diag.detail}${diag.requestId?`（请求编号 ${diag.requestId}）`:''}。`:''}未创建远端任务，修正后可重新提交，无需到控制台核对任务编号。`
       :`提交结果不确定（${diag?`${diag.stage}${diag.httpStatus?` HTTP ${diag.httpStatus}`:''}${diag.networkCode?` 网络 ${diag.networkCode}`:''}${diag.detail?`：${diag.detail}`:''}`:'本地错误'}）；远端可能已受理，请勿重复生成，请先查询 APIMart 记录。`;
      j.diag=diag?{...diag}:{stage:'local',detail:String(e?.message||'').slice(0,300),at:new Date().toISOString()};
      this.save(j);

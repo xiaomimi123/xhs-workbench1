@@ -83,3 +83,15 @@ test('API key never reaches job records or files on disk, even when upstream ech
  assert.equal(JSON.stringify(dropped.w.find(dropped.a,j2.id)).includes(key),false);
  assert.deepEqual(leaks(dropped.w,dropped.a,key),[]);
 });
+
+test('被拒绝时给出可操作的原因：密钥无效/余额不足/限流，且不倒出 JSON', async () => {
+ const cases=[[401,'API Key 无效'],[402,'余额不足'],[403,'没有使用该模型的权限'],[429,'请求太频繁'],[400,'内容审核']];
+ for(const [status,expected] of cases){
+  const {a,w}=setup(async()=>new Response(JSON.stringify({error:{message:`上游原因 (request id: req-${status})`}}),{status}));
+  const j=w.start(a,{provider:'apimart',prompt:`拒绝提示${status}`});await tick();
+  const saved=w.find(a,j.id);
+  assert.equal(saved.status,'error');assert.match(saved.error,new RegExp(expected));
+  assert.match(saved.error,new RegExp(`请求编号 req-${status}`));assert.match(saved.error,/上游返回：上游原因/);
+  assert.doesNotMatch(saved.error,/[{}"]/);assert.match(saved.error,/未创建远端任务/);
+ }
+});

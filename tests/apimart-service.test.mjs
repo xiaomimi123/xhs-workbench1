@@ -53,3 +53,33 @@ test('failures record stage, status, request id and redacted upstream, never the
  await assert.rejects(noId.submit({model:'gpt-image-2',prompt:'p',size:'1:1',resolution:'1k'},key),(err)=>{assert.equal(err.diag.stage,'respond');return true;});
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+// ── 失败提示：上游 JSON 只取 message；连接测试自动重试并给出网络错误码 ──
+test('上游错误体不再原样倒出：只取 message，请求编号拆出来，密钥仍被抹去', async () => {
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'apimart-'));try{
+ const key='secret-test-key';
+ const body=JSON.stringify({error:{code:'',message:`invalid API key ${key} (request id: 20261020abc-DEF1)`,param:'',type:'apimart_error'}});
+ const s=new mod.ImageService({file:path.join(dir,'k.json'),fetchImpl:async()=>new Response(body,{status:401})});s.save({apiKey:key});
+ await assert.rejects(s.request('/v1/images/generations',{method:'POST',body:{}}),(err)=>{
+  assert.equal(err.diag.detail,'invalid API key ***');
+  assert.equal(err.diag.requestId,'20261020abc-DEF1');
+  assert.doesNotMatch(err.diag.detail,/[{}"]/);assert.equal(JSON.stringify(err.diag).includes(key),false);return true;});
+ const plain=new mod.ImageService({file:path.join(dir,'k.json'),fetchImpl:async()=>new Response('upstream busy',{status:503})});
+ await assert.rejects(plain.request('/v1/x'),(err)=>{assert.equal(err.diag.detail,'upstream busy');return true;});
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('连接测试：偶发网络错误自动重试一次；两次都失败给出网络错误码和排查方向', async () => {
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'apimart-'));try{
+ let calls=0;
+ const flaky=new mod.ImageService({file:path.join(dir,'k.json'),fetchImpl:async()=>{calls++;if(calls===1){const e=new Error('fetch failed');e.cause={code:'ECONNRESET'};throw e;}return new Response('{}',{status:200});}});
+ flaky.retryDelayMs=0;flaky.save({apiKey:'secret-test-key'});
+ const ok=await flaky.testConnection();assert.equal(calls,2);assert.equal(ok.connected,true);assert.equal(ok.authenticated,true);
+ let n=0;
+ const down=new mod.ImageService({file:path.join(dir,'k.json'),fetchImpl:async()=>{n++;const e=new Error('x');e.cause={code:'ENOTFOUND'};throw e;}});down.retryDelayMs=0;
+ const bad=await down.testConnection();assert.equal(n,2);assert.equal(bad.connected,false);assert.equal(bad.networkCode,'ENOTFOUND');
+ assert.match(bad.message,/ENOTFOUND/);assert.match(bad.message,/重试/);assert.match(bad.message,/网络|代理|防火墙/);assert.equal(bad.message.includes('secret-test-key'),false);
+ // 鉴权失败属于“连上了”，不重试
+ let m=0;const unauth=new mod.ImageService({file:path.join(dir,'k.json'),fetchImpl:async()=>{m++;return new Response('no',{status:401});}});
+ const r=await unauth.testConnection();assert.equal(m,1);assert.equal(r.authenticated,false);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
