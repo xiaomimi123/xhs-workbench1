@@ -2,6 +2,9 @@
 // 小红书运营工作台 · 统一命令入口（给 agent 调用）
 //
 //   node scripts/workbench.mjs doctor [--json]               环境自检：缺什么、怎么装（不修改任何东西）
+//   node scripts/workbench.mjs upgrade --check              查看当前版本、数据版本与最近一次升级
+//   node scripts/workbench.mjs upgrade --package <zip> [--yes] [--allow-downgrade]
+//                                                            用新版安装包替换技能包（先备份数据，旧版本保留为 .bak-<版本>）
 //   node scripts/workbench.mjs setup                         初始化数据目录
 //   node scripts/workbench.mjs bridge-test [--agent <id>] [--prefer <id>] [--only <id>] [--all] [--auto] [--inbox]
 //                                                            探测本机 agent 并跑连接测试，写入配置
@@ -30,6 +33,9 @@ import { ensureWorkspace, readJson, writeJson, saveBridgeConfig, getBridgeConfig
 import { ADAPTERS, DESKTOP_AGENTS, findDesktopAgent, detectDesktopAgents, planConnection } from '../server/adapters.mjs';
 import { detectAdapters, pingAdapter } from '../server/bridge.mjs';
 import { runDoctor, formatDoctor } from '../server/doctor.mjs';
+import { VERSION } from '../server/version.mjs';
+import { readVersionRecord, installPackage, inspectPackage, DATA_VERSION } from '../server/upgrade.mjs';
+import { createBackup } from '../server/backup.mjs';
 import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -119,6 +125,56 @@ function storeWorkerSetting(enabled) {
 // ---------- 命令 ----------
 
 const commands = {
+  async upgrade() {
+    const record = readVersionRecord();
+    const last = record?.history?.at(-1);
+    if (flags.check || !flags.package) {
+      console.log(`技能包版本：v${VERSION}（数据格式 v${DATA_VERSION}）`);
+      console.log(record ? `数据目录记录：v${record.appVersion}（数据格式 v${record.dataVersion}）` : '数据目录还没有版本记录（旧版安装或全新安装；下次启动工作台时会自动备份并登记）');
+      if (last) console.log(`最近一次变更：${last.at} ${last.from ? 'v' + last.from : '未知版本'} → v${last.to}${last.backup ? `，升级前备份 ${last.backup}` : ''}${last.ok === false ? `，失败：${last.error}` : ''}`);
+      console.log('用新版安装包升级：upgrade --package <zip路径>（不带 --yes 只预检）');
+      console.log('RESULT: info');
+      return;
+    }
+    if (typeof flags.package !== 'string' || !fs.existsSync(flags.package)) fail('找不到安装包：' + flags.package);
+    let plan;
+    try {
+      plan = installPackage({ buf: fs.readFileSync(flags.package), skillDir: SKILL_DIR, currentVersion: VERSION, allowDowngrade: !!flags['allow-downgrade'], dryRun: true });
+    } catch (err) {
+      fail(`安装包检查未通过：${err.message}`);
+    }
+    console.log(`当前 v${plan.from} → 安装包 v${plan.to}（${plan.files} 个文件，SHA-256 ${plan.sha256}）`);
+    if (!plan.ok) {
+      console.log(`不会升级：${plan.refused}${plan.needsFlag ? `。确实要这样做请加 ${plan.needsFlag}` : ''}`);
+      console.log('RESULT: refused');
+      return;
+    }
+    if (!flags.yes) {
+      console.log('预检通过。执行时会：1) 停止工作台 2) 先备份全部用户数据 3) 把现有技能包改名为 ' + plan.oldCopy + '（作为回退用副本） 4) 换上新版本 5) 重新启动，启动时自动迁移数据。用户数据目录不会被替换。');
+      console.log('请先征得用户同意，再加 --yes 重新运行。');
+      console.log('RESULT: confirm');
+      return;
+    }
+    const wasRunning = await health(serverInfo());
+    if (wasRunning) await commands.stop();
+    const backup = createBackup({ prefix: 'upgrade-pre' });
+    console.log(`已备份用户数据：${backup.name}（${backup.files} 个文件）`);
+    let done;
+    try {
+      done = installPackage({ buf: fs.readFileSync(flags.package), skillDir: SKILL_DIR, currentVersion: VERSION, allowDowngrade: !!flags['allow-downgrade'] });
+    } catch (err) {
+      if (wasRunning) console.log('升级未完成，旧版本保持原样。可运行 start 重新启动工作台。');
+      fail(err.message);
+    }
+    if (!done.ok) fail(done.refused);
+    console.log(`已升级到 v${done.to}；旧版本保留在 ${done.oldCopy}，确认新版本正常后可自行删除。`);
+    if (wasRunning) {
+      const r = spawnSync(process.execPath, [path.join(SKILL_DIR, 'scripts', 'workbench.mjs'), 'start'], { stdio: 'inherit' });
+      if (r.status !== 0) console.log('新版本启动失败；回退方法：关闭工作台，删除当前 xhs-workbench 目录，把 ' + done.oldCopy + ' 改回 xhs-workbench。');
+    } else console.log('工作台之前没有在运行；需要时运行 start，启动时会自动迁移数据。');
+    console.log(`RESULT: upgraded ${done.from} ${done.to}`);
+  },
+
   // 第一步就能跑：不依赖数据目录已初始化，也不写任何文件（只在探测可写性时创建并删除一个临时文件）
   async doctor() {
     const report = runDoctor({ workspace: WORKSPACE, bridgeConfig: readJson(P.bridge, null) });

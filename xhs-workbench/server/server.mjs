@@ -35,10 +35,22 @@ import * as system from './system.mjs';
 import * as backup from './backup.mjs';
 import * as materials from './materials.mjs';
 
-export const VERSION = '0.6.2';
+import { VERSION } from './version.mjs';
+import { runStartupUpgrade, upgradeSummary } from './upgrade.mjs';
+export { VERSION };
 const PORT_RANGE = [17890, 17910];
 
+const hadData = fs.existsSync(P.accounts);
 store.ensureWorkspace();
+// 版本变化时先自动备份再迁移；备份失败或数据来自更新版本时不改动任何数据
+const startupUpgrade = runStartupUpgrade({
+  appVersion: VERSION, hadData, workspace: WORKSPACE,
+  backup: (kind) => backup.createBackup({ prefix: kind === 'legacy' ? 'upgrade-legacy' : 'upgrade' }),
+});
+if (startupUpgrade.kind === 'blocked') {
+  console.error(startupUpgrade.error);
+  process.exit(1);
+}
 await ensureSingleInstance();
 const token = loadOrCreateToken();
 
@@ -663,6 +675,7 @@ async function handleApi(req, res, url) {
     case 'GET /api/state':
       return sendJson(res, 200, {
         version: VERSION,
+        upgrade: upgradeSummary(VERSION, startupUpgrade),
         workspace: WORKSPACE,
         skillDir: SKILL_DIR,
         bridge: { ...bridge.status(), browserWorker: workerInfo() },

@@ -29,7 +29,7 @@ function stamp(d = new Date()) {
 }
 
 /** 生成备份，返回 { name, size, files } */
-export function createBackup({ auto = false } = {}) {
+export function createBackup({ auto = false, prefix = null } = {}) {
   const files = INCLUDE.flatMap((d) => walk(path.join(WORKSPACE, d)));
   const entries = files.map((abs) => ({
     name: path.relative(WORKSPACE, abs).split(path.sep).join('/'),
@@ -38,7 +38,7 @@ export function createBackup({ auto = false } = {}) {
   }));
   entries.push({ name: 'backup.json', data: Buffer.from(JSON.stringify({ app: 'xhs-workbench', createdAt: new Date().toISOString(), auto, files: entries.length }, null, 2)) });
   ensureDir(BACKUP_DIR);
-  const name = `${auto ? 'auto' : 'backup'}-${stamp()}.zip`;
+  const name = `${prefix || (auto ? 'auto' : 'backup')}-${stamp()}.zip`;
   const buf = createZip(entries);
   fs.writeFileSync(path.join(BACKUP_DIR, name), buf);
   if (auto) pruneAuto();

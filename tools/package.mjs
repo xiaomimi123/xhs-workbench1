@@ -19,10 +19,10 @@ function fail(msg) {
 
 const git = (...args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
 
-// 1. 版本号：以 server.mjs 中的 VERSION 为准，并要求 CHANGELOG 有对应条目
-const serverSrc = fs.readFileSync(path.join(ROOT, SKILL, 'server', 'server.mjs'), 'utf8');
+// 1. 版本号：以 server/version.mjs 中的 VERSION 为准，并要求 CHANGELOG 有对应条目
+const serverSrc = fs.readFileSync(path.join(ROOT, SKILL, 'server', 'version.mjs'), 'utf8');
 const version = (/export const VERSION = '([\d.]+)'/.exec(serverSrc) || [])[1];
-if (!version) fail('在 server/server.mjs 中找不到 VERSION');
+if (!version) fail('在 server/version.mjs 中找不到 VERSION');
 const changelog = fs.readFileSync(path.join(ROOT, SKILL, 'CHANGELOG.md'), 'utf8');
 if (!changelog.includes(`## v${version}`)) fail(`CHANGELOG.md 里没有 v${version} 的条目`);
 

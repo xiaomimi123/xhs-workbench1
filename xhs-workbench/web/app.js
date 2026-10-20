@@ -655,7 +655,9 @@ function viewSettings() {
       <dl class="kv">
         <dt>数据目录</dt><dd><code>${esc(info.workspace)}</code></dd>
         <dt>技能包目录</dt><dd><code>${esc(info.skillDir)}</code></dd>
-        <dt>版本</dt><dd>${esc(info.version)}</dd>
+        <dt>版本</dt><dd>v${esc(info.version)}${info.upgrade ? `（数据格式 v${esc(info.upgrade.dataVersion)}）` : ''}</dd>
+        ${info.upgrade?.lastUpgrade ? `<dt>最近升级</dt><dd>${fmtTime(info.upgrade.lastUpgrade.at)} · ${info.upgrade.lastUpgrade.from ? 'v' + esc(info.upgrade.lastUpgrade.from) : '旧版本'} → v${esc(info.upgrade.lastUpgrade.to)}${info.upgrade.lastUpgrade.ok === false ? ` ${icon('dot', 'icon-warn')} 失败：${esc(info.upgrade.lastUpgrade.error || '')}` : ''}${info.upgrade.lastUpgrade.backup ? `<br><span class="muted">升级前已自动备份：${esc(info.upgrade.lastUpgrade.backup)}（见下方「备份与恢复」）</span>` : ''}</dd>` : ''}
+        ${info.upgrade?.startup && info.upgrade.startup.ok === false ? `<dt>升级状态</dt><dd>${icon('dot', 'icon-warn')} ${esc(info.upgrade.startup.error || '')}</dd>` : ''}
       </dl>
     </div>`;
   renderSystem($('#system-panels'));
