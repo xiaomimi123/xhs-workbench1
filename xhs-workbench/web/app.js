@@ -14,6 +14,7 @@ import { renderSystem } from './modules/system.js';
 import * as materials from './modules/materials.js';
 import { icon } from './icons.js';
 import * as onboarding from './modules/onboarding.js';
+import { initConnect, isConnected, openConnectDialog, handleConnectClick, connectOptionsHtml, detect as openConnectDialogData } from './connect.js';
 
 // ---------- 模块定义 ----------
 
@@ -158,9 +159,19 @@ function viewOverview() {
     { title: '找对标账号', text: '让 agent 根据你的定位推荐值得学习的对标账号。', prompt: '请根据我的账号定位，帮我找 5 个值得对标的小红书账号，说明理由，并记录到知识库的对标拆解目录。' },
   ].filter(Boolean);
 
+  const connectCard = isConnected() ? '' : `
+    <div class="card" id="connect-card" style="max-width:760px;margin-bottom:16px;border-color:var(--brand)">
+      <h3 style="margin-top:0">第一步：连接你的 agent</h3>
+      <p class="muted" style="font-size:13px;margin-top:0">工作台里的对话和「让 agent …」操作都由 agent 完成。下面是本机检测到的，选哪一个由你决定。</p>
+      ${connectOptionsHtml()}
+    </div>`;
+  if (!isConnected() && !S.detected) {
+    openConnectDialogData().then(() => { if (S.view === 'overview' && !isConnected()) viewOverview(); });
+  }
   $('#main').innerHTML = `
-    <h1 class="page-title">你好，${esc(acc ? acc.name : '')} 👋</h1>
+    <h1 class="page-title">${acc && acc.name && acc.name !== '我的账号' ? `你好，${esc(acc.name)} 👋` : '你好 👋'}</h1>
     <p class="page-sub">在右侧和你的 agent 对话，或者点下面的卡片快速开始。<button class="btn small ghost" data-onboard style="margin-left:8px">${icon("rocket")} 新手引导</button></p>
+    ${connectCard}
     <div class="grid">
       ${quick.map((q) => `<div class="card quick-card" data-prompt="${esc(q.prompt)}"><h3>${esc(q.title)}</h3><p>${esc(q.text)}</p></div>`).join('')}
     </div>
@@ -558,9 +569,11 @@ async function saveAccountForm(form) {
 async function refreshBridge() {
   try {
     const { status } = await api('GET', '/api/bridge');
+    const wasConfigured = !!(S.bridge && S.bridge.configured);
     S.bridge = status;
     renderBridge();
     if (S.view === 'settings') viewSettings();
+    else if (S.view === 'overview' && wasConfigured !== !!status.configured) viewOverview();
   } catch (err) {
     console.error(err);
   }
@@ -579,6 +592,14 @@ function renderBridge(override) {
   const pill = $('#bridge-pill');
   pill.className = `bridge-pill ${sum.cls}`;
   pill.querySelector('.label').textContent = sum.label;
+  // 没连接时点状态胶囊直接选 agent，连接后才是进入设置页
+  if (S.bridge && S.bridge.configured) {
+    pill.removeAttribute('data-open-connect');
+    pill.setAttribute('data-nav', 'settings');
+  } else {
+    pill.removeAttribute('data-nav');
+    pill.setAttribute('data-open-connect', '');
+  }
   renderChatBanner();
 }
 
@@ -758,7 +779,7 @@ function renderChatBanner() {
   const el = $('#chat-banner');
   const b = S.bridge;
   let html = '';
-  if (b && !b.configured) html = '还没有连接 agent。回到你的 agent，说：<code>运行小红书工作台的连接自检</code>';
+  if (b && !b.configured) html = '还没有连接 agent。<button class="btn small primary" data-open-connect style="margin-left:6px">选择 agent</button>';
   else if (b && b.mode === 'inbox' && !b.inboxOnline) html = `收件箱模式：${esc(b.hostAgent ? b.hostAgent.name : 'agent')} 目前没在值守，消息会排队。回到它的窗口，说：<code>进入小红书工作台值守模式</code>`;
   el.innerHTML = html;
   el.hidden = !html;
@@ -798,6 +819,7 @@ async function sendMessage(text, options = {}) {
   document.body.classList.add('chat-open');
   document.body.classList.remove('chat-hidden');
   if (!text || isBusy()) return;
+  if (!isConnected()) return openConnectDialog(text);
   try {
     const session = await api('POST', '/api/chat/send', { sessionId: S.session && S.session.id, accountId: S.accountId, text, ...options });
     S.session = session;
@@ -851,6 +873,7 @@ function bindEvents() {
       S.editingAccount = null;
       return refreshAccounts();
     }
+    if (await handleConnectClick(t)) return;
     if (t.dataset.useHost) {
       if (!confirm('改用收件箱模式后，需要该 agent 的窗口保持打开并进入值守才能处理消息。确定吗？')) return;
       await api('PUT', '/api/bridge', { mode: 'inbox', hostAgentId: t.dataset.useHost }).catch((err) => toast(err.message));
@@ -995,6 +1018,7 @@ function switchAccount(id) {
 async function boot() {
   S.token = initToken();
   setHooks({ send: sendMessage, fill: usePrompt, go });
+  initConnect({ onChanged: refreshBridge, send: sendMessage });
   bindEvents();
   if (!S.token) {
     showOverlay('<h3>请通过 agent 打开工作台</h3><p class="muted">回到你的 agent，说「打开小红书工作台」，它会给你一个带访问令牌的链接。</p>');

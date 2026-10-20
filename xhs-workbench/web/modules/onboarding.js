@@ -55,8 +55,8 @@ async function buildSteps() {
       name: '连接你的 agent',
       desc: bridgeOk()
         ? 'agent 已连接，工作台里的任务都能交给它做。'
-        : '还没连上 agent。回到你的 agent 会话说「运行 workbench.mjs bridge-test」重试连接，或打开连接与设置选择可用的 agent。',
-      buttons: bridgeOk() ? [] : [['settings', '去连接设置']],
+        : '还没连上 agent。点下面的按钮，从本机已有的 agent 里选一个，几秒钟就能连好。',
+      buttons: bridgeOk() ? [] : [['connect', '选择 agent']],
     },
     {
       done: !!(acc0 && acc0.positioning),
@@ -116,7 +116,9 @@ export async function open() {
           <div class="muted" style="font-size:13px">${esc(s.desc)}</div>
           ${s.buttons.length ? `<div class="row" style="margin-top:8px">${s.buttons.map((b) => (b[0] === 'prompt'
             ? `<button class="btn small primary" data-prompt="${esc(b[1])}">${esc(b[2])}</button>`
-            : `<button class="btn small" data-nav="${b[0]}">${esc(b[1])}</button>`)).join('')}</div>` : ''}
+            : b[0] === 'connect'
+              ? `<button class="btn small primary" data-open-connect>${esc(b[1])}</button>`
+              : `<button class="btn small" data-nav="${b[0]}">${esc(b[1])}</button>`)).join('')}</div>` : ''}
         </div>
       </div>`,
         )
