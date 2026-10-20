@@ -17,3 +17,41 @@ test('restart recovers only a known task; an interrupted submission requires rev
  const interrupted={...w.find(a,j.id),id:'imagejob_interrupted',status:'submitting'};delete interrupted.taskId;w.save(interrupted);assert.equal((await resumed.refresh(a,interrupted.id)).status,'needs_review');assert.equal(calls,2);
 });
 test.after(()=>fs.rmSync(process.env.XHS_WORKSPACE,{recursive:true,force:true}));
+
+// ── 提交诊断修复的回归：明确拒绝与不确定断连分开记录，首次原因不被覆盖 ──
+test('gateway 4xx is a definite rejection saved with upstream reason; refresh cannot rewrite it',async()=>{
+ const {a,w}=setup(async()=>new Response(JSON.stringify({error:{code:402,message:'Insufficient balance',type:'payment_required'}}),{status:402,headers:{'x-request-id':'req_402'}}));
+ const j=w.start(a,{provider:'apimart',prompt:'拒单测试'});await tick();
+ const saved=w.find(a,j.id);
+ assert.equal(saved.status,'error');assert.equal(saved.notSubmitted,true);assert.equal(saved.taskId,undefined);
+ assert.equal(saved.diag.stage,'http');assert.equal(saved.diag.httpStatus,402);assert.equal(saved.diag.requestId,'req_402');
+ assert.match(saved.error,/明确拒绝/);assert.match(saved.error,/Insufficient balance/);
+ assert.equal(JSON.stringify(saved).includes('private-key'),false);
+ assert.equal(w.start(a,{provider:'apimart',prompt:'拒单测试'}).id,j.id);
+ await w.refresh(a,j.id);
+ assert.equal(w.find(a,j.id).status,'error');
+});
+test('network disconnect stays needs_review with diagnostics preserved across refresh',async()=>{
+ const {a,w}=setup(async()=>{const e=new Error('getaddrinfo failed');e.cause={code:'EAI_AGAIN'};throw e;});
+ const j=w.start(a,{provider:'apimart',prompt:'断网测试'});await tick();
+ const saved=w.find(a,j.id);
+ assert.equal(saved.status,'needs_review');assert.equal(saved.notSubmitted,false);
+ assert.equal(saved.diag.stage,'connect');assert.equal(saved.diag.networkCode,'EAI_AGAIN');
+ assert.match(saved.error,/不确定/);assert.match(saved.error,/EAI_AGAIN/);
+ await w.refresh(a,j.id);
+ const after=w.find(a,j.id);
+ assert.equal(after.status,'needs_review');
+ assert.match(after.error,/提交诊断：connect/);
+ assert.deepEqual(after.diag,saved.diag);
+});
+test('a 2xx response without task id is uncertain; poll 404 is reported explicitly with diagnostics',async()=>{
+ const {a,w}=setup(async()=>Response.json({data:[{}]}));
+ const j=w.start(a,{provider:'apimart',prompt:'缺编号'});await tick();
+ const saved=w.find(a,j.id);
+ assert.equal(saved.status,'needs_review');assert.equal(saved.diag.stage,'respond');assert.match(saved.error,/不确定/);
+ const fresh=setup(async url=>url.endsWith('generations')?Response.json({data:[{task_id:'task_404'}]}):new Response(JSON.stringify({error:{code:404,message:'Invalid task ID'}}),{status:404}));
+ const j2=fresh.w.start(fresh.a,{provider:'apimart',prompt:'查询404'});await tick();
+ const after=await fresh.w.refresh(fresh.a,j2.id);
+ assert.equal(after.status,'submitted');
+ assert.match(after.error,/HTTP 404/);assert.equal(after.diag.httpStatus,404);
+});
