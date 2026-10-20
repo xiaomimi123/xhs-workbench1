@@ -187,3 +187,16 @@ test('上一次升级留下的旧版本副本还在时不覆盖', () => {
   assert.equal(r.ok, false); assert.match(r.refused, /已存在/);
   assert.equal(fs.readFileSync(path.join(dir, 'OLD.txt'), 'utf8'), 'old');
 });
+
+test('命令行 setup 在全新数据目录里登记版本（服务之后不会把它当成旧版遗留数据）', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { SKILL } = await import('./helpers.mjs');
+  const dir = fs.mkdtempSync(path.join(WS, 'fresh-'));
+  const r = spawnSync(process.execPath, [path.join(SKILL, 'scripts', 'workbench.mjs'), 'setup'], { env: { ...process.env, XHS_WORKSPACE: dir }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const rec = JSON.parse(fs.readFileSync(path.join(dir, 'config', 'version.json'), 'utf8'));
+  assert.equal(rec.dataVersion, 1); assert.deepEqual(rec.history, []);
+  // 再跑一次不改变记录
+  spawnSync(process.execPath, [path.join(SKILL, 'scripts', 'workbench.mjs'), 'setup'], { env: { ...process.env, XHS_WORKSPACE: dir }, encoding: 'utf8' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'config', 'version.json'), 'utf8')).firstSeenAt, rec.firstSeenAt);
+});

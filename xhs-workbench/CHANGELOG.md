@@ -1,5 +1,14 @@
 # 更新日志
 
+## 未发布 · 升级机制
+
+- 数据目录新增版本记录（`config/version.json`：程序版本、数据格式版本、升级历史）；版本变化时启动前自动备份（`upgrade-*.zip`），再按序执行迁移；迁移失败不推进版本、保留备份并在网页显示原因，下次启动重试；备份失败则不迁移
+- 数据来自更新版本时（程序被换成了旧包）拒绝启动，不改动任何数据
+- 新增 `upgrade --check` 与 `upgrade --package <zip> [--yes]`：预检安装包（完整性、版本、路径安全），备份后替换技能包，旧版本保留为 `.bak-<版本>`，失败自动回滚
+- `setup` 在全新数据目录里立刻登记版本，避免服务误判为旧版遗留数据
+- 版本号集中到 `server/version.mjs`；「连接与设置」显示版本、数据格式与最近升级记录
+- 自动化测试新增 17 项（upgrade）
+
 ## 未发布 · 环境自检与安装流程
 
 - 新增 `doctor [--json]`：检查 Node、数据目录、ffmpeg/ffprobe、Agent 连接，缺项直接给出按本机包管理器（winget / choco / scoop / brew）选好的安装命令，最后一行 `RESULT: ok | action-needed | blocked`，agent 照输出执行即可

@@ -4,8 +4,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { P } from './paths.mjs';
-import { readJson, writeJson } from './store.mjs';
+import { P, WORKSPACE } from './paths.mjs';
+import { ensureWorkspace, readJson, writeJson } from './store.mjs';
 import { readZip } from './zip.mjs';
 
 /** 数据目录结构版本。只有在磁盘数据格式发生不兼容变化时才递增，并在 MIGRATIONS 里补一条迁移。 */
@@ -98,6 +98,16 @@ export function runStartupUpgrade({ appVersion, hadData, backup, migrations = MI
   }
   const entry = { at: now().toISOString(), kind: plan.kind, from: plan.from, to: appVersion, backup: backupName, migrations: ran, ok: true };
   return { ...plan, ok: true, backup: backupName, migrated: ran, record: stamp({ entry, dataVersion: Math.max(reached, record?.dataVersion || 1) }) };
+}
+
+/**
+ * 命令行用的初始化：全新安装时立刻登记版本。
+ * 否则 setup 先创建了数据目录、服务再启动时就分不清“全新安装”和“旧版遗留数据”，会把全新安装误当成旧版升级。
+ */
+export function ensureWorkspaceStamped(appVersion) {
+  const hadData = fs.existsSync(P.accounts);
+  ensureWorkspace();
+  if (!hadData && !readVersionRecord()) runStartupUpgrade({ appVersion, hadData: false, workspace: WORKSPACE });
 }
 
 /** 给界面和 doctor 用的摘要 */

@@ -29,17 +29,18 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { P, SKILL_DIR, WORKSPACE } from '../server/paths.mjs';
-import { ensureWorkspace, readJson, writeJson, saveBridgeConfig, getBridgeConfig } from '../server/store.mjs';
+import { readJson, writeJson, saveBridgeConfig, getBridgeConfig } from '../server/store.mjs';
 import { ADAPTERS, DESKTOP_AGENTS, findDesktopAgent, detectDesktopAgents, planConnection } from '../server/adapters.mjs';
 import { detectAdapters, pingAdapter } from '../server/bridge.mjs';
 import { runDoctor, formatDoctor } from '../server/doctor.mjs';
 import { VERSION } from '../server/version.mjs';
-import { readVersionRecord, installPackage, inspectPackage, DATA_VERSION } from '../server/upgrade.mjs';
+import { readVersionRecord, installPackage, ensureWorkspaceStamped, DATA_VERSION } from '../server/upgrade.mjs';
 import { createBackup } from '../server/backup.mjs';
 import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const flags = parseFlags(rest);
+const ensureWorkspace = () => ensureWorkspaceStamped(VERSION);
 let adapterBrowserChannel = null; // browser-setup 时确定的浏览器 channel（msedge / chrome / chromium）
 
 function parseFlags(argv) {

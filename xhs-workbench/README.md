@@ -159,7 +159,10 @@ node xhs-workbench/scripts/workbench.mjs browser-worker-setup --yes
 
 ## 七、更新与卸载
 
-- **更新**：先对 agent 说"关闭小红书工作台"，然后用新版本的 `xhs-workbench` 文件夹替换旧的。你的数据在 `XHS-Workbench` 文件夹里，不受影响。
+- **更新**：把新版本的安装包（zip）放在电脑上，对 agent 说"用这个安装包升级小红书工作台：<zip 的位置>"。agent 会先检查安装包，征得你同意后：备份你的全部数据 → 换上新版本 → 重新启动，数据自动迁移。旧版本会保留成 `xhs-workbench.bak-<版本号>` 文件夹，确认新版本正常后可以自己删掉。你的数据在 `XHS-Workbench` 文件夹里，不会被替换。
+  - 升级后出问题：在「连接与设置 → 备份与恢复」里恢复名字以 `upgrade-` 开头的备份；或关闭工作台，删掉当前 `xhs-workbench`，把 `xhs-workbench.bak-<版本号>` 改回 `xhs-workbench`。
+  - 手动替换文件夹也可以：关闭工作台，用新文件夹替换旧的，再启动。启动时同样会先自动备份再迁移。
+  - 「连接与设置」页最下方的「目录」里能看到当前版本、数据格式版本和最近一次升级记录。
 - **卸载**：先在「连接与设置」里取消开机自启，关闭工作台后，删除 `xhs-workbench` 文件夹。如果也不要数据了，再删除用户目录下的 `XHS-Workbench` 文件夹（删除前请确认不再需要）。
 
 版本变化见 [CHANGELOG.md](CHANGELOG.md)。
