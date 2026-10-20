@@ -1,7 +1,7 @@
 // 素材库：收藏剪辑素材（视频片段 / 图片截图 / 文案稿字幕），卡片 + 标签 + 批注。
 // agent 写内容时读批注模仿；规律由知识库管家提炼进知识库。
 import { esc } from '../md.js';
-import { S, $, api, acc, fileUrl, toast, fmtTime, ask, readFileAsDataURL } from '../core.js';
+import { S, $, api, acc, fileUrl, toast, fmtTime, ask, readFileAsDataURL, confirmDialog } from '../core.js';
 import { icon } from '../icons.js';
 
 const V = { items: [], filter: 'all', editing: null };
@@ -126,7 +126,7 @@ function bind(main) {
         V.editing = { ...m };
         return draw(main);
       case 'delete':
-        if (!confirm(`删除素材「${m.title || m.file}」？（文件会移到回收站）`)) return;
+        if (!await confirmDialog({ title: '删除素材？', message: `「${m.title || m.file}」会移到回收站，可以恢复。`, confirmLabel: '删除', danger: true })) return;
         await api('DELETE', `/api/materials?id=${encodeURIComponent(m.id)}`).catch((err) => toast(err.message));
         V.items = (await api('GET', '/api/materials')).items;
         return draw(main);

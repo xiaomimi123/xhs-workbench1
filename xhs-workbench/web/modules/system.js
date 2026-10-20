@@ -1,12 +1,23 @@
 // 「连接与设置」页下半部分：自动运行（开机自启 / 防休眠）、备份与恢复、回收站
 import { esc } from '../md.js';
-import { S, api, toast, fmtTime, opt, withBusy } from '../core.js';
+import { S, api, toast, fmtTime, opt, withBusy, confirmDialog } from '../core.js';
 
 const KEEP_AWAKE = [
   ['off', '不阻止休眠'],
   ['auto', '有定时任务时保持唤醒（推荐）'],
   ['always', '工作台运行期间一直保持唤醒'],
 ];
+
+/** 备份文件名 → 用户能看懂的名称（文件名本身作为次要信息保留） */
+export function backupLabel(name) {
+  const n = String(name || '');
+  if (n.startsWith('upgrade-legacy-')) return { title: '升级前自动备份', note: '首次登记版本时' };
+  if (n.startsWith('upgrade-pre-')) return { title: '升级前自动备份', note: '升级命令执行前' };
+  if (n.startsWith('upgrade-')) return { title: '升级前自动备份', note: '' };
+  if (n.startsWith('auto-')) return { title: '每日自动备份', note: '' };
+  if (n.startsWith('backup-')) return { title: '手动备份', note: '' };
+  return { title: n, note: '' };
+}
 
 function size(n) {
   return n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
@@ -30,7 +41,7 @@ export async function renderSystem(box) {
         <dt>开机自启</dt>
         <dd><label class="row" style="gap:6px"><input type="checkbox" data-sys="autostart"${sys.autostart.enabled ? ' checked' : ''}> 登录电脑后自动在后台运行工作台（${esc(platformName)}）</label></dd>
         <dt>防休眠</dt>
-        <dd><select data-sys="keepAwake">${KEEP_AWAKE.map(([v, n]) => opt(v, n, sys.keepAwake.mode)).join('')}</select>
+        <dd><select data-sys="keepAwake" aria-label="防休眠">${KEEP_AWAKE.map(([v, n]) => opt(v, n, sys.keepAwake.mode)).join('')}</select>
           <span class="muted" style="font-size:12px">${sys.keepAwake.active ? '当前：保持唤醒中' : '当前：未阻止休眠'}</span></dd>
       </dl>
       <p class="muted" style="font-size:12px;margin-bottom:0">笔记本合上盖子仍会休眠（接电源并外接显示器除外）；防休眠只阻止「闲置自动休眠」。</p>
@@ -38,14 +49,14 @@ export async function renderSystem(box) {
 
     <div class="card" style="max-width:760px;margin-top:16px">
       <div class="row"><h3 style="margin:0">备份与恢复</h3><div class="spacer"></div>
-        <select data-sys="autoBackup">${opt('daily', '每天自动备份（保留 7 份）', backups.autoBackup)}${opt('off', '不自动备份', backups.autoBackup)}</select>
+        <select data-sys="autoBackup" aria-label="自动备份频率">${opt('daily', '每天自动备份（保留 7 份）', backups.autoBackup)}${opt('off', '不自动备份', backups.autoBackup)}</select>
         <button class="btn small primary" data-sys-act="backup">立即备份</button>
       </div>
       <p class="muted" style="font-size:13px">备份包含账号、笔记（含配图）、选题、对标、数据、知识库和对话；不包含浏览器登录资料。文件保存在数据目录的 backups/ 里，也可以下载后放到网盘。</p>
       ${backups.items.length ? `<div class="trash-list">${backups.items.map((b) => `<div class="row">
-          <span>${esc(b.name)}</span><span class="muted" style="font-size:12px">${fmtTime(b.createdAt)} · ${size(b.size)}</span><div class="spacer"></div>
-          <a class="btn small" href="/api/backup/download?name=${encodeURIComponent(b.name)}&t=${encodeURIComponent(S.token)}">下载</a>
-          <button class="btn small ghost" data-sys-act="restore" data-name="${esc(b.name)}">恢复到这个备份</button>
+          <span><strong>${esc(backupLabel(b.name).title)}</strong> <span class="muted" style="font-size:12px">${esc(backupLabel(b.name).note)}${backupLabel(b.name).note ? ' · ' : ''}${esc(b.name)}</span></span><span class="muted" style="font-size:12px">${fmtTime(b.createdAt)} · ${size(b.size)}</span><div class="spacer"></div>
+          <a class="btn small" href="/api/backup/download?name=${encodeURIComponent(b.name)}&t=${encodeURIComponent(S.token)}" aria-label="下载${esc(backupLabel(b.name).title)}（${esc(fmtTime(b.createdAt))}）">下载</a>
+          <button class="btn small ghost" data-sys-act="restore" data-name="${esc(b.name)}" aria-label="恢复到${esc(backupLabel(b.name).title)}（${esc(fmtTime(b.createdAt))}）">恢复到这个备份</button>
         </div>`).join('')}</div>` : '<div class="muted">还没有备份。</div>'}
     </div>
 
@@ -85,7 +96,7 @@ export async function renderSystem(box) {
           renderSystem(box);
         });
       case 'restore':
-        if (!confirm(`恢复到「${t.dataset.name}」？\n\n当前的账号、笔记、知识库和对话会先整体移到回收站（可以撤销），然后换成备份里的内容。本机的 agent 连接设置会保留。`)) return;
+        if (!await confirmDialog({ title: '恢复到这个备份？', message: `当前的账号、笔记、知识库和对话会先整体移到回收站（可以撤销），然后换成这份备份（${backupLabel(t.dataset.name).title}，${t.dataset.name}）里的内容。本机的 agent 连接设置会保留。`, confirmLabel: '恢复', danger: true })) return;
         return withBusy(t, '恢复中…', async () => {
           const r = await api('POST', '/api/backups/restore', { name: t.dataset.name });
           toast(`已恢复 ${r.restored} 个文件`);

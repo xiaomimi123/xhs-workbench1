@@ -1,7 +1,7 @@
 // 竞品对标：录入对标账号 → agent 拆解（报告 + 笔记数据）→ 生成选题 / 沉淀知识库
 import { md, esc } from '../md.js';
 import { icon } from '../icons.js';
-import { S, $, api, acc, fileUrl, toast, fmtTime, ask, readFileAsDataURL, accDirRel } from '../core.js';
+import { S, $, api, acc, fileUrl, toast, fmtTime, ask, readFileAsDataURL, accDirRel, confirmDialog } from '../core.js';
 
 const V = { items: [], current: null, detail: null, tab: 'observed', form: null, cfg: null, issues: null, showRadar: false };
 
@@ -356,7 +356,7 @@ function bind(main) {
         V.form = null;
         return draw(main);
       case 'delete':
-        if (!confirm(`删除对标账号「${b.name}」？（数据会移到回收站）`)) return;
+        if (!await confirmDialog({ title: '删除对标账号？', message: `「${b.name}」的数据会移到回收站。`, confirmLabel: '删除', danger: true })) return;
         await api('DELETE', `/api/benchmarks?${acc(`id=${b.id}`)}`).catch((err) => toast(err.message));
         V.current = null;
         await load();
@@ -373,7 +373,7 @@ function bind(main) {
       case 'lock-restriction':
         await api('POST', `/api/browser/access?${acc()}`, {action:'restriction'}); await load(); return draw(main);
       case 'resolve-restriction':
-        if(!confirm('仅在你已在官方应用确认平台限制解除后继续。此操作不启动采集。确认已解除？')) return;
+        if(!await confirmDialog({ title: '确认限制已解除？', message: '仅在你已在小红书官方应用里确认限制解除后继续。这个操作不会启动采集。', confirmLabel: '我已确认解除' })) return;
         await api('POST', `/api/browser/access?${acc()}`, {action:'resolve-restriction',confirmed:true}); await load(); return draw(main);
       case 'recommend':
         return ask(`根据现有本地资料推荐候选，写入 ${accDirRel()}/benchmarks/checkpoints/pending/ 的 candidate 检查点。只登记待办；不要打开浏览器或自动采集，没有资料时说明缺项。`, true);

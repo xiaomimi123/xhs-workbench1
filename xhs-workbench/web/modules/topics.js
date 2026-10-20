@@ -1,7 +1,7 @@
 // 选题热点：选题池（agent 生成 / 手动添加）→ 打分排序 → 一键写成笔记
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
-import { S, $, api, acc, toast, ask, go, opt, accDirRel } from '../core.js';
+import { S, $, api, acc, toast, ask, go, opt, accDirRel, confirmDialog } from '../core.js';
 
 const STATUSES = [
   ['idea', '候选'],
@@ -154,7 +154,7 @@ function bind(main) {
     }
     if (t.dataset.del) {
       const topic = find(t.dataset.del);
-      if (!confirm(`删除选题「${topic.title}」？`)) return;
+      if (!await confirmDialog({ title: '删除这个选题？', message: `「${topic.title}」会被删除。`, confirmLabel: '删除', danger: true })) return;
       await api('DELETE', `/api/topics?${acc(`id=${topic.id}`)}`).catch((err) => toast(err.message));
       await load();
       return draw(main);

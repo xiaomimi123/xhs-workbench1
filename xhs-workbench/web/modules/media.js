@@ -1,7 +1,7 @@
 // 笔记素材编辑：图文（排序 / 裁剪 / 实况图配对）与视频笔记（上传 / 封面），素材打包下载
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
-import { S, $, api, acc, fileUrl, toast, readFileAsDataURL } from '../core.js';
+import { S, $, api, acc, fileUrl, toast, readFileAsDataURL, confirmDialog } from '../core.js';
 
 export const MAX_IMAGES = 18;
 const BROWSER_IMG = /\.(png|jpe?g|webp|gif)$/i;
@@ -171,7 +171,7 @@ async function videoAction(t) {
     return redraw();
   }
   if (t.dataset.mediaType === 'image') {
-    if (note.video && !confirm('转为图文笔记？已上传的视频会保留在素材目录里，随时可以切回视频模式。')) return;
+    if (note.video && !await confirmDialog({ title: '转为图文笔记？', message: '已上传的视频会保留在素材目录里，随时可以切回视频模式。', confirmLabel: '转为图文' })) return;
     videoMode = false;
     try {
       if (note.video) await setVideo({ file: '' });
@@ -182,7 +182,7 @@ async function videoAction(t) {
   }
   switch (act) {
     case 'delete-video':
-      if (!confirm('删除这个视频？（会移到回收站，可以恢复）')) return;
+      if (!await confirmDialog({ title: '删除这个视频？', message: '会移到回收站，可以恢复。', confirmLabel: '删除', danger: true })) return;
       videoMode = false;
       try {
         await api('POST', `/api/notes/video/delete?${acc()}`, { id: note.id, file: note.video.file });
@@ -261,7 +261,7 @@ export function bindMedia(box, note, onChange) {
       case 'crop':
         return openCrop(note, note.media[i].file);
       case 'delete':
-        if (!confirm(`删除这张配图${note.media[i].video ? '（连同它的动态视频）' : ''}？会移到回收站，可以恢复。`)) return;
+        if (!await confirmDialog({ title: '删除这张配图？', message: `${note.media[i].video ? '连同它的动态视频一起，' : ''}会移到回收站，可以恢复。`, confirmLabel: '删除', danger: true })) return;
         try {
           onChange(await api('POST', `/api/notes/media/delete?${acc()}`, { id: note.id, file: note.media[i].file }));
         } catch (err) {

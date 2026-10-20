@@ -3,7 +3,7 @@ import {mountImageStudio,imageBusy} from '../image-studio.js';
 // 受控任务校验封面与卡片规格，浏览器渲染并保存 PNG；旧式 cover 自动渲染兼容。
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
-import { S, $, api, acc, fileUrl, toast, ask, go, opt, readFileAsDataURL, accDirRel } from '../core.js';
+import { S, $, api, acc, fileUrl, toast, ask, go, opt, readFileAsDataURL, accDirRel, confirmLeave } from '../core.js';
 import { mediaHtml, bindMedia } from './media.js';
 import { TEMPLATES, PALETTES, normalizeSpec, drawCover } from '../covers.js';
 
@@ -59,7 +59,7 @@ export async function autoRender(ev) {
 // ---------- 面板 ----------
 
 export function canLeave() {
-  return !V.dirty || confirm('封面有未保存的修改，确定离开吗？');
+  return !V.dirty || confirmLeave('封面');
 }
 
 async function loadNote(id, guard=false) {
@@ -184,7 +184,7 @@ function draw(main) {
     <div id="cover-jobs">${jobsHtml()}</div>
     ${mediaHtml(n)}`;
   if(V.editorOnly)main.querySelector('[data-back-creation]').onclick=()=>{go('cover',{id:n.id});};
-  if(!V.editorOnly)mountImageStudio($('#image-studio',main),n,result=>{if(!canLeave())return;V.editCard=null;V.note=result.note;V.spec=normalizeSpec({...V.spec,template:'photo',image:result.file});V.dirty=true;V.revision++;draw(main);toast('底图已套用，可编辑标题后保存封面');});
+  if(!V.editorOnly)mountImageStudio($('#image-studio',main),n,async result=>{if(!(await canLeave()))return;V.editCard=null;V.note=result.note;V.spec=normalizeSpec({...V.spec,template:'photo',image:result.file});V.dirty=true;V.revision++;draw(main);toast('底图已套用，可编辑标题后保存封面');});
   redraw();
   options.forEach((o, i) => {
     const c = $(`[data-opt-canvas="${i}"]`, main);
@@ -228,7 +228,7 @@ function bind(main) {
     const t = e.target.closest('[data-tpl],[data-palette],[data-act],[data-option],[data-card],[data-retry]');
     if (!t) return;
     if(t.dataset.retry){try{await api('POST',`/api/covers/retry?${acc()}`,{id:t.dataset.retry});autoRender();}catch(e){toast(e.message);}return;}
-    if(t.dataset.card){if(!canLeave())return;const j=V.jobs.find(j=>j.id===t.dataset.card),i=Number(t.dataset.index);V.editCard={id:j.id,index:i,expectedSpec:j.specHashes[i]};V.spec=normalizeSpec(j.specs[i]);V.dirty=false;V.revision++;return draw(main);}
+    if(t.dataset.card){if(!(await canLeave()))return;const j=V.jobs.find(j=>j.id===t.dataset.card),i=Number(t.dataset.index);V.editCard={id:j.id,index:i,expectedSpec:j.specHashes[i]};V.spec=normalizeSpec(j.specs[i]);V.dirty=false;V.revision++;return draw(main);}
 
     if (t.dataset.tpl || t.dataset.palette) {
       readForm();
@@ -255,9 +255,9 @@ function bind(main) {
       }
       case 'ask-options': return run('options');
       case 'ask-image': return run('cards');
-      case 'schedule-draft': if(canLeave())return go('schedule',{id:V.note.id});return;
-      case 'preview-note': if(canLeave())return go('copywriting',{id:V.note.id,preview:true});return;
-      case 'back-cover': if(canLeave()){await loadNote(V.note.id);return draw(main);}return;
+      case 'schedule-draft': if(await canLeave())return go('schedule',{id:V.note.id});return;
+      case 'preview-note': if(await canLeave())return go('copywriting',{id:V.note.id,preview:true});return;
+      case 'back-cover': if(await canLeave()){await loadNote(V.note.id);return draw(main);}return;
     }
   };
 
@@ -270,7 +270,7 @@ function bind(main) {
 
   main.onchange = async (e) => {
     if (e.target.id === 'cover-note') {
-      if (!canLeave()) {
+      if (!(await canLeave())) {
         e.target.value = V.note.id;
         return;
       }

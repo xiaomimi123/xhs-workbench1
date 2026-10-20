@@ -2,7 +2,7 @@ import {renderDraft,draftBusy} from '../schedule-draft.js';
 // 发布排期：安排发布时间 → 到点提醒手动发布（附发布助手）
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
-import { S, $, api, acc, toast, fmtTime, opt } from '../core.js';
+import { S, $, api, acc, toast, fmtTime, opt, confirmDialog } from '../core.js';
 
 export const CREATOR_URL = 'https://creator.xiaohongshu.com/publish/publish';
 
@@ -251,7 +251,7 @@ function bind(main) {
       case 'retry':
         return update({ id: s.id, status: 'scheduled' });
       case 'cancel':
-        if (!confirm(`取消「${s.title}」的排期？`)) return;
+        if (!await confirmDialog({ title: '取消这个排期？', message: `「${s.title}」不会再按计划提醒发布，笔记本身不受影响。`, confirmLabel: '取消排期', danger: true })) return;
         return update({ id: s.id, status: 'cancelled' });
       case 'retime': {
         const v = prompt('新的发布时间（格式：2026-10-20 20:00）', fmtTime(s.publishAt));

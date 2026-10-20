@@ -2,7 +2,7 @@ import * as video from './modules/video-creation.js';
 import {mountVideoSettings} from './video-service-settings.js';
 import {mountImageServiceSettings} from './image-service-settings.js';
 import { md, esc, stripFrontmatter } from './md.js';
-import { S, $, api, acc, toast, showOverlay, fmtTime, currentAccount, withBusy, setHooks } from './core.js';
+import { S, $, api, acc, toast, showOverlay, fmtTime, currentAccount, withBusy, setHooks, confirmDialog, confirmLeave } from './core.js';
 import * as benchmark from './modules/benchmark.js';
 import * as topics from './modules/topics.js';
 import * as copywriting from './modules/copywriting.js';
@@ -121,16 +121,20 @@ function renderNav() {
 }
 
 function go(view, params) {
-  if (S.view === 'knowledge' && S.kb.dirty && !confirm('当前文档有未保存的修改，确定离开吗？')) return;
   const cur = MODULES.find((m) => m.id === S.view);
-  if (cur && cur.module && cur.module.canLeave && !cur.module.canLeave()) return;
-  S.kb.dirty = false;
-  S.view = view;
-  S.params = params || {};
-  try { localStorage.setItem('xhs-view', view); } catch { /* 忽略 */ }
-  document.body.classList.remove('nav-open');
-  renderNav();
-  renderMain();
+  const proceed = () => {
+    S.kb.dirty = false;
+    S.view = view;
+    S.params = params || {};
+    try { localStorage.setItem('xhs-view', view); } catch { /* 忽略 */ }
+    document.body.classList.remove('nav-open');
+    renderNav();
+    renderMain();
+  };
+  // 守卫返回 true（无需确认，同步继续）或 Promise<boolean>（站内确认框）
+  const then = (guard, next) => (guard === true ? next() : guard.then((ok) => ok && next()));
+  const kbGuard = S.view === 'knowledge' && S.kb.dirty ? confirmLeave('当前知识库文档') : true;
+  return then(kbGuard, () => then(cur && cur.module && cur.module.canLeave ? cur.module.canLeave() : true, proceed));
 }
 
 function renderMain() {
@@ -314,7 +318,7 @@ function viewKnowledge() {
     </div>
     <div class="kb">
       <div class="card kb-side">
-        <input type="search" id="kb-search" placeholder="搜索知识库，例如：怎么写标题" value="${esc(S.kb.query)}">
+        <input type="search" id="kb-search" aria-label="搜索知识库" placeholder="搜索知识库，例如：怎么写标题" value="${esc(S.kb.query)}">
         <div class="kb-tree" id="kb-tree"></div>
       </div>
       <div class="card kb-main" id="kb-main"></div>
@@ -383,7 +387,7 @@ function renderKbDoc() {
 }
 
 async function openDoc(path) {
-  if (S.kb.dirty && !confirm('当前文档有未保存的修改，确定切换吗？')) return;
+  if (S.kb.dirty && !(await confirmLeave('当前知识库文档'))) return;
   try {
     S.kb.current = await api('GET', `/api/knowledge/file?path=${encodeURIComponent(path)}`);
     S.kb.editing = false;
@@ -430,7 +434,7 @@ async function newDoc() {
 }
 
 async function deleteDoc() {
-  if (!confirm(`把「${S.kb.current.title}」移入回收站？（文件会移到数据目录的 .trash/ 下，可以找回）`)) return;
+  if (!await confirmDialog({ title: '移入回收站？', message: `「${S.kb.current.title}」会移到数据目录的 .trash/ 下，可以找回。`, confirmLabel: '移入回收站', danger: true })) return;
   try {
     await api('DELETE', `/api/knowledge/file?path=${encodeURIComponent(S.kb.current.path)}`);
     S.kb.current = null;
@@ -875,7 +879,7 @@ function bindEvents() {
     }
     if (await handleConnectClick(t)) return;
     if (t.dataset.useHost) {
-      if (!confirm('改用收件箱模式后，需要该 agent 的窗口保持打开并进入值守才能处理消息。确定吗？')) return;
+      if (!await confirmDialog({ title: '改用收件箱模式？', message: '改用后，需要该 agent 的窗口保持打开并进入值守，才能处理网页里的消息。', confirmLabel: '改用' })) return;
       await api('PUT', '/api/bridge', { mode: 'inbox', hostAgentId: t.dataset.useHost }).catch((err) => toast(err.message));
       return refreshBridge();
     }
@@ -892,7 +896,7 @@ function bindEvents() {
         S.kb.editing = true;
         return renderKbDoc();
       case 'kb-cancel':
-        if (S.kb.dirty && !confirm('放弃未保存的修改？')) return;
+        if (S.kb.dirty && !(await confirmLeave('当前知识库文档'))) return;
         S.kb.editing = false;
         S.kb.dirty = false;
         return renderKbDoc();
@@ -930,7 +934,7 @@ function bindEvents() {
           viewSettings();
         });
       case 'bridge-inbox':
-        if (!confirm('改用收件箱模式后，需要 agent 在它自己的窗口里值守才能处理消息。确定吗？')) return;
+        if (!await confirmDialog({ title: '改用收件箱模式？', message: '改用后，需要 agent 在它自己的窗口里值守，才能处理网页里的消息。', confirmLabel: '改用' })) return;
         await api('PUT', '/api/bridge', { mode: 'inbox' }).catch((err) => toast(err.message));
         return refreshBridge();
       case 'new-chat': return openSession('');
@@ -938,7 +942,7 @@ function bindEvents() {
         await api('POST', '/api/chat/cancel', { sessionId: S.session.id }).catch((err) => toast(err.message));
         return;
       case 'headless-toggle': {
-        if ($('#headless-toggle').checked && !confirm('无头模式抓取小红书有封号风险（无头浏览器的特征容易被平台风控识别）。\n\n推荐保持有头 + 系统真实浏览器。确定要开启无头吗？')) {
+        if ($('#headless-toggle').checked && !await confirmDialog({ title: '开启无头模式有封号风险', message: '无头浏览器的特征容易被平台风控识别。\n\n推荐保持有头 + 系统真实浏览器。', confirmLabel: '仍要开启', danger: true })) {
           $('#headless-toggle').checked = false;
           return;
         }

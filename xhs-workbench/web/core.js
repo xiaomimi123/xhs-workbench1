@@ -57,6 +57,56 @@ export function showOverlay(html) {
   el.hidden = false;
 }
 
+/**
+ * 站内确认框，替代浏览器自带的 confirm()：文案统一、不会被浏览器静默拦截、可用键盘操作。
+ * 返回 Promise<boolean>。danger=true 时默认焦点落在“取消”，避免回车误删。
+ * 不依赖 #overlay，所以不会盖掉已经打开的弹窗。
+ */
+export function confirmDialog({ title = '确认一下', message = '', confirmLabel = '确定', cancelLabel = '取消', danger = false } = {}) {
+  if (typeof document === 'undefined') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const previous = document.activeElement;
+    const wrap = document.createElement('div');
+    wrap.className = 'overlay confirm-overlay';
+    wrap.style.zIndex = '60';
+    const id = `confirm-${Date.now()}`;
+    wrap.innerHTML = `<div class="card confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="${id}-t" aria-describedby="${id}-m">
+      <h3 id="${id}-t" style="margin-top:0">${esc(title)}</h3>
+      <p id="${id}-m" style="white-space:pre-line">${esc(message)}</p>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="btn" data-confirm="no">${esc(cancelLabel)}</button>
+        <button class="btn ${danger ? 'danger' : 'primary'}" data-confirm="yes">${esc(confirmLabel)}</button></div></div>`;
+    const finish = (value) => {
+      document.removeEventListener('keydown', onKey, true);
+      wrap.remove();
+      try { previous?.focus?.(); } catch { /* 元素已不在页面上 */ }
+      resolve(value);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); return; }
+      if (e.key === 'Tab') { // 焦点留在对话框内
+        const items = [...wrap.querySelectorAll('button')];
+        const i = items.indexOf(document.activeElement);
+        e.preventDefault();
+        items[(i + (e.shiftKey ? items.length - 1 : 1)) % items.length].focus();
+      }
+    };
+    wrap.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-confirm]');
+      if (b) finish(b.dataset.confirm === 'yes');
+      else if (e.target === wrap) finish(false);
+    });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(wrap);
+    wrap.querySelector(danger ? '[data-confirm="no"]' : '[data-confirm="yes"]').focus();
+  });
+}
+
+/** 有未保存修改时离开当前内容的统一确认 */
+export function confirmLeave(what) {
+  return confirmDialog({ title: '有未保存的修改', message: `${what}还没有保存，离开后这些修改会丢失。`, confirmLabel: '不保存，离开', cancelLabel: '继续编辑', danger: true });
+}
+
 export function fmtTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);

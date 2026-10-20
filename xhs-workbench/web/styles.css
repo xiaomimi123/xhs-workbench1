@@ -606,3 +606,4 @@ mark { background: #ffe58a; color: inherit; border-radius: 2px; padding: 0 1px; 
 .creation-advanced, .video-notice { margin: 12px 0; }
 .creation-advanced > summary, .video-notice > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .warn-line { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); font-size: 13px; }
+.confirm-card { max-width: 420px; width: 100%; }

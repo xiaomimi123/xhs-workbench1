@@ -2,7 +2,7 @@ import {renderEngageReview,reviewBusy} from '../engage-review.js';
 // 评论私信：agent 抓取新评论 / 私信并起草回复 → 用户修改确认 → agent 发送
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
-import { S, $, api, acc, toast, fmtTime, ask, opt, accDirRel } from '../core.js';
+import { S, $, api, acc, toast, fmtTime, ask, opt, accDirRel, confirmDialog, confirmLeave } from '../core.js';
 import { lint } from '../lint.js';
 
 const FILTERS = [
@@ -43,7 +43,7 @@ export async function render(main) {
 }
 
 export function canLeave() {
-  return !V.editing.size || confirm('有修改过但未保存的回复，确定离开吗？');
+  return !V.editing.size || confirmLeave('修改过的回复');
 }
 
 export async function onContent(ev) {
@@ -179,7 +179,7 @@ function bind(main) {
         return ask(`请按 playbooks/engage.md，为 ${engageFile} 中状态为 new 且还没有草稿的消息起草回复（写入 draft，状态改为 drafted），不要发送。`, true);
       case 'send': {
         const n = V.items.filter((x) => x.status === 'approved').length;
-        if (!confirm(`让 agent 发送 ${n} 条已确认的回复？`)) return;
+        if (!await confirmDialog({ title: '发送已确认的回复？', message: `agent 会把 ${n} 条已确认的回复发出去，发出后无法撤回。`, confirmLabel: '发送' })) return;
         return ask(`请按 playbooks/engage.md 发送 ${engageFile} 中状态为 approved 的 ${n} 条回复（内容用 draft 字段，不要改写），逐条更新状态为 sent 或 failed。`, true);
       }
       case 'faq':

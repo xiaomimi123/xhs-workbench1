@@ -2,7 +2,7 @@ import {imagePages} from '../note-preview.js';
 // 文案：笔记列表 + 编辑器（标题 / 正文 / 话题），实时字数与违禁词检查，手机预览，一键让 agent 写 / 改
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
-import { S, $, api, acc, fileUrl, toast, fmtTime, ask, go, opt, accDirRel } from '../core.js';
+import { S, $, api, acc, fileUrl, toast, fmtTime, ask, go, opt, accDirRel, confirmDialog, confirmLeave } from '../core.js';
 import { lint, LIMITS } from '../lint.js';
 import { mediaHtml, bindMedia } from './media.js';
 
@@ -29,7 +29,7 @@ async function loadNote(id, {guard=false}={}) {
 }
 
 export function canLeave() {
-  return !V.dirty || confirm('笔记有未保存的修改，确定离开吗？');
+  return !V.dirty || confirmLeave('这篇笔记');
 }
 
 export async function render(main, params = {}) {
@@ -332,7 +332,7 @@ function bind(main) {
       }catch(err){toast(err.message);}return;
     }
     if (t.dataset.note) {
-      if (t.dataset.note === V.current || !canLeave()) return;
+      if (t.dataset.note === V.current || !(await canLeave())) return;
       await loadNote(t.dataset.note);
       return draw(main);
     }
@@ -348,7 +348,7 @@ function bind(main) {
     }
     switch (t.dataset.act) {
       case 'new': {
-        if (!canLeave()) return;
+        if (!(await canLeave())) return;
         const note = await api('POST', `/api/notes?${acc()}`, { create: true, title: '' }).catch((err) => toast(err.message));
         if (!note) return;
         await loadList();
@@ -379,7 +379,7 @@ function bind(main) {
         if (!(await save(true))) return;
         return go('cover', { id: V.note.id });
       case 'delete':
-        if (!confirm(`删除笔记「${V.note.title || V.note.id}」？（会移到回收站）`)) return;
+        if (!await confirmDialog({ title: '删除这篇笔记？', message: `「${V.note.title || V.note.id}」会移到回收站，可以恢复。`, confirmLabel: '删除', danger: true })) return;
         await api('DELETE', `/api/notes?${acc(`id=${V.note.id}`)}`).catch((err) => toast(err.message));
         V.dirty = false;
         await loadList();
