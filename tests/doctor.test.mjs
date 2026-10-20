@@ -74,3 +74,14 @@ test('detectPackageManagers 按平台只看对应的管理器', () => {
   assert.deepEqual(detectPackageManagers(find(['winget', 'brew']), 'win32'), ['winget']);
   assert.deepEqual(detectPackageManagers(find(['winget', 'brew']), 'darwin'), ['brew']);
 });
+
+test('Windows 路径文本里的反斜杠没有被当成转义（不能出现换页符/退格符）', () => {
+  const bs = String.fromCharCode(92);
+  const r = runDoctor({ ...base, platform: 'win32', find: find([]) });
+  const manual = r.checks.find((c) => c.id === 'ffmpeg').fix.manual;
+  assert.ok(manual.includes(`%USERPROFILE%${bs}ffmpeg`), manual);
+  assert.doesNotMatch(manual, /[\x08\x0c\x0b]/);
+  const dirs = commonBinDirs({ platform: 'win32', env: {}, home: 'H', exists: () => false });
+  assert.ok(dirs.includes(`C:${bs}ffmpeg${bs}bin`), dirs.join('|'));
+  for (const d of dirs) assert.doesNotMatch(d, /[\x08\x0c\x0b]/);
+});

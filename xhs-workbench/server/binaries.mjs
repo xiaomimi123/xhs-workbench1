@@ -12,11 +12,11 @@ export function commonBinDirs({ platform = process.platform, env = process.env, 
     const dirs = [
       path.join(local, 'Microsoft', 'WinGet', 'Links'),
       path.join(home, 'scoop', 'shims'),
-      path.join(env.ProgramData || 'C:\ProgramData', 'chocolatey', 'bin'),
-      'C:\ffmpeg\bin',
-      path.join(env.ProgramFiles || 'C:\Program Files', 'ffmpeg', 'bin'),
+      path.join(env.ProgramData || 'C:\\ProgramData', 'chocolatey', 'bin'),
+      'C:\\ffmpeg\\bin',
+      path.join(env.ProgramFiles || 'C:\\Program Files', 'ffmpeg', 'bin'),
     ];
-    for (const root of [path.join(home, 'ffmpeg'), 'C:\ffmpeg']) {
+    for (const root of [path.join(home, 'ffmpeg'), 'C:\\ffmpeg']) {
       try { if (exists(root)) for (const sub of list(root)) dirs.push(path.join(root, sub, 'bin')); } catch { /* 忽略不可读目录 */ }
     }
     return dirs;

@@ -32,7 +32,7 @@ function installHint(tool, platform, managers) {
     if (has('winget')) return { command: 'winget install Gyan.FFmpeg', note: '装完后新开终端；工作台自己也会在常见目录里查找，不一定要重启。' };
     if (has('choco')) return { command: 'choco install ffmpeg -y' };
     if (has('scoop')) return { command: 'scoop install ffmpeg' };
-    return { manual: '没有包管理器：从 https://www.gyan.dev/ffmpeg/builds/ 下载 ffmpeg-release-essentials.zip（约 110MB，国内网络可能很慢），解压到 %USERPROFILE%\ffmpeg，并把其中的 bin 目录加入用户 PATH。工作台会在 %USERPROFILE%\ffmpeg 下自动查找，所以只解压不改 PATH 也能用。下载前先告诉用户来源和大小。' };
+    return { manual: '没有包管理器：从 https://www.gyan.dev/ffmpeg/builds/ 下载 ffmpeg-release-essentials.zip（约 110MB，国内网络可能很慢），解压到 %USERPROFILE%\\ffmpeg，并把其中的 bin 目录加入用户 PATH。工作台会在 %USERPROFILE%\\ffmpeg 下自动查找，所以只解压不改 PATH 也能用。下载前先告诉用户来源和大小。' };
   }
   if (platform === 'darwin') {
     if (has('brew')) return { command: 'brew install ffmpeg' };
