@@ -54,3 +54,20 @@ test('描述任务：检测/分析中显示已用时间；自检未通过时说�
   assert.match(html, /data-video-action="settings">去连接与设置换 Agent/);
   assert.match(html, /每次会先让它做一次“看图自检”/);
 });
+
+test('视频任务排队/生成中显示已等待时间和按模式区分的预计时长；完成的不显示', async () => {
+  const mk = (over) => ({ id: 'videojob_x', status: 'running', createdAt: new Date(Date.now() - 125000).toISOString(), remoteId: 'r1', input: { prompt: 'p', mode: 't2v', width: 576, height: 768, total_frames: 73, frame_rate: 24 }, ...over });
+  const render = async (jobs) => {
+    const root = { innerHTML: '', querySelectorAll: () => [] };
+    const ctx = vm.createContext({ S: { accountId: 'a', view: 'video' }, root, structuredClone, esc: String, fileUrl: String, api: async (_m, url) => ({ items: url.includes('/videos/jobs') ? jobs : [] }), startVideoPolling: () => () => {}, go: () => {} });
+    vm.runInContext(source, ctx);
+    await vm.runInContext('render(root)', ctx);
+    return root.innerHTML;
+  };
+  const t2v = await render([mk({})]);
+  assert.match(t2v, /已等待 <span data-elapsed="[^"]+">2:0\d<\/span> · 通常需要 1–3 分钟/);
+  const clone = await render([mk({ input: { prompt: 'p', mode: 'rv2v', width: 576, height: 768, total_frames: 73, frame_rate: 24 } })]);
+  assert.match(clone, /参考视频复刻通常需要几分钟/);
+  assert.doesNotMatch(await render([mk({ status: 'done', path: 'x.mp4', media: { width: 1, height: 1, duration: 3 } })]), /已等待/);
+  assert.match(await render([mk({ status: 'queued' })]), /已等待/);
+});
