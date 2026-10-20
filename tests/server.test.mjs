@@ -286,3 +286,27 @@ test('参考视频 HTTP：真实上传抽帧、Agent回调、描述候选与账�
  }
  assert.equal((await api('GET','/api/videos/jobs?account=default')).body.items.length,0);
 });
+
+// ── 入站编码兜底：非 UTF-8 的调用方（Windows 命令行里的 curl 等）不再把中文永久替换成 U+FFFD ──
+test('聊天请求体：GBK 编码的中文按 GBK 兜底解码；UTF-8 不受影响；已经含 U+FFFD 的消息被拒绝而不是交给 agent 去猜', async () => {
+  const raw = (bytes) => fetch(`${base}/api/chat/send`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': token }, body: bytes });
+  // “测试中文”的 GBK 字节：B2 E2 CA D4 D6 D0 CE C4
+  const gbk = Buffer.concat([Buffer.from('{"accountId":"default","text":"'), Buffer.from([0xb2, 0xe2, 0xca, 0xd4, 0xd6, 0xd0, 0xce, 0xc4]), Buffer.from('"}')]);
+  const res = await raw(gbk);
+  assert.equal(res.status, 200);
+  const session = await res.json();
+  assert.equal(session.messages.find((m) => m.role === 'user').text, '测试中文');
+  const utf8 = await raw(Buffer.from(JSON.stringify({ accountId: 'default', text: '你好，UTF-8' })));
+  assert.equal(utf8.status, 200);
+  assert.equal((await utf8.json()).messages.filter((m) => m.role === 'user').at(-1).text, '你好，UTF-8');
+  const damaged = await api('POST', '/api/chat/send', { accountId: 'default', text: `损坏${String.fromCharCode(0xfffd)}${String.fromCharCode(0xfffd)}的消息` });
+  assert.equal(damaged.status, 400);
+  assert.match(damaged.body.error, /无法识别的字符/);
+});
+
+test('收件箱接口：peek 只看队列不领取；requeue 对不存在的任务返回 404', async () => {
+  const peek = await api('GET', '/api/agent/peek');
+  assert.equal(peek.status, 200);
+  assert.equal(typeof peek.body.pending, 'number');
+  assert.equal((await api('POST', '/api/agent/requeue', { taskId: 'nope' })).status, 404);
+});

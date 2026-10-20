@@ -22,7 +22,9 @@
 //   node scripts/workbench.mjs kb-search "<问题或关键词>"        按相关度检索知识库
 //   node scripts/workbench.mjs lint --account <账号id> --note <笔记id>
 //                                                            检查笔记字数与违禁词
-//   node scripts/workbench.mjs inbox-next [--wait 110]       收件箱模式：领取下一条任务
+//   node scripts/workbench.mjs inbox-next [--wait 110] [--dry-run]
+//                                                            收件箱模式：领取下一条任务；--dry-run 只看队列、不领取
+//   node scripts/workbench.mjs inbox-requeue <taskId>        收件箱模式：把刚领到、处理不了的任务退回队列
 //   node scripts/workbench.mjs inbox-reply <taskId> [--final] [--error <msg>] [--file <path>]
 //                                                            收件箱模式：回写结果（正文从 --file 或标准输入读取）
 import { spawn, spawnSync } from 'node:child_process';
@@ -94,18 +96,37 @@ async function health(info) {
   }
 }
 
-async function api(method, pathname, body, timeoutMs = 15_000) {
-  const info = serverInfo();
-  if (!(await health(info))) fail('工作台未运行，请先执行 start');
-  const res = await fetch(`http://127.0.0.1:${info.port}${pathname}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': token() },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) fail(data.error || `HTTP ${res.status}`);
-  return data;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 调本地服务。值守是长驻场景：服务重启、连接被重置时不能崩出一堆堆栈——
+ * 网络层错误带退避重试（1s、2s、4s），每次都重新读 server.json（重启后端口可能变了）；
+ * 仍不通就打印机器可读的 WORKBENCH_DOWN 并以退出码 2 结束，让值守端能区分“没有任务”（NO_TASK）和“服务不可用”。
+ * HTTP 层的业务错误（4xx/5xx 带 error 字段）不重试，照旧直接报错。
+ */
+async function api(method, pathname, body, timeoutMs = 15_000, { retries = 3 } = {}) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const info = serverInfo();
+    if (await health(info)) {
+      let res;
+      try {
+        res = await fetch(`http://127.0.0.1:${info.port}${pathname}`, {
+          method,
+          headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': token() },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch { res = null; } // 连接被重置 / 超时：落到下面的重试
+      if (res) {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) fail(data.error || `HTTP ${res.status}`);
+        return data;
+      }
+    }
+    if (attempt < retries) await sleep(1000 * 2 ** attempt);
+  }
+  console.log(`WORKBENCH_DOWN: 工作台没有运行或正在重启（已重试 ${retries} 次）。请稍后原样重试这条命令；一直不通请运行 start。`);
+  process.exit(2);
 }
 
 function openBrowser(url) {
@@ -113,11 +134,10 @@ function openBrowser(url) {
     process.platform === 'darwin'
       ? ['open', [url]]
       : process.platform === 'win32'
-        ? // start 的第一个带引号参数会被当成窗口标题，所以要补一个空标题
-          ['cmd', ['/c', 'start', '""', url]]
+        ? // explorer 直接打开 URL：不经过 shell，URL 里的 & 不会被截断，也没有 shell:true 传参的安全告警（DEP0190）
+          ['explorer.exe', [url]]
         : ['xdg-open', [url]];
-  // Windows 上 cmd /c 的整条命令要作为一个带引号的参数传给 shell，否则 URL 里的 & 会截断命令
-  spawn(bin, args, { detached: true, stdio: 'ignore', shell: process.platform === 'win32' }).unref();
+  spawn(bin, args, { detached: true, stdio: 'ignore' }).unref();
 }
 
 function storeWorkerSetting(enabled) {
@@ -338,6 +358,8 @@ const commands = {
     const info = serverInfo();
     if (!(await health(info))) return console.log('工作台未运行。');
     try {
+      // Windows 上 SIGTERM 等于直接结束进程，服务自己来不及写日志，所以由命令行记一笔：以后能分清是谁停的
+      try { fs.appendFileSync(path.join(P.logs, 'server.log'), `[${new Date().toISOString()}] 收到 stop 命令（命令行 pid ${process.pid}，父进程 pid ${process.ppid}），停止工作台 pid ${info.pid}\n`); } catch { /* 日志写不了不影响停止 */ }
       process.kill(info.pid, 'SIGTERM');
       console.log('工作台已停止。');
     } catch (err) {
@@ -473,6 +495,14 @@ const commands = {
   },
 
   async 'inbox-next'() {
+    if (flags['dry-run']) {
+      // 只看队列，绝不领取（探测、排查时用，避免把任务白白领走）
+      const peek = await api('GET', '/api/agent/peek');
+      console.log(`PENDING: ${peek.pending}`);
+      if (peek.head) console.log(`HEAD: ${peek.head.id}`);
+      console.log('DRY_RUN: 没有领取任何任务');
+      return;
+    }
     const wait = Number(flags.wait) || 110;
     const { task } = await api('GET', `/api/agent/next?wait=${wait}`, null, (wait + 15) * 1000);
     if (!task) {
@@ -490,6 +520,13 @@ const commands = {
     console.log(`完成后执行：node "${path.join(SKILL_DIR, 'scripts', 'workbench.mjs')}" inbox-reply ${task.id} --final  （回复正文从标准输入或 --file 传入）`);
   },
 
+  async 'inbox-requeue'() {
+    const taskId = flags._[0];
+    if (!taskId) fail('用法：inbox-requeue <taskId>');
+    await api('POST', '/api/agent/requeue', { taskId });
+    console.log('已把任务退回队列，其他（或稍后的）值守可以重新领取。');
+  },
+
   async 'inbox-reply'() {
     const taskId = flags._[0];
     if (!taskId) fail('缺少 taskId');
@@ -505,6 +542,11 @@ const commands = {
   },
 };
 
+// 帮助参数绝不进入真实命令：`inbox-next --help` 以前会真的领走队首任务
+if (flags.help || flags.h || rest.includes('-h') || cmd === '--help' || cmd === '-h' || cmd === 'help') {
+  console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//')).join('\n').replace(/^\/\/ ?/gm, ''));
+  process.exit(0);
+}
 if (!commands[cmd]) {
   console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//')).join('\n').replace(/^\/\/ ?/gm, ''));
   process.exit(cmd ? 1 : 0);

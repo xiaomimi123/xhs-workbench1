@@ -1,3 +1,4 @@
+import { decodeText } from './inbox-files.mjs';
 import {VideoDescriptionWorkflow} from './video-description-workflow.mjs';
 import {VideoRetrieval} from './video-retrieval.mjs';
 import {videoService} from './video-service.mjs';
@@ -144,7 +145,7 @@ function writeObservationCheckpoint(task, result) {
   return { warning };
 }
 
-const bridge = new Bridge({ browserWorker, onBenchmarkVerified: writeVerifiedCheckpoint, onBenchmarkObservation: writeObservationCheckpoint,
+const bridge = new Bridge({ inboxFile: path.join(P.run, 'inbox-tasks.json'), browserWorker, onBenchmarkVerified: writeVerifiedCheckpoint, onBenchmarkObservation: writeObservationCheckpoint,
   onBrowserPrepared: (task, result) => {
     if (store.getAccount(task.accountId)?.xhsId !== result.xhsId) throw new Error('账号设置已变化，请重新核对登录账号');
     const file = path.join(P.accountsDir, task.accountId, 'browser.json');
@@ -237,6 +238,8 @@ for (const account of store.listAccounts()) flushBenchmarkCheckpoints(account.id
 
 const sessions = new Map(); // 内存缓存
 const taskIndex = new Map(); // taskId -> { sessionId, msgId }
+// 重启前还在队列里的对话任务：已从磁盘恢复，对应的助手消息保持“等待”，不当成中断
+const restoredTaskIds = new Set();
 
 function getSession(id) {
   if (sessions.has(id)) return sessions.get(id);
@@ -244,7 +247,7 @@ function getSession(id) {
   if (!s) return null;
   // 服务重启前未完成的消息标记为中断
   for (const m of s.messages) {
-    if (m.role === 'assistant' && (m.status === 'pending' || m.status === 'running')) {
+    if (m.role === 'assistant' && (m.status === 'pending' || m.status === 'running') && !restoredTaskIds.has(m.id)) {
       m.status = 'error';
       m.error = '服务重启，任务已中断';
     }
@@ -332,6 +335,12 @@ const coverWorkflow = new CoverWorkflow({
   },
 });
 coverWorkflow.recover();
+
+const restoredFromDisk = bridge.restored.length;
+for (const t of bridge.restored) {
+  restoredTaskIds.add(t.id);
+  taskIndex.set(t.id, { sessionId: t.sessionId, msgId: t.id, accountId: t.accountId, adapterId: null, modelKey: '' });
+}
 
 bridge.on('claimed', ({ taskId }) => {
   topicWorkflow.progress(taskId, 'agent 正在处理');
@@ -640,7 +649,8 @@ function readBody(req) {
     req.on('end', () => {
       if (!chunks.length) return resolve({});
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        // 浏览器发的是 UTF-8；非 UTF-8 的调用方（例如 Windows 命令行里的 curl）按 GBK 兜底，避免中文被永久替换成 U+FFFD
+        resolve(JSON.parse(decodeText(Buffer.concat(chunks))));
       } catch {
         reject(store.httpError(400, 'JSON 格式错误'));
       }
@@ -772,7 +782,10 @@ async function handleApi(req, res, url) {
       store.trashChat(q.get('id') || '');
       return sendJson(res, 200, { ok: true });
     case 'POST /api/chat/send': {
-      const { session } = sendChat(await readBody(req));
+      const sent = await readBody(req);
+      // U+FFFD 是解码失败留下的替换字符，原文已不可恢复：宁可让用户重发，也不把残缺的消息交给 agent 去猜
+      if (typeof sent.text === 'string' && sent.text.includes(String.fromCharCode(0xfffd))) throw store.httpError(400, '消息里有无法识别的字符（中文编码异常），请重新发送');
+      const { session } = sendChat(sent);
       broadcast({ type: 'chats.changed' });
       return sendJson(res, 200, session);
     }
@@ -818,12 +831,21 @@ async function handleApi(req, res, url) {
     case 'GET /api/agent/next': {
       const wait = Math.min(Math.max(Number(q.get('wait')) || 0, 0), 600) * 1000;
       const before = bridge.status().inboxOnline;
-      const pending = bridge.next(wait);
+      const ac = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+      const pending = bridge.next(wait, ac.signal);
       if (!before) broadcast({ type: 'bridge.changed' });
       const task = await pending;
       // 长轮询期间 agent 已断开：把任务放回队列，下次再领
       if (task && res.socket && res.socket.destroyed) return bridge.requeue(task.id);
       return sendJson(res, 200, { task });
+    }
+    case 'GET /api/agent/peek':
+      return sendJson(res, 200, bridge.peek());
+    case 'POST /api/agent/requeue': {
+      const body = await readBody(req);
+      if (!bridge.requeue(body.taskId)) throw store.httpError(404, '任务不存在');
+      return sendJson(res, 200, { ok: true });
     }
     case 'POST /api/agent/reply': {
       const body = await readBody(req);
@@ -1264,6 +1286,13 @@ async function listen() {
   throw new Error(`端口 ${PORT_RANGE[0]}-${PORT_RANGE[1]} 都被占用`);
 }
 
+const previousInstance = (() => {
+  const prev = store.readJson(P.serverInfo, null);
+  if (!prev || prev.pid === process.pid) return null;
+  let alive = false;
+  try { process.kill(prev.pid, 0); alive = true; } catch { /* 不在了 */ }
+  return { pid: prev.pid, alive };
+})();
 const { port } = await listen();
 const info = {
   pid: process.pid,
@@ -1275,7 +1304,10 @@ const info = {
   skillDir: SKILL_DIR,
 };
 store.writeJson(P.serverInfo, info);
-log(`工作台已启动 ${info.url}（pid ${process.pid}）`);
+log(`工作台已启动 ${info.url}（pid ${process.pid}，父进程 pid ${process.ppid}${previousInstance ? `，上一个实例 pid ${previousInstance.pid} ${previousInstance.alive ? '仍在运行' : '已不在'}` : ''}${restoredFromDisk ? `，从磁盘恢复 ${restoredFromDisk} 个收件箱任务` : ''}）`);
+process.on('exit', (code) => { try { log(`工作台进程退出（pid ${process.pid}，退出码 ${code}）`); } catch { /* 日志目录不可写时忽略 */ } });
+process.on('uncaughtException', (err) => { try { log(`未捕获的异常，进程退出：${err && err.stack ? err.stack.split('\n').slice(0, 4).join(' | ') : err}`); } catch { /* 忽略 */ } process.exit(1); });
+process.on('unhandledRejection', (err) => { try { log(`未处理的 Promise 拒绝：${err && err.message ? err.message : err}`); } catch { /* 忽略 */ } });
 console.log(`工作台已启动：${info.openUrl}`);
 
 let shuttingDown = false;

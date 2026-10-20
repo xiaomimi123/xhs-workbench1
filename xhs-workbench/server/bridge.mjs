@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SKILL_DIR, WORKSPACE } from './paths.mjs';
-import { getBridgeConfig } from './store.mjs';
+import { getBridgeConfig, readJson, writeJson } from './store.mjs';
 import { mcpConfigFor, codexBrowserArgs } from './browser.mjs';
 
 const IS_WIN = process.platform === 'win32';
@@ -222,7 +222,7 @@ export function localFileAdapter(cfg){
 }
 
 export class Bridge extends EventEmitter {
-  constructor({ browserWorker = null, onBenchmarkVerified = null, onBenchmarkObservation = null, onBrowserPrepared = null } = {}) {
+  constructor({ browserWorker = null, onBenchmarkVerified = null, onBenchmarkObservation = null, onBrowserPrepared = null, inboxFile = null } = {}) {
     super();
     this.running = new Map(); // CLI/只读任务：taskId -> { cancel, accountId }
     this.cliQueue = []; // 同一账号的浏览器资料排队；普通无浏览器任务不排队
@@ -234,6 +234,41 @@ export class Bridge extends EventEmitter {
     this.tasks = new Map(); // 收件箱模式：taskId -> task
     this.waiters = [];
     this.lastPoll = 0;
+    this.inboxFile = inboxFile; // 不传则不持久化（测试用）
+    this.restored = [];
+    this.#restoreInbox();
+  }
+
+  // ---- 收件箱任务持久化：服务重启后不丢任务 ----
+  // 只保存对话任务（带 sessionId，用户在网页里发的消息）；自动工作流的任务重启时由各自的 recover() 标记中断，不在这里恢复。
+  // 重启前已被 agent 领走但没回写的（claimed）一律放回待领取：agent 那边的长轮询早已断开，不会再来回写。
+  #persistInbox() {
+    if (!this.inboxFile) return;
+    try {
+      const keep = [...this.tasks.values()].filter((t) => t.sessionId && ['pending', 'claimed'].includes(t.state)).map((t) => ({ ...t, account: undefined }));
+      writeJson(this.inboxFile, { savedAt: new Date().toISOString(), tasks: keep });
+    } catch { /* 写盘失败不影响主流程 */ }
+  }
+
+  #restoreInbox() {
+    if (!this.inboxFile) return;
+    const saved = readJson(this.inboxFile, { tasks: [] });
+    const cutoff = Date.now() - 24 * 3600_000;
+    for (const t of saved.tasks || []) {
+      if (!t || !t.id || !t.sessionId || new Date(t.createdAt || 0).getTime() < cutoff) continue;
+      const task = { ...t, state: 'pending' };
+      delete task.claimedAt;
+      delete task.lastReplyAt;
+      this.tasks.set(task.id, task);
+      this.restored.push({ id: task.id, sessionId: task.sessionId, accountId: task.accountId, wasClaimed: t.state === 'claimed' });
+    }
+    if (this.restored.length) this.#persistInbox();
+  }
+
+  /** 队首待领取任务的概览（不领取），给 inbox-next --dry-run 用 */
+  peek() {
+    const pending = [...this.tasks.values()].filter((t) => t.state === 'pending');
+    return { pending: pending.length, head: pending[0] ? { id: pending[0].id, createdAt: pending[0].createdAt } : null };
   }
 
   config() {
@@ -255,7 +290,8 @@ export class Bridge extends EventEmitter {
       testedAt: cfg ? cfg.testedAt : null,
       browser: cfg ? cfg.browser || null : null,
       // agent 领到任务后在处理（可能几分钟不再轮询），这段时间也算在线，否则界面会误报“离线”
-      inboxOnline: Date.now() - this.lastPoll < INBOX_ONLINE_MS || inboxTasks.some((t) => t.state === 'claimed' && Date.now() - new Date(t.lastReplyAt || t.claimedAt).getTime() < INBOX_WORKING_MS),
+      // 正在长轮询（waiters 里有它）一定在线：一次长轮询最长 110 秒，超过 45 秒的窗口，不算的话每次轮询中途都会闪成“离线”
+      inboxOnline: this.waiters.length > 0 || Date.now() - this.lastPoll < INBOX_ONLINE_MS || inboxTasks.some((t) => t.state === 'claimed' && Date.now() - new Date(t.lastReplyAt || t.claimedAt).getTime() < INBOX_WORKING_MS),
       lastPollAt: this.lastPoll ? new Date(this.lastPoll).toISOString() : null,
       pending: inboxTasks.filter((t) => t.state === 'pending').length + this.cliQueue.length,
       running: this.running.size + inboxTasks.filter((t) => t.state === 'claimed').length,
@@ -303,6 +339,7 @@ export class Bridge extends EventEmitter {
     if (t) {
       if (t.state === 'claimed') this.activeProfiles.delete(t.accountId);
       this.tasks.delete(taskId);
+      this.#persistInbox();
       this.emit('error', { taskId, message: '已取消' });
       return true;
     }
@@ -442,6 +479,7 @@ export class Bridge extends EventEmitter {
 
   #queueInboxTask(task) {
     this.tasks.set(task.id, { ...task, prompt: task.prompt + '\n\n【收件箱执行范围】只处理本地文件与资料；不得打开浏览器、访问平台或发布。外部收件箱执行端无法由工作台强制中断。', state: 'pending', createdAt: new Date().toISOString() });
+    this.#persistInbox();
     this.#wakeWaiter();
   }
 
@@ -453,6 +491,7 @@ export class Bridge extends EventEmitter {
         if (t.accountId) this.activeProfiles.add(t.accountId);
         t.state = 'claimed';
         t.claimedAt = new Date().toISOString();
+        this.#persistInbox();
         this.emit('claimed', { taskId: t.id });
         return { id: t.id, sessionId: t.sessionId, prompt: t.prompt, createdAt: t.createdAt };
       }
@@ -470,28 +509,45 @@ export class Bridge extends EventEmitter {
   }
 
   /** agent 长轮询领取任务；超时返回 null */
-  next(waitMs) {
+  next(waitMs, signal = null) {
     this.lastPoll = Date.now();
     const task = this.#takePending();
     if (task || waitMs <= 0) return Promise.resolve(task);
     return new Promise((resolve) => {
       const waiter = (t) => {
         clearTimeout(timer);
+        signal?.removeEventListener?.('abort', onAbort);
         this.lastPoll = Date.now();
         resolve(t);
       };
       const timer = setTimeout(() => {
         this.waiters = this.waiters.filter((w) => w !== waiter);
+        signal?.removeEventListener?.('abort', onAbort);
         this.lastPoll = Date.now();
         resolve(null);
       }, waitMs);
+      // 客户端断开（连接重置、服务重启、进程被杀）：立刻把这个等待者摘掉，
+      // 否则下一条任务会被“领”给一个已经不存在的客户端，既没送达也没回滚
+      const onAbort = () => {
+        clearTimeout(timer);
+        this.waiters = this.waiters.filter((w) => w !== waiter);
+        resolve(null);
+      };
+      if (signal?.aborted) return onAbort();
+      signal?.addEventListener?.('abort', onAbort, { once: true });
       this.waiters.push(waiter);
     });
   }
 
   requeue(taskId) {
     const t = this.tasks.get(taskId);
-    if (t) { if (t.state === 'claimed') this.activeProfiles.delete(t.accountId); t.state = 'pending'; }
+    if (!t) return false;
+    if (t.state === 'claimed') this.activeProfiles.delete(t.accountId);
+    t.state = 'pending';
+    delete t.claimedAt;
+    this.#persistInbox();
+    this.#wakeWaiter();
+    return true;
   }
 
   /** agent 回写：final=false 为进度（显示为进度行），final=true 为最终回复 */
@@ -503,10 +559,12 @@ export class Bridge extends EventEmitter {
     if (error) {
       if (t.state === 'claimed') this.activeProfiles.delete(t.accountId);
       this.tasks.delete(taskId);
+      this.#persistInbox();
       this.emit('error', { taskId, message: error });
     } else if (final) {
       if (t.state === 'claimed') this.activeProfiles.delete(t.accountId);
       this.tasks.delete(taskId);
+      this.#persistInbox();
       this.emit('done', { taskId, text });
     } else if (text) {
       this.emit('tool', { taskId, name: '进度', detail: text.slice(0, 200) });

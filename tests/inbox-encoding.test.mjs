@@ -58,3 +58,15 @@ test('agent 领到任务后在处理（不再轮询）也算在线，超过 15 �
   b.lastPoll = Date.now() - 5 * 60_000;
   assert.equal(b.status().inboxOnline, false, '任务结束且长时间没轮询：离线');
 });
+
+test('正在长轮询等任务时始终在线（一次长轮询最长 110 秒，不能每次都中途闪成离线）', async () => {
+  store.saveBridgeConfig({ mode: 'inbox' });
+  const b = new Bridge();
+  b.lastPoll = Date.now() - 100_000; // 距上次领取已经 100 秒，但这个轮询还挂着
+  const waiting = b.next(300);
+  assert.equal(b.status().inboxOnline, true);
+  assert.equal(await waiting, null);
+  assert.equal(b.status().inboxOnline, true); // 刚返回，lastPoll 刚刷新
+  b.lastPoll = Date.now() - 100_000;
+  assert.equal(b.status().inboxOnline, false); // 没有挂着的轮询、也太久没动静：离线
+});
