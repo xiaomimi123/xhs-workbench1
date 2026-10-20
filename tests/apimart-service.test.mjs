@@ -10,7 +10,7 @@ test('settings preserve empty keys, mask secrets and restrict file permissions',
  const s=new mod.ImageService({file:path.join(dir,'secret.json')});
  const pub=s.save({apiKey:'secret-test-key',defaultProvider:'apimart'});
  assert.equal(pub.hasKey,true);assert.equal(JSON.stringify(pub).includes('secret-test-key'),false);
- assert.equal(s.save({apiKey:''}).hasKey,true);assert.equal(fs.statSync(s.file).mode&0o777,0o600);
+ assert.equal(s.save({apiKey:''}).hasKey,true);if(process.platform!=='win32')assert.equal(fs.statSync(s.file).mode&0o777,0o600);
  assert.equal(s.save({deleteKey:true}).hasKey,false);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

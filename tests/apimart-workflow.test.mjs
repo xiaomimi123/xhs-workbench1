@@ -55,3 +55,31 @@ test('a 2xx response without task id is uncertain; poll 404 is reported explicit
  assert.equal(after.status,'submitted');
  assert.match(after.error,/HTTP 404/);assert.equal(after.diag.httpStatus,404);
 });
+
+// ── 已知任务编号恢复与密钥不落盘 ──
+const allFiles=d=>fs.existsSync(d)?fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?allFiles(path.join(d,e.name)):[path.join(d,e.name)]):[];
+const leaks=(w,a,secret)=>allFiles(w.dir(a)).filter(f=>!/\.(png)$/.test(f)&&fs.readFileSync(f,'utf8').includes(secret));
+test('known task ID survives poll failures and a later refresh downloads the result, clearing the error',async()=>{
+ let fail=true;const {a,w}=setup(async url=>{
+  if(url.endsWith('generations'))return Response.json({data:[{task_id:'task_recover'}]});
+  if(url.includes('/tasks/')){if(fail)throw Object.assign(new Error('socket hang up'),{cause:{code:'ECONNRESET'}});return Response.json({data:{id:'task_recover',status:'completed',result:{images:[{url:['https://upload.apimart.ai/f/image/r.png']}]}}});}
+  return new Response(png);});
+ const j=w.start(a,{provider:'apimart',prompt:'恢复下载'});await tick();
+ const mid=await w.refresh(a,j.id);
+ assert.equal(mid.taskId,'task_recover');assert.equal(mid.status,'submitted');assert.equal(mid.diag.networkCode,'ECONNRESET');
+ fail=false;
+ const done=await w.refresh(a,j.id);
+ assert.equal(done.status,'done');assert.equal(done.taskId,'task_recover');assert.equal(done.assets.length,1);
+ assert.equal(fs.existsSync(path.join(w.dir(a),j.id,'candidates','1.png')),true);
+});
+test('API key never reaches job records or files on disk, even when upstream echoes it back',async()=>{
+ const key='private-key';
+ const rejected=setup(async()=>new Response(JSON.stringify({error:{message:`bad key ${key}`}}),{status:401}));
+ const j1=rejected.w.start(rejected.a,{provider:'apimart',prompt:'泄露检查A'});await tick();await rejected.w.refresh(rejected.a,j1.id);
+ assert.equal(JSON.stringify(rejected.w.find(rejected.a,j1.id)).includes(key),false);
+ assert.deepEqual(leaks(rejected.w,rejected.a,key),[]);
+ const dropped=setup(async()=>{throw new Error(`fetch failed for Bearer ${key}`);});
+ const j2=dropped.w.start(dropped.a,{provider:'apimart',prompt:'泄露检查B'});await tick();await dropped.w.refresh(dropped.a,j2.id);
+ assert.equal(JSON.stringify(dropped.w.find(dropped.a,j2.id)).includes(key),false);
+ assert.deepEqual(leaks(dropped.w,dropped.a,key),[]);
+});

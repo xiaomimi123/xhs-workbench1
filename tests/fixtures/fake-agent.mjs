@@ -60,8 +60,8 @@ if(prompt.includes('这是工作台受控回复审核任务')){
 
 // Reference-description integration fixture; no model/network/generation calls.
 if(prompt.includes('执行工作台视频描述任务。')){
- const inputPath=/读取 (.+?vdesc_[\w-]+\/input\.json)。/.exec(prompt)?.[1];
- const outputPath=/只写 JSON 到 (.+?vdesc_[\w-]+\/result\.json)：/.exec(prompt)?.[1];
+ const inputPath=/读取 (.+?vdesc_[\w-]+[\\/]input\.json)。/.exec(prompt)?.[1];
+ const outputPath=/只写 JSON 到 (.+?vdesc_[\w-]+[\\/]result\.json)：/.exec(prompt)?.[1];
  if(inputPath&&outputPath){const input=JSON.parse(fs.readFileSync(inputPath,'utf8'));fs.writeFileSync(outputPath,JSON.stringify({prompt:'隔离测试：固定镜头，主体缓慢移动。',observations:input.frames.map(f=>({time:f.time,description:'隔离抽帧占位观察，不代表真实模型分析'})),limitations:['假 Agent 只验证流程']}));}
 }
 

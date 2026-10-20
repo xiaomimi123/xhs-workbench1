@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SKILL = path.join(ROOT, 'xhs-workbench');
@@ -16,11 +16,11 @@ export function useTempWorkspace() {
 }
 
 export function server(mod) {
-  return import(path.join(SKILL, 'server', mod));
+  return import(pathToFileURL(path.join(SKILL, 'server', mod)).href);
 }
 
 export function web(mod) {
-  return import(path.join(SKILL, 'web', mod));
+  return import(pathToFileURL(path.join(SKILL, 'web', mod)).href);
 }
 
 /** 假 agent 的适配器配置 */

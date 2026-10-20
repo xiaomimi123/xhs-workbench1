@@ -4,7 +4,7 @@
   "type": "module",
   "description": "小红书运营工作台的开发仓库（分发的技能包在 xhs-workbench/，基础服务无第三方依赖，可选安装浏览器运行时）",
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.mjs",
     "package": "node tools/package.mjs"
   }
 }

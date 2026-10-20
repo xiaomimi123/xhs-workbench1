@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { useTempWorkspace, server, fakeAdapter, PNG_1PX, SKILL } from './helpers.mjs';
 
 const WS = useTempWorkspace();
@@ -87,7 +88,7 @@ const audits = () => fs.existsSync(audit) ? fs.readdirSync(audit).sort().map((f)
 
 await test('后台核实 HTTP/SSE、逐条检查点与无模型调用', async () => {
   try {
-    proc = spawn(process.execPath, ['--loader', path.join(SKILL, '..', 'tests', 'fixtures', 'ocr-loader.mjs'), path.join(SKILL, 'server', 'server.mjs')], {
+    proc = spawn(process.execPath, ['--loader', pathToFileURL(path.join(SKILL, '..', 'tests', 'fixtures', 'ocr-loader.mjs')).href, path.join(SKILL, 'server', 'server.mjs')], {
       env: { ...process.env, XHS_WORKSPACE: WS, FAKE_AGENT_MODE: 'claude-json', FAKE_AGENT_AUDIT_DIR: audit },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
