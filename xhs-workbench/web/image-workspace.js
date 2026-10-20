@@ -1,7 +1,8 @@
 import {initializeImageService,imageServiceFields,imageJobStatus,imageJobProgress} from './image-service-settings.js';
 import {esc} from './md.js';
+import {startImagePolling} from './image-polling.js';
 import {S,api,fileUrl,toast,go,readFileAsDataURL} from './core.js';
-const forms=new Map();
+const forms=new Map();let stopPolling=null;
 export const IMAGE_STYLES={fermented:{name:'腐乳食欲特写',prompt:'真实食品摄影，筷子夹起或勺子托起腐乳，突出油润酱汁和颗粒，家庭餐桌、暖色自然光，产品包装适度露出。'},powder:{name:'粉剂暖光场景',prompt:'真实食品摄影，粉剂产品罐与冲泡后的饮品同框，奶白桌布、木托盘、窗边暖阳，突出粉末与饮品质感，奶油色和暖棕色。'},coffee:{name:'咖啡生活随拍',prompt:'真实生活摄影，手持咖啡或桌面倒奶瞬间，突出冰块、奶泡、液体层次，自然窗光，主体清晰、背景适当虚化。'}};
 export function creationForm(account,entry,noteId=''){const key=JSON.stringify([account,entry,noteId]);if(!forms.has(key))forms.set(key,{prompt:'',headline:'',outputMode:'poster',count:1,style:'',references:[],busy:false,target:noteId,uploadRole:'style'});return forms.get(key);}
 export function creationBusy(account,entry,noteId=''){return creationForm(account,entry,noteId).busy;}
@@ -33,6 +34,7 @@ ${entry!=='reference'?refsHtml:''}
  <div class="creation-candidates">${j.assets.map(x=>`<div><a href="${fileUrl(x.path,x.hash)}" target="_blank" rel="noopener"><img src="${fileUrl(x.path,x.hash)}" alt="生成候选 ${x.index+1}"></a><p class="muted">${x.width} × ${x.height} · ${j.outputMode==='poster'?'文字已合成':'底图'}</p><div class="row"><button class="btn small" data-create-action="live" data-job="${j.id}" data-index="${x.index}" ${disabled}>制作实况照片</button><button class="btn small" data-create-action="video" data-job="${esc(j.id)}" data-index="${x.index}" ${disabled}>制作视频</button><a class="btn small" href="${fileUrl(x.path,x.hash)}" download="${j.id}-${x.index+1}.png">下载 PNG</a><button class="btn small" data-create-action="library" data-job="${j.id}" data-index="${x.index}" ${disabled}>${x.materialId?'已存共享素材库':'保存到共享素材库'}</button></div><div class="row"><button class="btn small" data-create-action="media" data-job="${j.id}" data-index="${x.index}" ${disabled||(!v.target||j.stale?'disabled':'')}>加入正文配图</button><button class="btn primary small" data-create-action="${j.outputMode==='poster'?'cover':'layout'}" data-job="${j.id}" data-index="${x.index}" ${disabled||(!v.target||j.stale?'disabled':'')}>${j.outputMode==='poster'?'设为封面':'编辑封面文字'}</button></div></div>`).join('')}</div></article>`).join('')||'<div class="card empty-card">还没有创作记录。先创建第一张图片。</div>'}</section></div>`;
  }
  v.redraw=draw;draw();
+ stopPolling?.();stopPolling=startImagePolling({current,jobs:()=>jobs,paused:()=>v.busy,focused:()=>typeof document!=='undefined'&&!!document.activeElement&&root.contains?.(document.activeElement)&&/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName),refresh:id=>api('POST',`/api/images/refresh?${query}`,{id}),load:async()=>{await load();},draw});
  root.addEventListener?.('toggle',e=>{if(e.target.classList?.contains('creation-advanced'))v.advancedOpen=e.target.open;},true);
  root.oninput=e=>{const key=e.target.dataset.createField;if(['prompt','headline'].includes(key))v[key]=e.target.value;};
  root.onchange=async e=>{const key=e.target.dataset.createField;if(key){if(key==='count')v.count=Number(e.target.value);else v[key]=e.target.value;if(key==='provider'&&v.provider==='apimart')v.count=1;if(key==='style'&&v.style){v.prompt=IMAGE_STYLES[v.style].prompt;const found=refs.find(r=>r.style===v.style&&r.role==='style');if(found)v.references=[{file:found.file,source:'studio',role:'style'},...v.references.filter(r=>r.role==='product')].slice(0,3);}if(!['prompt','headline'].includes(key))draw();}
