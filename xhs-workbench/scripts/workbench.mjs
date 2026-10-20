@@ -2,7 +2,7 @@
 // 小红书运营工作台 · 统一命令入口（给 agent 调用）
 //
 //   node scripts/workbench.mjs setup                         初始化数据目录
-//   node scripts/workbench.mjs bridge-test [--prefer <id>] [--only <id>] [--all] [--inbox]
+//   node scripts/workbench.mjs bridge-test [--agent <id>] [--prefer <id>] [--only <id>] [--all] [--auto] [--inbox]
 //                                                            探测本机 agent 并跑连接测试，写入配置
 //   node scripts/workbench.mjs start [--open]                启动工作台（已运行则复用）
 //   node scripts/workbench.mjs open                          在浏览器打开工作台
@@ -26,7 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { P, SKILL_DIR, WORKSPACE } from '../server/paths.mjs';
 import { ensureWorkspace, readJson, writeJson, saveBridgeConfig, getBridgeConfig } from '../server/store.mjs';
-import { ADAPTERS } from '../server/adapters.mjs';
+import { ADAPTERS, DESKTOP_AGENTS, findDesktopAgent, detectDesktopAgents, planConnection } from '../server/adapters.mjs';
 import { detectAdapters, pingAdapter } from '../server/bridge.mjs';
 import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
 
@@ -129,16 +129,47 @@ const commands = {
   async 'bridge-test'() {
     checkNode();
     ensureWorkspace();
-    if (flags.inbox) {
-      saveBridgeConfig({ ...(getBridgeConfig() || {}), mode: 'inbox', testedAt: new Date().toISOString() });
-      console.log('已设置为收件箱模式。');
-      console.log('RESULT: inbox');
+    const saveInbox = (host) => {
+      const { hostAgent: _old, ...prev } = getBridgeConfig() || {};
+      saveBridgeConfig({ ...prev, mode: 'inbox', ...(host ? { hostAgent: { id: host.id, name: host.name } } : {}), testedAt: new Date().toISOString() });
+    };
+
+    const detectedCli = detectAdapters(ADAPTERS);
+    const detectedDesktop = detectDesktopAgents();
+    const hostId = flags.agent || flags.prefer;
+    const plan = flags.inbox
+      ? { action: 'inbox', hostId: hostId && findDesktopAgent(hostId) ? hostId : null }
+      : planConnection({ cliIds: detectedCli.map((a) => a.id), desktopIds: detectedDesktop.map((a) => a.id), prefer: hostId || flags.only || null, current: getBridgeConfig(), auto: !!flags.auto });
+
+    console.log(`本机检测到的 agent 命令行：${detectedCli.map((a) => `${a.name}(${a.command})`).join('，') || '无'}`);
+    console.log(`本机检测到的桌面类 agent（只能走收件箱模式）：${detectedDesktop.map((a) => a.name).join('，') || '无'}`);
+
+    if (plan.action === 'choose') {
+      console.log('\n本机有多个可用的 agent，工作台不替用户决定。请问用户想让网页里的对话由哪一个处理，然后重新运行：');
+      console.log('  bridge-test --agent <id>');
+      for (const o of plan.options) {
+        const cli = detectedCli.find((a) => a.id === o);
+        const desktop = detectedDesktop.find((a) => a.id === o);
+        console.log(`  ${o}	${(cli || desktop).name}	${cli ? 'CLI 模式（工作台直接调用，无需保持窗口）' : '收件箱模式（需要该 agent 窗口保持打开并值守）'}`);
+      }
+      console.log(`RESULT: choose ${plan.options.join(' ')}`);
+      return;
+    }
+    if (plan.action === 'inbox') {
+      const host = plan.hostId ? findDesktopAgent(plan.hostId) : null;
+      saveInbox(host);
+      console.log(host ? `已设置为收件箱模式，由 ${host.name} 值守。` : '已设置为收件箱模式。');
+      console.log('提示：收件箱模式要求该 agent 的窗口保持打开，并在会话里循环领取任务（见 SKILL.md 第三节）。');
+      console.log(`RESULT: inbox${host ? ` ${host.id}` : ''}`);
       return;
     }
 
-    let candidates = detectAdapters(ADAPTERS);
-    console.log(`本机检测到的 agent 命令行：${candidates.map((a) => `${a.name}(${a.command})`).join('，') || '无'}`);
-    if (flags.only) candidates = candidates.filter((a) => a.id === flags.only);
+    let candidates = detectedCli;
+    if (plan.action === 'cli') {
+      if (!candidates.some((a) => a.id === plan.id)) fail(`本机没有找到命令行 agent「${plan.id}」。已知的桌面类 agent id：${DESKTOP_AGENTS.map((a) => a.id).join('、')}`);
+      candidates = candidates.filter((a) => a.id === plan.id);
+    }
+    if (flags.all) candidates = detectedCli;
     if (flags.prefer) candidates.sort((a, b) => (b.id === flags.prefer) - (a.id === flags.prefer));
 
     const results = [];
@@ -154,7 +185,7 @@ const commands = {
       }
     }
 
-    const prev = getBridgeConfig() || {};
+    const { hostAgent: _staleHost, ...prev } = getBridgeConfig() || {};
     if (chosen) {
       // 之前为同一个 agent 开启过浏览器控制的，保留
       let adapter = chosen;

@@ -22,7 +22,7 @@ import crypto from 'node:crypto';
 import { P, SKILL_DIR, WORKSPACE } from './paths.mjs';
 import * as store from './store.mjs';
 import { Bridge, detectAdapters, pingAdapter } from './bridge.mjs';
-import { ADAPTERS, findAdapter } from './adapters.mjs';
+import { ADAPTERS, findAdapter, findDesktopAgent, detectDesktopAgents } from './adapters.mjs';
 import { buildPrompt } from './prompt.mjs';
 import * as content from './content.mjs';
 import * as ops from './automation.mjs';
@@ -674,7 +674,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { status: { ...bridge.status(), browserWorker: workerInfo() }, config: bridge.config() });
     case 'GET /api/bridge/detect':
       if (q.get('refresh')) detectedCache = null;
-      return sendJson(res, 200, { adapters: detected() });
+      return sendJson(res, 200, { adapters: detected(), desktop: detectDesktopAgents() });
     case 'POST /api/bridge/test': {
       const cfg = bridge.config();
       if (!cfg) throw store.httpError(409, '尚未配置连接');
@@ -690,7 +690,10 @@ async function handleApi(req, res, url) {
       if (body.mode === 'inbox') {
         if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请稍后切换连接');
         await bridge.closeBrowsers();
-        store.saveBridgeConfig({ ...prev, mode: 'inbox', testedAt: new Date().toISOString() });
+        const host = body.hostAgentId ? findDesktopAgent(body.hostAgentId) : null;
+        if (body.hostAgentId && !host) throw store.httpError(400, '未知的桌面类 agent');
+        const { hostAgent: _old, ...rest } = prev;
+        store.saveBridgeConfig({ ...rest, mode: 'inbox', ...(host ? { hostAgent: { id: host.id, name: host.name } } : {}), testedAt: new Date().toISOString() });
         broadcast({ type: 'bridge.changed' });
         return sendJson(res, 200, { ok: true });
       }
@@ -702,6 +705,7 @@ async function handleApi(req, res, url) {
       if (!result.ok) return sendJson(res, 200, result);
       if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请稍后切换连接');
       await bridge.closeBrowsers();
+      delete prev.hostAgent;
       store.saveBridgeConfig({ ...prev, mode: 'cli', adapter, browser: 'none', testedAt: new Date().toISOString() });
       broadcast({ type: 'bridge.changed' });
       return sendJson(res, 200, result);

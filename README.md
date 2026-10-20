@@ -81,7 +81,7 @@ node xhs-workbench/scripts/workbench.mjs setup
 ```
 
 ```bash
-node xhs-workbench/scripts/workbench.mjs bridge-test --prefer claude-code
+node xhs-workbench/scripts/workbench.mjs bridge-test --agent claude-code
 ```
 
 ```bash

@@ -1,5 +1,13 @@
 # 更新日志
 
+## 未发布 · Agent 连接选择
+
+- 本机同时有多个可用 agent（如 Claude Code 命令行 + WorkBuddy 桌面应用）时，`bridge-test` 不再默认挑第一个命令行，而是输出 `RESULT: choose` 让用户决定；已有选择重跑时沿用，不会被别的 agent 悄悄改掉
+- 新增桌面类 agent（WorkBuddy、Cursor、Trae）探测，连接走收件箱模式并记录由谁值守；`--agent <id>` 明确指定，`--auto` 保留旧的自动挑选
+- 网页「连接与设置」自动列出本机检测到的 agent 及各自模式（CLI 无需保持窗口 / 收件箱需窗口常开），一键切换；离线提示点名具体 agent
+- 指定的命令行 agent 测试失败时不再偷偷换别的 agent；收件箱值守不再 30 次无消息后自行停止
+- 自动化测试新增 6 项（agent-selection）
+
 ## 未发布 · APIMart 提交失败诊断
 
 - 生图提交失败不再丢失原因：记录失败阶段（connect/http/respond）、HTTP 状态、请求编号（x-request-id/cf-ray）和脱敏后的网关返回（自动替换 API Key 为 `***`），诊断信息随任务落盘，重启后仍可查看

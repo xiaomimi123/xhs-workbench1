@@ -602,8 +602,13 @@ function workerSettingsHtml(w = {}) {
 function viewSettings() {
   const b = S.bridge || {};
   const info = S.info || {};
-  const modeText = !b.configured ? '未配置' : b.mode === 'cli' ? 'CLI 模式（工作台直接调用 agent 命令行）' : '收件箱模式（agent 在自己的会话里值守）';
+  const modeText = !b.configured ? '未配置' : b.mode === 'cli' ? 'CLI 模式（工作台直接调用 agent 命令行）' : `收件箱模式（${b.hostAgent ? b.hostAgent.name : 'agent'} 在自己的会话里值守）`;
+  if (!S.detected && !S.detecting) {
+    S.detecting = true;
+    api('GET', '/api/bridge/detect').then((r) => { S.detected = r.adapters; S.detectedDesktop = r.desktop || []; }).catch(() => { S.detected = []; S.detectedDesktop = []; }).finally(() => { S.detecting = false; if (S.view === 'settings') viewSettings(); });
+  }
   const detected = S.detected;
+  const detectedDesktop = S.detectedDesktop || [];
   $('#main').innerHTML = `
     <h1 class="page-title">${icon("plug")} 连接与设置</h1>
     <p class="page-sub">这里选择工作台实际调用的 Agent；不会自动跟随当前聊天应用切换。</p>
@@ -625,7 +630,10 @@ function viewSettings() {
       </div>
       ${detected ? `
         <div style="margin-top:14px">
-          ${detected.length ? detected.map((a) => `<div class="row" style="padding:6px 0;border-top:1px solid var(--line)"><span>${esc(a.name)}</span><code class="muted">${esc(a.command)}</code><div class="spacer"></div><button class="btn small" data-use-adapter="${esc(a.id)}">测试并使用</button></div>`).join('') : '<div class="muted">本机没有检测到支持的 agent 命令行，可使用收件箱模式。</div>'}
+          <div class="muted" style="margin-bottom:4px">本机检测到的 agent（由你决定网页里的对话交给谁处理，不会自动切换）</div>
+          ${detected.map((a) => `<div class="row" style="padding:6px 0;border-top:1px solid var(--line)"><span>${esc(a.name)}</span>${b.mode === 'cli' && b.adapter?.id === a.id ? '<span class="muted">（当前）</span>' : ''}<code class="muted">${esc(a.command)}</code><span class="muted">CLI 模式 · 无需保持窗口</span><div class="spacer"></div><button class="btn small" data-use-adapter="${esc(a.id)}">测试并使用</button></div>`).join('')}
+          ${detectedDesktop.map((a) => `<div class="row" style="padding:6px 0;border-top:1px solid var(--line)"><span>${esc(a.name)}</span>${b.mode === 'inbox' && b.hostAgent?.id === a.id ? '<span class="muted">（当前）</span>' : ''}<span class="muted">收件箱模式 · 需要它的窗口保持打开并值守</span><div class="spacer"></div><button class="btn small" data-use-host="${esc(a.id)}">使用它值守</button></div>`).join('')}
+          ${!detected.length && !detectedDesktop.length ? '<div class="muted">本机没有检测到支持的 agent，可使用收件箱模式，让你正在用的 agent 值守。</div>' : ''}
         </div>` : ''}
       ${b.mode === 'cli' && !b.browser ? `
         <div class="chat-banner" style="margin:14px 0 0">
@@ -749,7 +757,7 @@ function renderChatBanner() {
   const b = S.bridge;
   let html = '';
   if (b && !b.configured) html = '还没有连接 agent。回到你的 agent，说：<code>运行小红书工作台的连接自检</code>';
-  else if (b && b.mode === 'inbox' && !b.inboxOnline) html = '收件箱模式：agent 目前没在值守，消息会排队。回到你的 agent，说：<code>进入小红书工作台值守模式</code>';
+  else if (b && b.mode === 'inbox' && !b.inboxOnline) html = `收件箱模式：${esc(b.hostAgent ? b.hostAgent.name : 'agent')} 目前没在值守，消息会排队。回到它的窗口，说：<code>进入小红书工作台值守模式</code>`;
   el.innerHTML = html;
   el.hidden = !html;
   renderComposer();
@@ -841,6 +849,11 @@ function bindEvents() {
       S.editingAccount = null;
       return refreshAccounts();
     }
+    if (t.dataset.useHost) {
+      if (!confirm('改用收件箱模式后，需要该 agent 的窗口保持打开并进入值守才能处理消息。确定吗？')) return;
+      await api('PUT', '/api/bridge', { mode: 'inbox', hostAgentId: t.dataset.useHost }).catch((err) => toast(err.message));
+      return refreshBridge();
+    }
     if (t.dataset.useAdapter) {
       return withBusy(t, '测试中…（最长约 3 分钟）', async () => {
         const r = await api('PUT', '/api/bridge', { adapterId: t.dataset.useAdapter });
@@ -886,7 +899,9 @@ function bindEvents() {
         });
       case 'bridge-detect':
         return withBusy(t, '检测中…', async () => {
-          S.detected = (await api('GET', '/api/bridge/detect?refresh=1')).adapters;
+          const r = await api('GET', '/api/bridge/detect?refresh=1');
+          S.detected = r.adapters;
+          S.detectedDesktop = r.desktop || [];
           viewSettings();
         });
       case 'bridge-inbox':
