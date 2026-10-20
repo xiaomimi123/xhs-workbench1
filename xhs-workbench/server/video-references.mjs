@@ -1,3 +1,4 @@
+import {findBinary} from './binaries.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -8,7 +9,7 @@ import {readJson,writeJson,httpError} from './store.mjs';
 const exec=promisify(execFile);
 export const MAX_SOURCE_BYTES=60_000_000;
 export const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
-const bin=name=>['/opt/homebrew/bin/','/usr/local/bin/'].map(p=>p+name).find(p=>fs.existsSync(p))||name;
+const bin=name=>findBinary(name)||name;
 export function readVideoFile(file,root,max=MAX_SOURCE_BYTES){
  let p=file;while(p!==root){if(fs.lstatSync(p).isSymbolicLink())throw httpError(400,'文件路径不能包含软链接');p=path.dirname(p);if(p===path.dirname(p))throw httpError(400,'文件不在账号内');}
  const s=fs.statSync(file);if(!s.isFile()||s.size>max)throw httpError(400,'参考视频不能超过60MB');return fs.readFileSync(file);

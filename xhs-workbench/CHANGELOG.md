@@ -1,5 +1,13 @@
 # 更新日志
 
+## 未发布 · 环境自检与安装流程
+
+- 新增 `doctor [--json]`：检查 Node、数据目录、ffmpeg/ffprobe、Agent 连接，缺项直接给出按本机包管理器（winget / choco / scoop / brew）选好的安装命令，最后一行 `RESULT: ok | action-needed | blocked`，agent 照输出执行即可
+- ffmpeg / ffprobe 改为先查 PATH、再查各系统常见安装目录（含 Windows 的 WinGet、用户目录解压位），刚装完未重开终端也能找到
+- SKILL.md 安装流程改为：检查 Node → `doctor` → 初始化 → 启动；明确“装可选依赖前先告知影响与体积、需要密码/管理员权限的步骤由用户本人操作、装完必须用 doctor 复核”
+- 修复打包脚本：Node 22+ 不再接受目录作为 `--test` 参数，改为显式列出测试文件，失败时输出具体失败项
+- 自动化测试新增 8 项（doctor）
+
 ## 未发布 · Agent 连接选择
 
 - 本机同时有多个可用 agent（如 Claude Code 命令行 + WorkBuddy 桌面应用）时，`bridge-test` 不再默认挑第一个命令行，而是输出 `RESULT: choose` 让用户决定；已有选择重跑时沿用，不会被别的 agent 悄悄改掉

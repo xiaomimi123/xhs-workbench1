@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 小红书运营工作台 · 统一命令入口（给 agent 调用）
 //
+//   node scripts/workbench.mjs doctor [--json]               环境自检：缺什么、怎么装（不修改任何东西）
 //   node scripts/workbench.mjs setup                         初始化数据目录
 //   node scripts/workbench.mjs bridge-test [--agent <id>] [--prefer <id>] [--only <id>] [--all] [--auto] [--inbox]
 //                                                            探测本机 agent 并跑连接测试，写入配置
@@ -28,6 +29,7 @@ import { P, SKILL_DIR, WORKSPACE } from '../server/paths.mjs';
 import { ensureWorkspace, readJson, writeJson, saveBridgeConfig, getBridgeConfig } from '../server/store.mjs';
 import { ADAPTERS, DESKTOP_AGENTS, findDesktopAgent, detectDesktopAgents, planConnection } from '../server/adapters.mjs';
 import { detectAdapters, pingAdapter } from '../server/bridge.mjs';
+import { runDoctor, formatDoctor } from '../server/doctor.mjs';
 import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -117,6 +119,14 @@ function storeWorkerSetting(enabled) {
 // ---------- 命令 ----------
 
 const commands = {
+  // 第一步就能跑：不依赖数据目录已初始化，也不写任何文件（只在探测可写性时创建并删除一个临时文件）
+  async doctor() {
+    const report = runDoctor({ workspace: WORKSPACE, bridgeConfig: readJson(P.bridge, null) });
+    if (flags.json) console.log(JSON.stringify(report, null, 2));
+    else console.log(formatDoctor(report));
+    if (!report.ready) process.exitCode = 1;
+  },
+
   async setup() {
     checkNode();
     ensureWorkspace();

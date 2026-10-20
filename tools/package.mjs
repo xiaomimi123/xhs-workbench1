@@ -44,14 +44,17 @@ for (const f of jsFiles) {
   }
 }
 
-// 5. 自动化测试（tests/，node:test）
+// 5. 自动化测试（tests/*.test.mjs，node:test）
+// Node 22+ 不再接受目录作为 --test 参数，所以显式列出文件；输出带上失败项，方便定位。
 if (!skipTests) {
+  const testFiles = fs.readdirSync(path.join(ROOT, 'tests')).filter((f) => f.endsWith('.test.mjs')).sort().map((f) => path.join('tests', f));
   try {
-    execFileSync(process.execPath, ['--test', 'tests/'], { cwd: ROOT, stdio: 'pipe' });
+    execFileSync(process.execPath, ['--test', ...testFiles], { cwd: ROOT, stdio: 'pipe', maxBuffer: 256 * 1024 * 1024 });
   } catch (err) {
-    fail(`自动化测试未通过：\n${String(err.stdout || '').split('\n').filter((l) => /^not ok|error:|expected|actual/.test(l)).join('\n')}`);
+    const out = `${err.stdout || ''}${err.stderr || ''}`.split(/\r?\n/).filter((l) => /^(not ok|✖)|Error|expected|actual/.test(l.trim())).slice(0, 40).join('\n');
+    fail(`自动化测试未通过：\n${out || err.message}`);
   }
-  console.log('自动化测试：全部通过');
+  console.log(`自动化测试：全部通过（${testFiles.length} 个文件）`);
 }
 
 // 6. 生成 zip

@@ -14,14 +14,22 @@ description: 小红书自动化运营工作台。在本地启动一个 Web 工�
 按顺序执行，已完成的步骤会自动跳过：
 
 1. **检查 Node.js**：运行 `node -v`，需要 18 或更高版本。
-   - 没有安装或版本过低：见「附录 A：安装 Node.js」。
-2. **初始化**：`WB setup`
-   - 输出中显示「连接配置：尚未配置」时，执行第二节「连接自检」。
-3. **启动**：`WB start --open`
+   - 没有安装或版本过低：见「附录 A」，装好后**新开一个终端**再继续（PATH 才会刷新）。这一步通过前，下面的命令都跑不了。
+2. **环境自检**：`WB doctor`
+   - 它只检查、不修改任何东西，输出每项 ✔/△/✖，缺的项下面直接给出 `FIX:` 命令。最后一行是 `RESULT: ok`、`RESULT: action-needed <项>` 或 `RESULT: blocked <项>`。
+   - `blocked`：必须先解决（Node 过旧、数据目录不可写），按 `FIX` 处理后重跑 `WB doctor`。
+   - `action-needed`：不影响启动，但会让部分功能不可用。**先用一句话告诉用户缺了什么、会少哪些功能、要装多大的东西，征得同意再执行 `FIX` 命令**（例如 ffmpeg 只影响参考视频与视频创作，图文笔记完全不受影响，用户可以先不装）。
+   - 需要管理员权限、输入电脑密码、或点安装向导的步骤，请用户本人操作，你不要代劳。
+   - 下载安装包前，先说清楚来源网址和大概体积；下载很慢时告诉用户“还在下载”，不要反复重试或换来源。
+   - 装完后再跑一次 `WB doctor` 确认 ✔，不要凭安装命令没报错就当成功。
+   - 想要机器可读的结果：`WB doctor --json`。
+3. **初始化**：`WB setup`
+   - 输出中显示「连接配置：尚未配置」时，执行第二节「连接自检」（注意：本机有多个 agent 时必须问用户，不要替用户选）。
+4. **启动**：`WB start --open`
    - 会自动打开浏览器。把输出里的 `URL:` 链接也发给用户，方便收藏。
    - 浏览器没打开时，请用户手动打开该链接；如果你有浏览器控制能力，也可以自己打开。
-4. 告诉用户：工作台已打开，可以在网页右侧的对话框里直接下达任务。
-5. 如果连接模式是**收件箱模式**（`WB status` 可查看），接着进入第三节「值守模式」。
+5. 告诉用户：工作台已打开，可以在网页右侧的对话框里直接下达任务。
+6. 如果连接模式是**收件箱模式**（`WB status` 可查看），接着进入第三节「值守模式」。
 
 ## 二、连接自检（首次使用 / 用户说"运行连接自检" / 工作台显示未连接）
 
@@ -102,6 +110,7 @@ M3 的自动发布、检查评论私信、抓取数据都需要 agent 能操作�
 
 | 命令 | 作用 |
 |---|---|
+| `WB doctor [--json]` | 环境自检：缺什么、怎么装（只检查不修改） |
 | `WB status` | 查看工作台和连接状态 |
 | `WB open` | 重新在浏览器中打开工作台 |
 | `WB stop` | 停止工作台（用户说"关闭小红书工作台"时执行） |
@@ -114,15 +123,23 @@ M3 的自动发布、检查评论私信、抓取数据都需要 agent 能操作�
 
 运行日志：`~/XHS-Workbench/logs/server.log`。
 
-## 附录 A：安装 Node.js
+## 附录 A：安装 Node.js 和 ffmpeg
 
-先判断系统：
+`WB doctor` 会按本机的包管理器给出现成命令，下面是它的依据，供你处理例外情况。
 
-- **macOS**：如果有 Homebrew（`brew -v` 能运行），执行 `brew install node`；否则请用户到 https://nodejs.org 下载 LTS 版安装包（.pkg），双击安装。安装过程需要用户输入电脑密码，这一步只能由用户完成。
-- **Windows**：执行 `winget install OpenJS.NodeJS.LTS`；如果 winget 不可用，请用户到 https://nodejs.org 下载 .msi 安装包安装。装完后可能需要重开终端。
-- **Linux**：用系统包管理器安装，或使用 nvm。
+**Node.js ≥ 18（必需）**
 
-安装后再次运行 `node -v` 确认版本 ≥ 18。
+- **macOS**：有 Homebrew（`brew -v` 能运行）就 `brew install node`；否则请用户到 https://nodejs.org 下载 LTS 版 .pkg 安装包，双击安装（需要输入电脑密码，请用户本人操作）。
+- **Windows**：`winget install OpenJS.NodeJS.LTS`；没有 winget 就请用户到 https://nodejs.org 下载 LTS 版 .msi 安装（可能需要管理员权限）。装完必须新开终端。
+- **Linux**：用系统包管理器，或使用 nvm。
+
+**ffmpeg（推荐；参考视频、视频创作需要，图文笔记不需要）**
+
+- **macOS**：`brew install ffmpeg`；没有 Homebrew 时先请用户安装 Homebrew（https://brew.sh）。
+- **Windows**：优先 `winget install Gyan.FFmpeg`，其次 `choco install ffmpeg -y` 或 `scoop install ffmpeg`。三者都没有时：从 https://www.gyan.dev/ffmpeg/builds/ 下载 `ffmpeg-release-essentials.zip`（约 110MB，网络差时可能要十几分钟），解压到 `%USERPROFILE%\ffmpeg`。工作台会在这个目录下自动查找，不改 PATH 也能用；改了 PATH 的话需要新开终端。
+- 装完用 `WB doctor` 确认 ffmpeg 和 ffprobe 都是 ✔。
+
+两台电脑的差异：实况图（Live Photo）制作、本地二维码、截图 OCR 核对目前只支持 macOS；Windows 上这些功能会明确提示不可用，其余功能完全相同。
 
 ## 附录 B：常见问题
 
