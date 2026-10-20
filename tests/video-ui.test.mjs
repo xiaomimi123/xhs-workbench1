@@ -36,3 +36,21 @@ test('提交前须知折叠，但完整内容仍在，并保留“提交后不�
   assert.match(root.innerHTML, /提交后不能取消；生成需要几分钟/);
   assert.match(root.innerHTML, /<details class="video-notice"><summary>提交前须知<\/summary>[\s\S]*发送给已配置的视频服务[\s\S]*单轮自动取回最长30分钟/);
 });
+
+// ── 描述任务的等待与失败：已用时间、看图自检失败的出路 ──
+test('描述任务：检测/分析中显示已用时间；自检未通过时说明不用 AI 描述也能继续，并给出去设置的按钮', async () => {
+  const { ctx, root } = setup();
+  const failed = { id: 'vdesc_1', sourceVideoId: 'vref_a', status: 'error', createdAt: new Date().toISOString(), error: '当前 Agent 的模型没有通过看图自检：……', visionCheck: { passed: false, correct: 0 } };
+  const checking = { id: 'vdesc_2', sourceVideoId: 'vref_a', status: 'checking', createdAt: new Date(Date.now() - 65000).toISOString() };
+  vm.runInContext('globalThis.__jobs=' + JSON.stringify([checking, failed]), ctx);
+  const ctx2 = vm.createContext({ ...ctx, S: { accountId: 'a', view: 'video' }, api: async (method, url) => (url.includes('/descriptions') ? { items: [checking, failed] } : url.includes('/reference-videos') ? { items: [{ id: 'vref_a', title: 'ref', media: { duration: 3 } }] } : { items: [] }), root, esc: String, fileUrl: String, structuredClone, startVideoPolling: () => () => {}, go: () => {} });
+  vm.runInContext(source, ctx2);
+  vm.runInContext("videoForm('a').mode='rv2v';videoForm('a').sourceVideoId='vref_a'", ctx2);
+  await vm.runInContext('render(root)', ctx2);
+  const html = root.innerHTML;
+  assert.match(html, /正在检测 Agent 能否看清图片/);
+  assert.match(html, /已用 <span data-elapsed="[^"]+">1:0\d<\/span>/);
+  assert.match(html, /不用 AI 描述也能继续/);
+  assert.match(html, /data-video-action="settings">去连接与设置换 Agent/);
+  assert.match(html, /每次会先让它做一次“看图自检”/);
+});

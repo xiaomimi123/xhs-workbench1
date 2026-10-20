@@ -2,6 +2,8 @@
 // 测试用的假 agent：从标准输入读提示词，按 FAKE_AGENT_MODE 模拟不同 agent 的输出
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+const { readQuadrants } = await import(pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'xhs-workbench', 'server', 'vision-challenge.mjs')).href);
 
 const mode = process.env.FAKE_AGENT_MODE || 'text';
 const prompt = fs.readFileSync(0, 'utf8');
@@ -58,6 +60,12 @@ if(prompt.includes('这是工作台受控回复审核任务')){
  if(inputPath&&outputPath){const input=JSON.parse(fs.readFileSync(inputPath,'utf8'));fs.writeFileSync(outputPath,JSON.stringify({replies:input.messages.map(m=>({itemId:m.itemId,category:'咨询',action:m.incomplete?'human':'reply',reason:'先核对具体问题',draft:'你想了解哪一步？可以补充具体问题。',sourceIds:[m.itemId],unverified:[]}))}));}
 }
 
+// 看图自检（描述任务的第一阶段）：FAKE_VISION=blind 模拟“看不清图”的模型，随便答
+if(prompt.includes('执行工作台“看图自检”任务')){
+ const inputPath=/读取 (.+?vdesc_[\w-]+[\\/]input\.json)。/.exec(prompt)?.[1];
+ const outputPath=inputPath&&path.join(path.dirname(inputPath),'check.json');
+ if(inputPath&&outputPath){const input=JSON.parse(fs.readFileSync(inputPath,'utf8'));fs.writeFileSync(outputPath,JSON.stringify({visionCheck:process.env.FAKE_VISION==='blind'?{topLeft:'红',topRight:'红',bottomLeft:'红',bottomRight:'红'}:readQuadrants(fs.readFileSync(input.visionCheck.path))}));}
+}
 // Reference-description integration fixture; no model/network/generation calls.
 if(prompt.includes('执行工作台视频描述任务。')){
  const inputPath=/读取 (.+?vdesc_[\w-]+[\\/]input\.json)。/.exec(prompt)?.[1];

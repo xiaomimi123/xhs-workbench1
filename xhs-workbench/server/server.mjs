@@ -313,7 +313,9 @@ const copyWorkflow = new CopyWorkflow({
 });
 copyWorkflow.recover();
 const videoWorkflow = new VideoWorkflow({changed:account=>broadcast({type:'content.changed',account,area:'videos'})});
-const videoDescriptions = new VideoDescriptionWorkflow({references:videoWorkflow.videoReferences,changed:account=>broadcast({type:'content.changed',account,area:'videos'}),submit:task=>bridge.submitLocalDescription(task)});
+const videoDescriptions = new VideoDescriptionWorkflow({references:videoWorkflow.videoReferences,changed:account=>broadcast({type:'content.changed',account,area:'videos'}),submit:task=>bridge.submitLocalDescription(task),
+  // 换了 agent / 重新测试连接后，之前的看图自检结果不再沿用
+  visionKey:()=>{const c=bridge.config()||{};return crypto.createHash('sha256').update(JSON.stringify([c.mode,c.adapter?.id,c.adapter?.command,c.hostAgent?.id,c.testedAt])).digest('hex').slice(0,16);}});
 videoDescriptions.recover();
 const videoRetrieval = new VideoRetrieval({workflow:videoWorkflow,accounts:store.listAccounts});
 setInterval(()=>videoRetrieval.tick().catch(()=>{}),5000).unref();
@@ -384,7 +386,7 @@ bridge.on('done', ({ taskId, text, agentSessionId }) => {
   analyticsWorkflow.finish(taskId);
   topicWorkflow.finish(taskId);
   copyWorkflow.finish(taskId);
-  videoDescriptions.finish(taskId);
+  videoDescriptions.finish(taskId, '', text);
   coverWorkflow.finish(taskId);
   scheduler.onTaskFinished(taskId, true);
   for (const a of store.listAccounts()) flushBenchmarkCheckpoints(a.id);
@@ -915,8 +917,8 @@ async function handleContentApi(route, q, req) {
     case 'POST /api/videos/service/test': return await videoService.test();
     case 'GET /api/videos/reference-videos': return {items:videoWorkflow.videoReferences.list(acc)};
     case 'POST /api/videos/reference-videos': return await videoWorkflow.videoReferences.upload(acc,await body());
-    case 'GET /api/videos/descriptions': return {items:videoDescriptions.jobs(acc)};
-    case 'POST /api/videos/descriptions': return await videoDescriptions.start(acc,await body());
+    case 'GET /api/videos/descriptions': return {items:videoDescriptions.jobs(acc).map(({visionExpected,...j})=>j)};
+    case 'POST /api/videos/descriptions': { const { visionExpected, ...started } = await videoDescriptions.start(acc, await body()); return started; }
     case 'GET /api/videos/jobs': return {items:videoWorkflow.jobs(acc)};
     case 'GET /api/videos/sources': return {items:videoWorkflow.sources(acc)};
     case 'POST /api/videos/start': return videoWorkflow.start(acc,await body());

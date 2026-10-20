@@ -44,4 +44,14 @@ export class VideoReferences {
    frames.push({time,path:file});
   }return frames;
  }
+ // 把 12 张抽帧拼成 2 张拼图（每张 3 列 × 2 行，按时间从左到右、从上到下）：agent 只需要读 2 张图，而不是 12 张，
+ // 真实测试里逐张读 12 张图会超过 240 秒。拼图失败时返回空数组，调用方退回逐帧查看。
+ async contactSheets(frames,destination){
+  const sheets=[];if(!frames.length)return sheets;fs.mkdirSync(destination,{recursive:true});
+  for(let start=0;start<frames.length;start+=6){
+   const group=frames.slice(start,start+6),file=path.join(destination,`sheet-${sheets.length+1}.jpg`),pattern=path.join(path.dirname(group[0].path),'frame-%02d.jpg');
+   try{await exec(bin('ffmpeg'),['-v','error','-nostdin','-start_number',String(start),'-i',pattern,'-frames:v','1','-vf',`tile=3x${Math.ceil(group.length/3)}`,'-y',file],{timeout:20000,maxBuffer:1024*1024});if(!fs.existsSync(file))throw Error();}catch{return [];}
+   sheets.push({path:file,times:group.map(f=>f.time),columns:3});
+  }return sheets;
+ }
 }
