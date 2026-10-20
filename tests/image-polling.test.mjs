@@ -96,3 +96,18 @@ test('没有定时器的环境（测试沙箱）直接不轮询', () => {
   const stop = start({ current: () => true, jobs: () => [], refresh: async () => ({}), load: async () => {}, draw: () => {} });
   assert.equal(typeof stop, 'function');
 });
+
+test('输入框一直有焦点时最多推迟 20 秒，之后照常重绘（输入内容在表单状态里，不会丢）', async () => {
+  let t = 1_000_000;
+  const calls = { draw: 0 };
+  const queue = [];
+  start({ current: () => true, jobs: () => [job()], focused: () => true, refresh: async () => ({}), load: async () => {}, draw: () => { calls.draw++; }, now: () => t, setTimer: (fn) => { queue.push(fn); }, clearTimer: () => {} });
+  await queue.shift()();
+  assert.equal(calls.draw, 0);
+  t += 10_000;
+  await queue.shift()();
+  assert.equal(calls.draw, 0); // 才 10 秒，继续推迟
+  t += 11_000;
+  await queue.shift()();
+  assert.equal(calls.draw, 1); // 超过 20 秒，重绘
+});

@@ -23,7 +23,7 @@ export async function mountImageStudio(root,note,onApply){
  <div class="option-grid">${j.assets.map(x=>`<div class="option"><img src="${fileUrl(x.path,x.hash)}" style="width:100%" alt="生图候选${x.index+1}"><p>${x.width} × ${x.height}</p><button class="btn small" data-image-action="apply" data-job="${j.id}" data-index="${x.index}" ${j.stale||v.busy?'disabled':''}>套用底图并编辑标题</button></div>`).join('')}</div></div>`).join('')}`;
  }
  draw();
- stopPolling?.();stopPolling=startImagePolling({current,jobs:()=>jobs,paused:()=>v.busy,focused:()=>typeof document!=='undefined'&&!!document.activeElement&&root.contains?.(document.activeElement)&&/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName),refresh:id=>api('POST',`/api/images/refresh?${query}`,{id}),load:async()=>{jobs=(await api('GET',`/api/images/jobs?${query}&noteId=${encodeURIComponent(note.id)}`)).items;},draw});
+ stopPolling?.();stopPolling=startImagePolling({current,jobs:()=>jobs,paused:()=>v.busy,focused:()=>typeof document!=='undefined'&&!!document.activeElement&&root.contains?.(document.activeElement)&&(document.activeElement.tagName==='TEXTAREA'||(document.activeElement.tagName==='INPUT'&&/^(text|search|)$/.test(document.activeElement.type||''))),refresh:id=>api('POST',`/api/images/refresh?${query}`,{id}),load:async()=>{jobs=(await api('GET',`/api/images/jobs?${query}&noteId=${encodeURIComponent(note.id)}`)).items;},draw});
  root.oninput=e=>{if(e.target.matches('[data-image-prompt]'))v.prompt=e.target.value;};
  root.onchange=async e=>{
   if(e.target.dataset.imageField){v[e.target.dataset.imageField]=e.target.value;if(v.provider==='apimart')v.count=1;draw();}
