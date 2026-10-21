@@ -29,8 +29,11 @@ export const ADAPTERS = [
     id: 'codebuddy',
     name: 'CodeBuddy Code',
     bins: ['codebuddy', 'cbc'],
-    args: ['-p', '{prompt}'],
-    promptVia: 'arg',
+    // 提示词走标准输入：Windows 上 codebuddy 是 .cmd 垫片，通过命令行参数传多行文本会在第一个换行处被截断（agent 只看到标题）
+    // 无人值守没有权限弹窗：自动接受文件编辑（acceptEdits），读文件、搜索和联网要显式放行（实测只加 --add-dir 时 Read 仍被拒）。
+    // --allowedTools 是多值参数，每个工具单独一项；用逗号拼成一项放行不生效。
+    args: ['-p', '--permission-mode', 'acceptEdits', '--add-dir', '{skillDir}', '--allowedTools', 'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+    promptVia: 'stdin',
     parser: 'text',
   },
   {

@@ -14,6 +14,7 @@
 //   node scripts/workbench.mjs stop                          停止工作台
 //   node scripts/workbench.mjs browser-setup [--engine playwright|chrome] [--headless] [--yes]
 //                                                            为 CLI agent 配置浏览器控制
+//   node scripts/workbench.mjs browser-mode readonly|test   切换 CodeBuddy 的浏览器权限档（readonly 只读 / test 测试档）
 //   node scripts/workbench.mjs browser-worker-setup [--yes]  安装可选的后台有头读取组件
 //   node scripts/workbench.mjs browser-worker-status        检查后台读取组件
 //   node scripts/workbench.mjs autostart on|off|status            登录电脑后自动运行工作台
@@ -372,8 +373,8 @@ const commands = {
     if (!cfg) fail('请先运行 bridge-test 完成连接设置');
     if (readJson(P.settings, {}).backgroundBrowser) fail('请先在设置页关闭后台有头读取，再修改 agent 浏览器配置');
     const engine = flags.engine === 'chrome' ? 'chrome' : 'playwright';
-    if (cfg.mode !== 'cli' || !cfg.adapter || !['claude-code','codex'].includes(cfg.adapter.id)) {
-      console.log('当前不是 Claude Code / Codex 的 CLI 模式，无法自动配置。');
+    if (cfg.mode !== 'cli' || !cfg.adapter || !['claude-code','codex','codebuddy'].includes(cfg.adapter.id)) {
+      console.log('当前不是 Claude Code / Codex / CodeBuddy 的 CLI 模式，无法自动配置。');
       console.log('- 收件箱模式：你（agent）在自己的会话里用自带的浏览器 / 电脑控制能力完成任务即可，无需配置。');
       console.log('- 其他 CLI agent：参考 adapters/ 下对应说明，为它接入 Playwright MCP（npx @playwright/mcp）后重新运行 bridge-test。');
       return;
@@ -398,7 +399,7 @@ const commands = {
       plan.push('启用 Claude in Chrome：直接使用你日常 Chrome 里的登录状态（需要已安装 Claude 浏览器扩展）。注意：这种方式所有账号共用一个浏览器，多账号时请用 Playwright');
     }
     const adapter = applyBrowser(cfg.adapter, engine, pkg);
-    const tools = adapter.id==='codex'?'Playwright MCP':adapter.args[adapter.args.indexOf('--allowedTools') + 1];
+    const tools = adapter.id==='codex'?'Playwright MCP':adapter.id==='codebuddy'?adapter.args.slice(adapter.args.indexOf('--allowedTools') + 1).filter((a,i,arr)=>!arr.slice(0,i).some((x)=>x.startsWith('-'))).join(','):adapter.args[adapter.args.indexOf('--allowedTools') + 1];
     plan.push(`允许 agent 在无界面模式下使用浏览器工具（${tools.split(',').join(', ')}）`);
 
     console.log('将进行以下修改：');
@@ -423,6 +424,19 @@ const commands = {
     console.log(`RESULT: browser ${engine}`);
   },
 
+  async 'browser-mode'() {
+    const mode = rest[0] || '';
+    const cfg = getBridgeConfig();
+    if (!['readonly', 'test'].includes(mode)) fail('用法：browser-mode readonly|test');
+    if (!cfg?.adapter || cfg.adapter.id !== 'codebuddy' || cfg.browser !== 'playwright') fail('当前不是 CodeBuddy 的 Playwright 浏览器控制，请先运行 browser-setup');
+    const adapter = applyBrowser({ ...cfg.adapter, browserMode: mode }, 'playwright', cfg.adapter.playwrightMcp);
+    adapter.headless = cfg.adapter.headless; adapter.browserChannel = cfg.adapter.browserChannel;
+    saveBridgeConfig({ ...cfg, adapter });
+    console.log(mode === 'test'
+      ? '已切到【测试档】：点击 / 输入等交互工具已放开；仍禁用上传文件和执行脚本，并屏蔽创作者中心域名（发布入口）。测完请运行 browser-mode readonly 收回。'
+      : '已切回【只读档】：浏览器写类工具全部禁用。');
+    console.log(`RESULT: browser-mode ${mode}`);
+  },
   async 'browser-worker-status'() {
     const { browserRuntimeStatus } = await import('../server/browser-runtime.mjs');
     const runtime = browserRuntimeStatus();

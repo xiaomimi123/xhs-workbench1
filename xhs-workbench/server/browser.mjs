@@ -88,6 +88,7 @@ export function mcpConfigFor(accountId, pkg, opts = {}) {
   const args = ['-y', pkg, '--user-data-dir', path.join(PROFILES_DIR, accountId), '--output-dir', path.join(P.run, 'browser-output', accountId)];
   if (opts.browser && opts.browser !== 'chromium') args.push('--browser', opts.browser);
   if (opts.headless) args.push('--headless');
+  if (opts.blockedOrigins?.length) args.push('--blocked-origins', opts.blockedOrigins.join(';')); // 浏览器不得请求这些源（测试档：创作者中心，发布入口所在）
   const want = { mcpServers: { playwright: { command: 'npx', args } } };
   mergeHubServers(want); // 由中枢启动时并入 enterprise-hub 等服务（没有环境变量则无变化）
   if (JSON.stringify(readJson(file, null)) !== JSON.stringify(want)) writeJson(file, want);
@@ -108,6 +109,42 @@ export function applyBrowser(adapter, engine, pkg) {
     if(engine && engine!=='playwright')throw new Error('Codex 仅支持 Playwright 浏览器连接');
     const next={...adapter,args:[...adapter.args]};delete next.playwrightMcp;delete next.browserTransport;
     if(engine==='playwright'){if(!pkg)throw new Error('浏览器控制配置不完整');next.playwrightMcp=pkg;next.browserTransport='codex';}
+    return next;
+  }
+  if (adapter.id === 'codebuddy') {
+    if (engine && engine !== 'playwright') throw new Error('CodeBuddy 仅支持 Playwright 浏览器连接（只读）');
+    // CodeBuddy 的 --allowedTools / --disallowedTools 是多值参数：每个工具要单独一项（实测把工具名用逗号拼成一项，放行不生效）。
+    const args = [...adapter.args];
+    const stripMulti = (flag) => {
+      const i = args.indexOf(flag);
+      if (i < 0) return;
+      let j = i + 1;
+      while (j < args.length && !String(args[j]).startsWith('-')) j++;
+      args.splice(i, j - i);
+    };
+    stripMulti('--allowedTools');
+    stripMulti('--disallowedTools');
+    const m = args.indexOf('--mcp-config');
+    if (m >= 0) args.splice(m, 2);
+    args.push('--allowedTools', ...CODEBUDDY_BASE_TOOLS, ...(engine === 'playwright' ? ['mcp__playwright'] : []));
+    const next = { ...adapter };
+    delete next.playwrightMcp;
+    // 两档权限（adapter.browserMode）：
+    //  readonly（默认）：点击 / 输入 / 填表 / 上传 / 按键 / 拖放 / 选择 / 执行脚本 / 弹窗处理一律禁用（被禁的工具对 agent 不可见），
+    //    只留打开网址、快照、截图、等待、查找、标签页等读取类工具——用于分析数据和学习博主帖子，不允许自动发布。
+    //  test（测试档）：点击、输入等交互工具放开，用来验证采集能力；仍禁用上传文件和执行脚本，并屏蔽创作者中心域名（发布入口），
+    //    所以发布做不了；点赞 / 评论 / 关注这类站内操作靠提示词约束，测完用 browser-mode readonly 收回。
+    const mode = adapter.browserMode === 'test' ? 'test' : 'readonly';
+    delete next.blockedOrigins;
+    if (engine === 'playwright') {
+      args.push('--mcp-config', '{mcpConfig}', '--disallowedTools', ...(mode === 'test' ? CODEBUDDY_TEST_DENY : CODEBUDDY_BROWSER_DENY));
+      next.playwrightMcp = pkg;
+      next.browserMode = mode;
+      if (mode === 'test') next.blockedOrigins = CODEBUDDY_TEST_BLOCKED_ORIGINS;
+    } else {
+      delete next.browserMode;
+    }
+    next.args = args;
     return next;
   }
   const args = [...adapter.args];
@@ -138,9 +175,15 @@ export function applyBrowser(adapter, engine, pkg) {
   return next;
 }
 
+export const CODEBUDDY_TEST_DENY = ['file_upload', 'evaluate', 'run_code_unsafe'].map((t) => `mcp__playwright__browser_${t}`);
+export const CODEBUDDY_TEST_BLOCKED_ORIGINS = ['https://creator.xiaohongshu.com'];
+export const CODEBUDDY_BASE_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
+export const CODEBUDDY_BROWSER_DENY = ['click', 'type', 'fill_form', 'file_upload', 'press_key', 'drag', 'drop', 'select_option',
+  'evaluate', 'run_code_unsafe', 'handle_dialog', 'hover', 'resize', 'emulate_media'].map((t) => `mcp__playwright__browser_${t}`);
+
 /** Per-process Codex overrides; never modify global config or login data. */
 export function codexBrowserArgs(adapter,accountId){
- const file=mcpConfigFor(accountId,adapter.playwrightMcp,{headless:!!adapter.headless,browser:adapter.browserChannel});
+ const file=mcpConfigFor(accountId,adapter.playwrightMcp,{headless:!!adapter.headless,browser:adapter.browserChannel,blockedOrigins:adapter.blockedOrigins});
  const config=readJson(file,null).mcpServers.playwright;
  return ['-c',`mcp_servers.playwright.command=${JSON.stringify(config.command)}`,'-c',`mcp_servers.playwright.args=${JSON.stringify(config.args)}`,'-c', 'mcp_servers.playwright.enabled=true',
  '-c','mcp_servers.playwright.enabled_tools=["browser_navigate","browser_snapshot","browser_take_screenshot","browser_wait_for"]',

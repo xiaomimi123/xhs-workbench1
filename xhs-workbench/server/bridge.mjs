@@ -68,7 +68,7 @@ export function runCli(adapter, prompt, opts = {}) {
   const { agentSessionId, timeoutMs = 30 * 60_000, onText = () => {}, onTool = () => {}, onSession = () => {} } = opts;
   const vars = { prompt, workspace: WORKSPACE, skillDir: SKILL_DIR, agentSessionId: agentSessionId || '' };
   // 每个账号用自己的浏览器资料（登录状态隔离）
-  if ((adapter.args || []).includes('{mcpConfig}')) vars.mcpConfig = mcpConfigFor(opts.accountId, adapter.playwrightMcp, { headless: !!adapter.headless, browser: adapter.browserChannel });
+  if ((adapter.args || []).includes('{mcpConfig}')) vars.mcpConfig = mcpConfigFor(opts.accountId, adapter.playwrightMcp, { headless: !!adapter.headless, browser: adapter.browserChannel, blockedOrigins: adapter.blockedOrigins });
   let args = (adapter.args || []).map((a) => fill(a, vars));
   if(adapter.id==='codex' && adapter.browserTransport==='codex')args=[...codexBrowserArgs(adapter,opts.accountId),...args];
   // 企业中枢：普通对话任务（没有 kind 的浏览器专用任务不加）让底层 agent 能用中枢的知识库、技能和 GPU 工具
