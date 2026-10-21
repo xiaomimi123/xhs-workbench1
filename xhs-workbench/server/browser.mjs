@@ -1,6 +1,7 @@
 // 单账号浏览器资料：一份 Playwright 配置，与用户日常浏览器登录态隔离。
 // 优先用系统安装的 Edge / Chrome；浏览器二进制并不能保证规避平台风控。
 // 都没装时才用 Playwright 内置 Chromium。
+import { mergeHubServers } from './hub-mcp.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -88,6 +89,7 @@ export function mcpConfigFor(accountId, pkg, opts = {}) {
   if (opts.browser && opts.browser !== 'chromium') args.push('--browser', opts.browser);
   if (opts.headless) args.push('--headless');
   const want = { mcpServers: { playwright: { command: 'npx', args } } };
+  mergeHubServers(want); // 由中枢启动时并入 enterprise-hub 等服务（没有环境变量则无变化）
   if (JSON.stringify(readJson(file, null)) !== JSON.stringify(want)) writeJson(file, want);
   return file;
 }

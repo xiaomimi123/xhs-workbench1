@@ -8,9 +8,10 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { SKILL_DIR, WORKSPACE } from './paths.mjs';
+import { P, SKILL_DIR, WORKSPACE } from './paths.mjs';
 import { getBridgeConfig, readJson, writeJson } from './store.mjs';
 import { mcpConfigFor, codexBrowserArgs } from './browser.mjs';
+import { readHubServers, withHubMcp, writeHubConfig } from './hub-mcp.mjs';
 
 const IS_WIN = process.platform === 'win32';
 const INBOX_ONLINE_MS = 45_000;
@@ -70,6 +71,8 @@ export function runCli(adapter, prompt, opts = {}) {
   if ((adapter.args || []).includes('{mcpConfig}')) vars.mcpConfig = mcpConfigFor(opts.accountId, adapter.playwrightMcp, { headless: !!adapter.headless, browser: adapter.browserChannel });
   let args = (adapter.args || []).map((a) => fill(a, vars));
   if(adapter.id==='codex' && adapter.browserTransport==='codex')args=[...codexBrowserArgs(adapter,opts.accountId),...args];
+  // 企业中枢：普通对话任务（没有 kind 的浏览器专用任务不加）让底层 agent 能用中枢的知识库、技能和 GPU 工具
+  if (opts.useHub) { const hub = readHubServers(); if (Object.keys(hub.servers).length) args = withHubMcp(args, { adapterId: adapter.id, useHub: true, servers: hub.servers, hubFile: writeHubConfig(path.join(P.config, 'mcp'), hub.servers) }); }
   if (agentSessionId && adapter.resumeArgs) args = args.concat(adapter.resumeArgs.map((a) => fill(a, vars)));
   const command = adapter.command || adapter.bins[0];
 
@@ -441,6 +444,7 @@ export class Bridge extends EventEmitter {
           this.emit('claimed', { taskId: task.id });
           child = runCli(cfg.adapter, task.prompt, {
             accountId: task.accountId,
+            useHub: !task.kind,
             agentSessionId: task.agentSessionId,
             timeoutMs: task.timeoutMs ?? cfg.timeoutMs,
             onText: (text) => this.emit('delta', { taskId: task.id, text }),

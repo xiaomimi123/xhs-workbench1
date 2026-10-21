@@ -1,4 +1,5 @@
 import { decodeText } from './inbox-files.mjs';
+import { readHubServers } from './hub-mcp.mjs';
 import {VideoDescriptionWorkflow} from './video-description-workflow.mjs';
 import {VideoRetrieval} from './video-retrieval.mjs';
 import {videoService} from './video-service.mjs';
@@ -688,6 +689,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, {
         version: VERSION,
         upgrade: upgradeSummary(VERSION, startupUpgrade),
+        hub: (() => { const h = readHubServers(); return { connected: Object.keys(h.servers).length > 0, servers: Object.keys(h.servers), problem: h.problem }; })(),
         workspace: WORKSPACE,
         skillDir: SKILL_DIR,
         bridge: { ...bridge.status(), browserWorker: workerInfo() },
