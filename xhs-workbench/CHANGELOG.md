@@ -1,5 +1,16 @@
 # 更新日志
 
+## v0.7.1（2026-10-21）CodeBuddy CLI 适配与两档浏览器权限
+
+在真实的 CodeBuddy CLI 2.171.0 + 企业中枢环境里测通了：连接自检、浏览器控制、对标采集与拆解、选题生成、笔记草稿。
+
+- **CodeBuddy 适配**：提示词改走标准输入（Windows 上 `codebuddy` 是 .cmd 垫片，命令行参数里的多行文本会在第一个换行处被截断，agent 只看到标题）；无人值守用 `--permission-mode acceptEdits`，并显式放行 Read/Glob/Grep/WebSearch/WebFetch。`--allowedTools` / `--disallowedTools` 是多值参数，**每个工具名单独一项**（实测逗号拼成一项时放行不生效）。`browser-setup` 白名单加入 codebuddy
+- **两档浏览器权限**（`adapter.browserMode`）：
+  - **只读档（默认）**：点击 / 输入 / 填表 / 上传文件 / 按键 / 拖放 / 选择 / 执行脚本 / 弹窗处理等 14 个写类 Playwright 工具全部禁用（被禁的工具对 agent 不可见），只留打开网址、快照、截图、等待、查找、标签页等读取类工具——用于分析数据、学习博主帖子，不允许自动发布
+  - **测试档**：放开点击、输入等交互工具；仍禁用上传文件和执行脚本，并用 Playwright MCP 的 `--blocked-origins` 屏蔽创作者中心（发布入口所在），所以发布做不了；点赞 / 评论 / 关注靠提示词约束，测完应切回只读档
+  - 新命令 `node scripts/workbench.mjs browser-mode readonly|test` 一键切换；`applyBrowser` 对 CodeBuddy 幂等，关闭浏览器控制时一并去掉模式和屏蔽域名
+- 自动化测试新增 6 项（codebuddy-browser，使用临时数据目录）
+
 ## v0.7.0（2026-10-21）跨平台可用、可升级、可接入企业中枢
 
 这一版以“能发给别人用”为目标，经过 Windows 上的真实测试（真实 agent、WorkBuddy 值守、APIMart 生图、视频生成）打磨：
