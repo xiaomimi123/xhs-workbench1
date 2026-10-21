@@ -1,0 +1,90 @@
+# 接入「企业智能体中枢」：发布清单与对接契约
+
+工作台通过中枢的**应用分发**子系统（`apps/` + `open_app` + 岗位包 `apps` 字段）交给员工使用。设计文档在中枢仓库：`docs/superpowers/specs/2026-10-19-app-launcher-design.md`。本文只记录**工作台这边**要做什么、承诺什么。
+
+## 1. 发布一个新版本到中枢（管理员）
+
+在工作台仓库（本仓库）：
+
+```bash
+node tools/package.mjs      # 先跑全部测试，再生成 dist/xhs-workbench-v<版本>.zip，并打印文件数与 SHA-256
+```
+
+当前版本 **v0.7.0**（`xhs-workbench/server/version.mjs`），包 413 KB、129 个文件，零第三方依赖。
+
+在中枢仓库（`D:\企业agent中枢系统`）：
+
+1. 把 zip 复制成 `apps/xhs-workbench/0.7.0.zip`（文件名 = `app.json` 的 `version` + `.zip`）。
+2. 改 `apps/xhs-workbench/app.json` 的 `"version": "0.7.0"`，其余字段不用变：
+
+   ```json
+   {
+     "id": "xhs-workbench",
+     "name": "小红书运营工作台",
+     "version": "0.7.0",
+     "description": "小红书自动运营：对标采集、内容生产、评论私信审核，底层 agent 接入公司中枢",
+     "entry": "xhs-workbench/scripts/workbench.mjs",
+     "requires": {"node": ">=18"},
+     "setup_args": ["setup"],
+     "start_args": ["start", "--open"]
+   }
+   ```
+3. 不需要重启中枢（SHA-256 由中枢按文件内容计算）。旧的 `0.6.2.zip` 可以留着，也可以删掉。
+4. 控制台「岗位包 → 小红书运营 → 可打开的应用」勾选“小红书运营工作台”（演示数据里 `rp-xhs-ops` 已经放行）。
+
+## 2. 员工使用
+
+对已接入中枢的 agent 说“打开小红书工作台”。中枢校验岗位包并写审计，本机接入器下载、校验、解压，然后在包目录下依次执行：
+
+```
+node xhs-workbench/scripts/workbench.mjs setup
+node xhs-workbench/scripts/workbench.mjs start --open
+```
+
+## 3. 工作台对中枢的承诺（对接契约）
+
+| 项 | 内容 |
+|---|---|
+| 启动脚本 | `xhs-workbench/scripts/workbench.mjs`；`setup` 初始化数据目录；`start --open` **幂等**，输出一行 `URL: <地址>`（已在运行时返回同一个地址并输出“工作台已在运行”） |
+| 运行要求 | Node.js ≥ 18。缺 Node 时接入器给出安装指引；**ffmpeg 不是必需**（只有参考视频和视频创作需要），缺失不影响启动，`node …/workbench.mjs doctor` 会列出缺什么、怎么装 |
+| 数据位置 | `~/XHS-Workbench`（`XHS_WORKSPACE` 可改），在包目录之外：换版本、清理旧版本目录都不影响账号、笔记、登录资料、排期 |
+| 升级 | 每次启动时检查数据版本：版本变化先自动备份（`backups/upgrade-*.zip`）再迁移；迁移失败不推进版本、保留备份、网页显示原因；数据来自更新版本（被换成了旧包）时拒绝启动且不改任何数据 |
+| 不被打断 | 工作台里有定时发布、定时检查评论，**接入器不要在它运行时强制重启**；有新版本时返回现有地址并提示“关闭后再打开即可升级”（与中枢设计一致）。要手动升级：`workbench.mjs upgrade --package <zip> --yes`（先备份，旧版保留为 `.bak-<版本>` 可回退） |
+| 停止 | `workbench.mjs stop`（由员工对 agent 说“关闭小红书工作台”触发） |
+| 首次连接 agent | 接入器只跑 `setup` 和 `start --open`，不跑连接自检。工作台打开后，**网页里会直接出现“连接你的 agent”卡片**，列出本机检测到的 agent（含 WorkBuddy 等桌面类），员工点一下就连好，不需要回到 agent 里说命令 |
+
+## 4. 工作台里的 agent 接入中枢（环境变量契约）
+
+中枢接入器启动工作台前：
+
+1. 写 `~/.hub-agent/hub-mcp.json`，内容 `{"mcpServers": {"enterprise-hub": {…}}}`（命令是员工现在用的 MCP 桥，含令牌续期、心跳、技能同步）。
+2. 启动工作台时设置环境变量 **`HUB_MCP_SERVERS_FILE=<该文件的绝对路径>`**。
+
+工作台（v0.7.0 起）这样处理：
+
+- 服务启动时读取该文件，把条目并入底层 agent 的 MCP 配置：对话任务里的 **Claude Code** 能使用 `enterprise-hub` 的知识库检索、岗位技能、`generate_image` / `generate_video` 等工具。
+- 校验：只保留 `command/args/env` 或 `url/type/headers` 字段并检查类型；服务名只允许 `[\w-]{1,40}`；最多 8 个；文件超过 64KB 或不合法就整体忽略。**不能覆盖工作台自己的 `playwright`**。
+- 收紧：本地描述助手（`--strict-mcp-config`）和浏览器专用的只读采集任务**不加**中枢工具。
+- 没有该环境变量、文件不存在或内容不合法时，一切照旧，不报错。
+- 「连接与设置」页显示“企业中枢：已接入（enterprise-hub）”，不合法时显示原因。
+- 目前只对 **Claude Code** 生效。Codex、WorkBuddy（收件箱模式）按各自方式接入，不在这一版范围；WorkBuddy 本身如果已经配置了中枢的 MCP，就在它自己的会话里直接能用中枢工具。
+
+## 5. 已验证与未验证
+
+**已验证（Windows）**
+
+- 解压发布包到空目录，按上面的约定执行 `setup`、`start --open`（两次，幂等），带 `HUB_MCP_SERVERS_FILE` 启动后 `/api/state` 报告 `hub.connected = true`、版本 0.7.0。
+- 自动化测试 342 项（含 `hub-mcp` 10 项：解析校验、不覆盖 playwright、命令行参数、不该加的场景）。
+- 工作台本身的真实流程：APIMart 生图、视频生成与参考视频换主体、WorkBuddy 值守（重启不丢任务、中文不乱码）。
+
+**未验证**
+
+- 真实的中枢接入器（本机 MCP 桥）下载、校验、启动整条链路——需要中枢服务和一台已接入的员工电脑。
+- 工作台里的 Claude Code 真正调用到中枢 MCP 工具（这台机器上的 Claude Code 接的是本地 deepseek / qwen 模型，不能代表真实的工具调用质量）。
+- macOS / Safari。实况图、本地二维码、截图 OCR 核对目前只支持 macOS。
+
+## 6. 中枢侧建议的后续工作
+
+1. `skills/运营部/xhs-*` 目前是通用占位内容，可以按工作台各模块的实际做法重写（竞品对标、选题、文案、封面、合规、评论、复盘）。
+2. 知识库 `vault/历史爆款笔记`、`品牌调性与人设` 与工作台自己的知识库（`~/XHS-Workbench/knowledge`）目前是两套；先分别使用，需要打通时再定同步方向。
+3. 工作台自己的生图 / 视频密钥（APIMart、视频网关）可以逐步改成走中枢的 `generate_image` / `generate_video`，这样额度和审计都在中枢。这一步需要在工作台里新增“中枢通道”，不在 0.7.0 范围。
