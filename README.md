@@ -15,6 +15,7 @@
 | v0.4 | 多账号分别登录、实况图与多图编辑、开机自启与防休眠、备份与回收站、知识库智能检索、自动化测试 | ✅ 已完成 |
 | v0.5 | 视频笔记、对标追踪（爆款雷达）、历史笔记导入、新手引导 | ✅ 已完成 |
 | v0.6 | 知识库管家（自动整理）、视频脚本生产、可选无头模式、对标任务检查点 | ✅ 已完成 |
+| v0.7 | 跨平台可用与升级、接入企业中枢（中枢 MCP、能力预检、成果上报、与中枢技能叠加）、CodeBuddy CLI 适配、两档浏览器权限 | ✅ 已完成（当前 v0.7.4，详见 `xhs-workbench/CHANGELOG.md`） |
 
 ## 目录结构
 
@@ -32,7 +33,8 @@
 │   ├── v0.5-enhancements.md   v0.5 增强功能设计
 │   ├── benchmark-recovery.md  对标超时检查点与恢复
 │   ├── background-browser.md   可选有头只读采集与模型路由
-│   └── benchmark-observation.md 对标卡片与主页/笔记观察
+│   ├── benchmark-observation.md 对标卡片与主页/笔记观察
+│   └── hub-integration.md      接入企业中枢：发布清单、环境变量契约、与中枢技能的分工
 └── xhs-workbench/             ← 分发的技能包（整个文件夹交给用户）
     ├── SKILL.md               agent 入口：安装、自检、启动、值守流程
     ├── README.md              给用户的安装与使用指南

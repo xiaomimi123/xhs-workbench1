@@ -10,26 +10,26 @@
 node tools/package.mjs      # 先跑全部测试，再生成 dist/xhs-workbench-v<版本>.zip，并打印文件数与 SHA-256
 ```
 
-当前版本 **v0.7.0**（`xhs-workbench/server/version.mjs`），包 413 KB、129 个文件，零第三方依赖。
+当前版本 **v0.7.4**（`xhs-workbench/server/version.mjs`），包约 424 KB、131 个文件，零第三方依赖。
 
 在中枢仓库（`D:\企业agent中枢系统`）：
 
-1. 把 zip 复制成 `apps/xhs-workbench/0.7.0.zip`（文件名 = `app.json` 的 `version` + `.zip`）。
-2. 改 `apps/xhs-workbench/app.json` 的 `"version": "0.7.0"`，其余字段不用变：
+1. 把 zip 复制成 `apps/xhs-workbench/0.7.4.zip`（文件名 = `app.json` 的 `version` + `.zip`）。
+2. 改 `apps/xhs-workbench/app.json` 的 `"version"`；依赖声明 `requires` 见下面的「能力预检」，其余字段不用变：
 
    ```json
    {
      "id": "xhs-workbench",
      "name": "小红书运营工作台",
-     "version": "0.7.0",
+     "version": "0.7.4",
      "description": "小红书自动运营：对标采集、内容生产、评论私信审核，底层 agent 接入公司中枢",
      "entry": "xhs-workbench/scripts/workbench.mjs",
-     "requires": {"node": ">=18"},
+     "requires": {"node": ">=18", "agent_cli": "codebuddy", "capabilities": ["browser"]},
      "setup_args": ["setup"],
      "start_args": ["start", "--open"]
    }
    ```
-3. 不需要重启中枢（SHA-256 由中枢按文件内容计算）。旧的 `0.6.2.zip` 可以留着，也可以删掉。
+3. 不需要重启中枢（SHA-256 由中枢按文件内容计算）。旧版本的 zip 可以留着，也可以删掉。每次重新上传都要升版本号。
 4. 控制台「岗位包 → 小红书运营 → 可打开的应用」勾选“小红书运营工作台”（演示数据里 `rp-xhs-ops` 已经放行）。
 
 ## 2. 员工使用
@@ -108,18 +108,17 @@ node xhs-workbench/scripts/workbench.mjs start --open
 
 **已验证（Windows）**
 
-- 解压发布包到空目录，按上面的约定执行 `setup`、`start --open`（两次，幂等），带 `HUB_MCP_SERVERS_FILE` 启动后 `/api/state` 报告 `hub.connected = true`、版本 0.7.0。
-- 自动化测试 342 项（含 `hub-mcp` 10 项：解析校验、不覆盖 playwright、命令行参数、不该加的场景）。
+- 解压发布包到空目录，按上面的约定执行 `setup`、`start --open`（两次，幂等），带 `HUB_MCP_SERVERS_FILE` 启动后 `/api/state` 报告 `hub.connected = true`（早期用 0.7.0 验证，之后每个版本都用中枢真实的 `open-app` 打开过）。
+- 自动化测试 359 项（含 `hub-mcp`、`hub-capabilities`、`hub-work`、`hub-guidance` 等中枢对接用例）；本机没装 ffmpeg 时参考视频相关的 2 项会失败，与功能无关，打包时用 `--skip-tests`。
 - 工作台本身的真实流程：APIMart 生图、视频生成与参考视频换主体、WorkBuddy 值守（重启不丢任务、中文不乱码）。
 
 **未验证**
 
-- 真实的中枢接入器（本机 MCP 桥）下载、校验、启动整条链路——需要中枢服务和一台已接入的员工电脑。
-- 工作台里的 Claude Code 真正调用到中枢 MCP 工具（这台机器上的 Claude Code 接的是本地 deepseek / qwen 模型，不能代表真实的工具调用质量）。
+- 工作台里的 **Claude Code** 真正调用到中枢 MCP 工具（目前真实验证的是 **CodeBuddy CLI 2.171.0**：读中枢技能、调用中枢模型、提交改进建议都已在真实环境跑通）。
 - macOS / Safari。实况图、本地二维码、截图 OCR 核对目前只支持 macOS。
 
 ## 6. 中枢侧建议的后续工作
 
-1. `skills/运营部/xhs-*` 目前是通用占位内容，可以按工作台各模块的实际做法重写（竞品对标、选题、文案、封面、合规、评论、复盘）。
+1. ~~`skills/运营部/xhs-*` 目前是通用占位内容~~（已完成：七个运营技能已改写成业务标准并发布，与本包的操作手册叠加使用，见上面「与中枢技能的分工」）。
 2. 知识库 `vault/历史爆款笔记`、`品牌调性与人设` 与工作台自己的知识库（`~/XHS-Workbench/knowledge`）目前是两套；先分别使用，需要打通时再定同步方向。
-3. 工作台自己的生图 / 视频密钥（APIMart、视频网关）可以逐步改成走中枢的 `generate_image` / `generate_video`，这样额度和审计都在中枢。这一步需要在工作台里新增“中枢通道”，不在 0.7.0 范围。
+3. 工作台自己的生图 / 视频密钥（APIMart、视频网关）可以逐步改成走中枢的 `generate_image` / `generate_video`，这样额度和审计都在中枢。这一步需要在工作台里新增“中枢通道”，目前还没做。
