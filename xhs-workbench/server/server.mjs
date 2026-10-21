@@ -492,7 +492,7 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
     !taskKind && cfg.mode === 'cli' && cfg.adapter.resumeArgs && session.agentSessionId
     && session.agentAdapterId === cfg.adapter.id && session.agentAccountId === account.id
     && session.agentModelTier === 'normal' && session.agentModelKey === normalModelKey(cfg.adapter);
-  const prompt = buildPrompt({ session, account, text, includeHistory: !canResume });
+  const prompt = buildPrompt({ session, account, text, includeHistory: !canResume, allowHub: !taskKind });
 
   const asstMsg = {
     id: store.newId('m_'),

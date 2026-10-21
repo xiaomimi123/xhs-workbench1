@@ -2,11 +2,23 @@
 import path from 'node:path';
 import { SKILL_DIR, WORKSPACE, accountDir } from './paths.mjs';
 import { materialsSummary } from './materials.mjs';
+import { readHubServers } from './hub-mcp.mjs';
 
 const HISTORY_LIMIT = 10;
 const HISTORY_CHARS = 1500;
 
-export function buildPrompt({ session, account, text, includeHistory }) {
+/** 接入企业中枢时给 agent 的指引：先读公司技能（业务标准）、两套指引的优先级、读不到就跳过、发现问题提改进建议。 */
+export function hubGuidance() {
+  return [
+    '## 企业中枢（公司统一的业务标准）',
+    '- 各模块操作手册开头有一行「中枢技能」，写明对应的公司技能。做那个模块的事之前，先用中枢工具 list_skills / read_skill 读它，把它当作**业务标准**（口吻、选题标准、合规红线、回复原则、复盘指标）。同一会话读过就不用重复读。',
+    '- 优先级：文件格式、存放位置、检查点、浏览器与账号安全、不自动发布，以操作手册为准；业务标准以公司技能为准。两者直接冲突时先停下来说明，不要自己挑一个。',
+    '- 没有这些工具、没有权限或读取失败时，直接按操作手册做，不要重试，也不要因此中断。',
+    '- 读了公司技能或知识库后，如果发现内容有错误、过时或缺步骤，用 propose_improvement 提交改进建议（只是建议，不要自己改；有把握才提，不是每次都提）。',
+  ];
+}
+
+export function buildPrompt({ session, account, text, includeHistory, allowHub = false }) {
   const accDir = path.relative(WORKSPACE, accountDir(account.id)) || '.';
   const accountLines = [
     `名称：${account.name}（id: ${account.id}）`,
@@ -37,6 +49,9 @@ export function buildPrompt({ session, account, text, includeHistory }) {
     '- 不要删除文件；需要删除时移入数据目录下的 .trash/。',
     '- 涉及登录、验证码、支付、账号安全时停下来，请用户本人操作。',
   ];
+
+  // 只有会带中枢工具的任务（普通对话）且确实接入了中枢时才加；受控任务和只读采集任务没有中枢工具，不加
+  if (allowHub && Object.keys(readHubServers().servers).length) parts.push('', ...hubGuidance());
 
   const library = materialsSummary();
   if (library) {
