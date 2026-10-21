@@ -1,4 +1,5 @@
 import {assertBrowserAccess, lockBrowserAccess, resumeBrowserAccess} from './access-policy.mjs';
+import {assertBrowserCapability} from './hub-capabilities.mjs';
 // 持久化采集意图。只登记检查点关联目标或用户批量选中的缺项，不扫描触发全部旧账号。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -105,7 +106,7 @@ export class BenchmarkQueue {
           q.paused = true; q.reason = item.reason; dirty = true; break;
         }
         if (item.authorized !== true) continue;
-        try { assertBrowserAccess(account); } catch (err) { q.paused=true; q.reason=err.message; dirty=true; break; }
+        try { assertBrowserCapability(); assertBrowserAccess(account); } catch (err) { q.paused=true; q.reason=err.message; dirty=true; break; }
         item.state = 'running'; item.attempts++; item.startedAt = new Date().toISOString();
         item.taskId = `collect_${account}_${item.id}_${Date.now()}`;
         this.save(account, q); // 派发前写意图，崩溃不会无记录重放。

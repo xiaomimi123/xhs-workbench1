@@ -69,6 +69,16 @@ node xhs-workbench/scripts/workbench.mjs start --open
 - 「连接与设置」页显示“企业中枢：已接入（enterprise-hub）”，不合法时显示原因。
 - 目前只对 **Claude Code** 生效。Codex、WorkBuddy（收件箱模式）按各自方式接入，不在这一版范围；WorkBuddy 本身如果已经配置了中枢的 MCP，就在它自己的会话里直接能用中枢工具。
 
+### 能力预检（v0.7.2 起）
+
+应用在 `app.json` 的 `requires` 里声明依赖（如 `{"node":">=18","agent_cli":"codebuddy","capabilities":["browser"]}`）。接入器打开应用前预检，写 `~/.hub-agent/capabilities/<app_id>.json` 并设置环境变量 **`HUB_CAPABILITIES_FILE`**：
+
+```json
+{"schema":1,"app_id":"xhs-workbench","checkedAt":"…","capabilities":{"browser":{"ready":false,"missing":["CodeBuddy CLI"],"fixes":["npm install -g @tencent-ai/codebuddy-code"]},"agent_cli":{…}}}
+```
+
+工作台：每次使用时重读；仅当 `capabilities.browser.ready === false` 时拒绝浏览器专用任务（409，写明缺什么与第一条处理方法）；无变量 / 文件不存在 / 不合法时不拦。文件不含任何密钥。
+
 ## 5. 已验证与未验证
 
 **已验证（Windows）**

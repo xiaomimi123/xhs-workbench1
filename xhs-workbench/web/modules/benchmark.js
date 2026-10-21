@@ -189,14 +189,17 @@ function collectionCardHtml() {
   const kind = V.access?.kind || 'open';
   if (!V.items.length && !items.length && kind === 'open') return '';
   const reason = (kind !== 'open' ? V.access?.reason : '') || V.collection?.reason || '';
-  const statusLine = kind === 'restriction' ? '已暂停自动访问：遇到了平台限制，处理好之前不会再自动访问。'
+  const capBlocked = S.info?.hub?.capabilities?.present && S.info.hub.capabilities.browser?.ready === false;
+  const capMissing = capBlocked ? (S.info.hub.capabilities.browser.missing.join('、') || '必要的能力') : '';
+  const statusLine = capBlocked ? `浏览器自动化不可用：缺少 ${capMissing}（中枢能力检查），装好后刷新本页即可。`
+    : kind === 'restriction' ? '已暂停自动访问：遇到了平台限制，处理好之前不会再自动访问。'
     : kind === 'login' ? '已暂停自动访问：需要先确认登录账号。'
     : kind === 'paused' ? '自动访问已暂停。'
     : '';
   const main = [
-    todo ? `<button class="btn small primary" data-act="collect-resume" ${kind !== 'open' ? 'disabled' : ''}>开始采集待办（${todo}）</button>` : '',
-    `<button class="btn small" data-act="collect-fill" ${kind !== 'open' ? 'disabled' : ''}>补齐已登记对标的缺失资料</button>`,
-    `<button class="btn small" data-act="prepare-browser" ${kind === 'restriction' ? 'disabled' : ''}>先核对登录账号</button>`,
+    todo ? `<button class="btn small primary" data-act="collect-resume" ${kind !== 'open' || capBlocked ? 'disabled' : ''}>开始采集待办（${todo}）</button>` : '',
+    `<button class="btn small" data-act="collect-fill" ${kind !== 'open' || capBlocked ? 'disabled' : ''}>补齐已登记对标的缺失资料</button>`,
+    `<button class="btn small" data-act="prepare-browser" ${kind === 'restriction' || capBlocked ? 'disabled' : ''}>先核对登录账号</button>`,
     running ? '<button class="btn small" data-act="collect-pause">暂停采集</button>' : '',
     kind === 'paused' ? '<button class="btn small" data-act="resume-access">恢复自动访问</button>' : '',
     kind === 'restriction' ? '<button class="btn small" data-act="resolve-restriction">我已在小红书确认限制解除</button>' : '',

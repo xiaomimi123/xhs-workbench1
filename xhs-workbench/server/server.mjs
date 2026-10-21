@@ -1,5 +1,6 @@
 import { decodeText } from './inbox-files.mjs';
 import { readHubServers } from './hub-mcp.mjs';
+import { readHubCapabilities, assertBrowserCapability } from './hub-capabilities.mjs';
 import {VideoDescriptionWorkflow} from './video-description-workflow.mjs';
 import {VideoRetrieval} from './video-retrieval.mjs';
 import {videoService} from './video-service.mjs';
@@ -441,6 +442,7 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
   let benchmark = null;
   if (taskKind !== undefined) {
     if (!['benchmark.verify', 'browser.prepare'].includes(taskKind)) throw store.httpError(400, '任务类型不支持');
+    assertBrowserCapability(); // 中枢判定缺浏览器能力时只拦浏览器功能（先于访问锁：缺能力不该被记成平台风控）
     assertBrowserAccess(account.id);
     const worker = workerInfo();
     if (!worker.enabled || !worker.available || !worker.compatible) throw store.httpError(409, '后台有头读取尚未就绪，请在设置页开启并安装组件，或使用原 agent 路径');
@@ -689,7 +691,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, {
         version: VERSION,
         upgrade: upgradeSummary(VERSION, startupUpgrade),
-        hub: (() => { const h = readHubServers(); return { connected: Object.keys(h.servers).length > 0, servers: Object.keys(h.servers), problem: h.problem }; })(),
+        hub: (() => { const h = readHubServers(); return { connected: Object.keys(h.servers).length > 0, servers: Object.keys(h.servers), problem: h.problem, capabilities: readHubCapabilities() }; })(),
         workspace: WORKSPACE,
         skillDir: SKILL_DIR,
         bridge: { ...bridge.status(), browserWorker: workerInfo() },

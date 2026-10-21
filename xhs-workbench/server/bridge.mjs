@@ -1,5 +1,6 @@
 import {findAdapter} from './adapters.mjs';
 import {assertBrowserAccess, lockBrowserAccess, warningKind} from './access-policy.mjs';
+import {assertBrowserCapability} from './hub-capabilities.mjs';
 // Agent 桥接层
 // - CLI 模式：本地服务直接以 headless 方式调用 agent 命令行，流式读取输出
 // - 收件箱模式：任务进入队列，由 agent 在自己的会话里轮询领取、回写结果
@@ -306,6 +307,7 @@ export class Bridge extends EventEmitter {
     const cfg = this.config();
     if (!cfg) throw new Error('尚未完成连接设置，请让 agent 运行连接自检');
     if (cfg.mode === 'inbox' && cfg.browser && cfg.browser !== 'none') throw new Error('收件箱不支持可撤销的浏览器任务，请切换 CLI 只读组件；收件箱仅可用于本地资料任务');
+    if (task.kind) assertBrowserCapability(); // 浏览器专用任务：中枢判定缺能力就直接拒绝，说明缺什么
     if (task.kind || cfg.browser && cfg.browser !== 'none' || cfg.mode === 'inbox') assertBrowserAccess(task.accountId);
     if (task.kind === 'benchmark.verify' || task.kind === 'browser.prepare') {
       if (!this.browserWorker || (task.kind === 'benchmark.verify' && !this.onBenchmarkVerified)) throw new Error('后台浏览器未启用');

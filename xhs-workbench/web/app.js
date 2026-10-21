@@ -591,6 +591,16 @@ function bridgeSummary() {
   return b.inboxOnline ? { cls: 'ok', label: '值守 agent 在线' } : { cls: 'warn', label: '等待 agent 值守' };
 }
 
+function hubCapRow(hub) {
+  const c = hub?.capabilities;
+  if (!c) return '';
+  if (c.problem) return `<dt>中枢能力检查</dt><dd>${icon('dot', 'icon-warn')} ${esc(c.problem)}</dd>`;
+  if (!c.present || !c.browser) return '';
+  if (c.browser.ready) return `<dt>中枢能力检查</dt><dd>${icon('check', 'icon-ok')} 浏览器自动化所需的能力都满足${c.checkedAt ? `（检查于 ${esc(fmtTime(c.checkedAt))}）` : ''}</dd>`;
+  const fix = c.browser.fixes.map((f) => `<div><code>${esc(f)}</code></div>`).join('');
+  return `<dt>中枢能力检查</dt><dd>${icon('dot', 'icon-warn')} 浏览器自动化不可用：缺少 ${c.browser.missing.map(esc).join('、') || '必要的能力'}。写笔记、看数据等不需要浏览器的功能不受影响。${fix ? `<div class="muted" style="margin-top:4px">处理方法：</div>${fix}` : ''}<div class="muted" style="margin-top:4px">装好后让 agent 运行 <code>app-doctor</code>（或刷新本页），无需重启工作台。</div></dd>`;
+}
+
 function renderBridge(override) {
   const sum = override ? { cls: 'bad', label: override } : bridgeSummary();
   const pill = $('#bridge-pill');
@@ -645,6 +655,7 @@ function viewSettings() {
         ${b.mode === 'cli' && b.adapter ? `<dt>Agent</dt><dd>${esc(b.adapter.name)} <code>${esc(b.adapter.command)}</code></dd>` : ''}
         ${b.mode === 'inbox' ? `<dt>值守状态</dt><dd>${b.inboxOnline ? icon('dot', 'icon-ok') + ' 在线' : icon('dot', 'icon-warn') + ' 离线'}${b.lastPollAt ? `（最近一次 ${fmtTime(b.lastPollAt)}）` : ''}，待领取 ${b.pending} 条</dd>` : ''}
         <dt>上次测试</dt><dd>${b.testedAt ? fmtTime(b.testedAt) : '—'}</dd>
+        ${hubCapRow(info.hub)}
         ${info.hub?.connected ? `<dt>企业中枢</dt><dd>${icon('check', 'icon-ok')} 已接入（${info.hub.servers.map(esc).join('、')}）：对话任务里的 agent 可以使用公司知识库、岗位技能和出图出视频</dd>` : info.hub?.problem ? `<dt>企业中枢</dt><dd>${icon('dot', 'icon-warn')} ${esc(info.hub.problem)}</dd>` : ''}
         ${b.mode === 'cli' ? `<dt>浏览器控制</dt><dd>${b.browser === 'playwright' ? `${icon('check', 'icon-ok')} Playwright（${b.adapter?.id==='codex'?'只读采集':'独立浏览器'}）` : b.browser === 'chrome' ? `${icon('check', 'icon-ok')} Claude in Chrome` : '未开启（只读采集需要）'}</dd>` : ''}
         ${b.mode === 'cli' && b.browser === 'playwright' ? `<dt>抓取浏览器</dt><dd>${b.adapter && b.adapter.browserChannel && b.adapter.browserChannel !== 'chromium' ? `${icon('check', 'icon-ok')} 系统浏览器（${b.adapter.browserChannel === 'msedge' ? 'Edge' : 'Chrome'}；仍有平台风控风险）` : `${icon('warning', 'icon-warn')} 内置浏览器（建议重新运行 browser-setup，自动切换到系统 Edge/Chrome）`}；${b.adapter && b.adapter.headless ? '无头（后台）' : '有头（弹窗）'}</dd>` : ''}
