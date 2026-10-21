@@ -2,6 +2,7 @@
 // 数据格式与 playbooks/ 中的手册保持一致，agent 可以直接读写这些文件。
 import fs from 'node:fs';
 import { enqueueCollection, recordCollectionObservation } from './benchmark-queue.mjs';
+import { reportWork } from './hub-work.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { P, accountDir } from './paths.mjs';
@@ -290,13 +291,29 @@ export function listBenchmarks(accountId) {
   });
 }
 
+const NOTE_REPORT = { draft: ['进行中', 30, '草稿'], ready: ['待审核', 90, '待发布'], published: ['已完成', 100, '已发布'] };
+
+/** 把笔记的状态变化上报给企业中枢（没接入中枢时什么都不做）。只报标题和状态，不报正文。 */
+function reportNote(accountId, meta, before) {
+  const title = String(meta.title || meta.titleOptions?.[0] || '').trim() || '未命名笔记';
+  if (before && before.status === meta.status && before.title === title) return;
+  const [status, progress, label] = NOTE_REPORT[meta.status] || NOTE_REPORT.draft;
+  reportWork({ key: `note:${accountId}:${meta.id}`, title: `笔记：${title}`, kind: '笔记', status, progress, note: label,
+    link: meta.status === 'published' ? meta.publishedUrl : '' });
+}
+
 export function saveBenchmark(accountId, input) {
   if (!input.id && !String(input.name || '').trim()) throw httpError(400, '请填写对标账号名称');
   const index = readableBenchIndex(accountId);
   if (input.id && !readItems(index, 'b_').some((b) => b.id === input.id)) {
     throw httpError(404, '对标账号不存在');
   }
+  const prevBench = input.id ? readItems(index, 'b_').find((b) => b.id === input.id) : null;
+  const before = prevBench ? { status: prevBench.status, analyzedAt: prevBench.analyzedAt } : null;
   const item = upsertItem(index, 'b_', input.id ? input : { status: 'pending', ...input }, BENCH_FIELDS);
+  if (item.status === 'analyzed' && (before?.status !== 'analyzed' || before.analyzedAt !== item.analyzedAt)) {
+    reportWork({ key: `benchmark:${accountId}:${item.id}`, title: `对标拆解：${item.name}`, kind: '对标报告', status: '已完成' });
+  }
   ensureDir(path.join(accRoot(accountId), 'benchmarks', item.id, 'screenshots'));
   return item;
 }
@@ -689,6 +706,7 @@ export function saveNote(accountId, input) {
   const dir = noteDir(accountId, id);
   const prev = readJson(path.join(dir, 'meta.json'), null);
   if (!prev && input.id && !input.create) throw httpError(404, '笔记不存在');
+  const before = prev ? { status: prev.status, title: String(prev.title || prev.titleOptions?.[0] || '').trim() || '未命名笔记' } : null;
   const meta = prev || { id, status: 'draft', titleOptions: [], tags: [], createdAt: now() };
   for (const k of NOTE_FIELDS) if (k in input) meta[k] = input[k];
   meta.id = id;
@@ -697,6 +715,8 @@ export function saveNote(accountId, input) {
   writeJson(path.join(dir, 'meta.json'), meta);
   if (typeof input.content === 'string') fs.writeFileSync(path.join(dir, 'content.md'), input.content);
   else if (!fs.existsSync(path.join(dir, 'content.md'))) fs.writeFileSync(path.join(dir, 'content.md'), '');
+
+  reportNote(accountId, meta, before);
 
   // 从选题创建笔记时，回写选题状态
   if (!prev && meta.topicId) {

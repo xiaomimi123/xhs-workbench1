@@ -69,6 +69,19 @@ node xhs-workbench/scripts/workbench.mjs start --open
 - 「连接与设置」页显示“企业中枢：已接入（enterprise-hub）”，不合法时显示原因。
 - 目前只对 **Claude Code** 生效。Codex、WorkBuddy（收件箱模式）按各自方式接入，不在这一版范围；WorkBuddy 本身如果已经配置了中枢的 MCP，就在它自己的会话里直接能用中枢工具。
 
+### 成果上报（v0.7.3 起）
+
+接入器启动工作台时设置环境变量 **`HUB_WORK_OUTBOX=<~/.hub-agent/outbox/xhs-workbench.jsonl>`**。工作台在关键产出变化时往该文件**追加一行** JSON：
+
+```json
+{"key":"note:default:n_ab12","title":"笔记：秋季护肤","kind":"笔记","status":"待审核","progress":90,"link":"https://…","note":"待发布"}
+```
+
+- `key` 必填，同一产出固定不变（中枢按 人 + 应用 + key 幂等，重复上报是更新）；`status` 为 进行中 / 待审核 / 已完成 / 受阻；链接只放 http(s)。
+- 目前上报笔记（draft→ready→published）和对标拆解完成（analyzed）；只在状态变化时写。不写正文、提示词、账号资料、本机路径。
+- 接入器每 20 秒（MCP 桥运行时）把新行转发给中枢；也可手动 `hub_agent.py flush-outbox`。没有该变量时工作台什么都不做。
+- 代码：`server/hub-work.mjs`；钩子在 `content.mjs` 的 `saveNote` / `saveBenchmark`。agent 直接改文件（绕过这两个函数）的路径不会上报。
+
 ### 能力预检（v0.7.2 起）
 
 应用在 `app.json` 的 `requires` 里声明依赖（如 `{"node":">=18","agent_cli":"codebuddy","capabilities":["browser"]}`）。接入器打开应用前预检，写 `~/.hub-agent/capabilities/<app_id>.json` 并设置环境变量 **`HUB_CAPABILITIES_FILE`**：
