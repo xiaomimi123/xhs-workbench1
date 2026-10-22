@@ -61,3 +61,11 @@ test('已有选择会被沿用，不会被另一个 agent 悄悄改掉；--auto 
   assert.equal(planConnection({ cliIds: ['codex'], desktopIds: ['workbuddy'], current: { mode: 'cli', adapter: { id: 'claude-code' } } }).action, 'choose');
   assert.equal(planConnection({ ...both, auto: true }).action, 'cli');
 });
+
+test('--auto 时 CodeBuddy 优先，没有它才按固定顺序', () => {
+  assert.deepEqual(planConnection({ cliIds: ['claude-code', 'codex', 'codebuddy'], desktopIds: [], auto: true }), { action: 'cli', id: 'codebuddy' });
+  assert.deepEqual(planConnection({ cliIds: ['codex', 'codebuddy'], desktopIds: ['workbuddy'], auto: true }), { action: 'cli', id: 'codebuddy' });
+  assert.deepEqual(planConnection({ cliIds: ['claude-code', 'codex'], desktopIds: [], auto: true }), { action: 'cli', id: 'claude-code' });
+  // 不带 --auto 仍然不替用户决定
+  assert.equal(planConnection({ cliIds: ['codex', 'codebuddy'], desktopIds: [] }).action, 'choose');
+});

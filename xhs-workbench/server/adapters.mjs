@@ -106,6 +106,7 @@ export function planConnection({ cliIds = [], desktopIds = [], prefer = null, cu
   if (current?.mode === 'cli' && current.adapter?.id && cliIds.includes(current.adapter.id)) return { action: 'cli', id: current.adapter.id };
   const options = [...cliIds, ...desktopIds];
   if (options.length === 0) return { action: 'inbox', hostId: null };
-  if (options.length === 1 || auto) return cliIds.length ? { action: 'cli', id: cliIds[0] } : { action: 'inbox', hostId: desktopIds[0] };
+  // 自动挑选时 CodeBuddy 优先：中枢的浏览器自动化、模型和只读权限档都按它配置（其余按固定顺序）
+  if (options.length === 1 || auto) return cliIds.length ? { action: 'cli', id: cliIds.includes('codebuddy') ? 'codebuddy' : cliIds[0] } : { action: 'inbox', hostId: desktopIds[0] };
   return { action: 'choose', options };
 }

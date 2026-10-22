@@ -1,5 +1,11 @@
 # 更新日志
 
+## v0.7.7（2026-10-22）`--auto` 自动选择时 CodeBuddy 优先
+
+- 无人值守安装（`bridge-test --auto`）原来取固定顺序里的第一个命令行 agent（claude-code → codex → codebuddy …），本机同时装有 Codex 时会选成 Codex，而中枢的浏览器自动化、模型和只读权限档都按 CodeBuddy 配置。现在 `--auto` 时有 CodeBuddy 就优先选它，没有才按原顺序
+- 不带 `--auto` 时行为不变：多个选项仍不替用户决定；已有选择仍沿用，不会被悄悄改掉
+- `agent-selection` 测试新增 1 项
+
 ## v0.7.6（2026-10-22）启动底层 agent 前清理沙箱注入的环境变量
 
 - 在 WorkBuddy 等 agent 的沙箱里被拉起时，工作台会继承沙箱注入的 `CODEBUDDY_CONFIG_DIR`、`SERVER__PORT`、`WORKBUDDY_*` 和指向本机回环的代理，再原样传给 codebuddy / claude 等 CLI，导致读不到 CLI 自己的登录状态、端口冲突、请求被转进已不存在的代理。现在检测到 `WORKBUDDY_*` 标记时清理这些变量；没有沙箱标记时（包括用户自己常驻的 Clash 等本机代理）一律不动
