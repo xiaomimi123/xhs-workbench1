@@ -13,6 +13,7 @@ import { P, SKILL_DIR, WORKSPACE } from './paths.mjs';
 import { getBridgeConfig, readJson, writeJson } from './store.mjs';
 import { mcpConfigFor, codexBrowserArgs } from './browser.mjs';
 import { readHubServers, withHubMcp, writeHubConfig } from './hub-mcp.mjs';
+import { sanitizeAgentEnv } from './agent-env.mjs';
 
 const IS_WIN = process.platform === 'win32';
 const INBOX_ONLINE_MS = 45_000;
@@ -50,11 +51,7 @@ function fill(template, vars) {
 }
 
 function childEnv() {
-  const env = { ...process.env };
-  // 从另一个 Claude Code 会话里启动时，需去掉这些变量，否则嵌套调用会被拒绝
-  delete env.CLAUDECODE;
-  delete env.CLAUDE_CODE_ENTRYPOINT;
-  return env;
+  return sanitizeAgentEnv(process.env);
 }
 
 function winQuote(arg) {
