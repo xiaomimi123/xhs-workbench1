@@ -81,6 +81,10 @@ node xhs-workbench/scripts/workbench.mjs start --open
 - 发现公司技能或知识库有错 / 过时 / 缺步骤，用 `propose_improvement` 提建议（中枢 MCP 工具，人审核后才生效）。
 - 受控任务和只读采集任务没有中枢工具，不加这段指引；没接中枢时提示词不变。
 
+### 复盘经验沉淀（v0.7.5 起）
+
+数据复盘后，agent 把有数据依据的经验结论**建议**沉淀到中枢的「复盘总结」知识库：agent 列出候选并询问 → **用户明确确认** → 调用中枢 `propose_improvement`（`kind=new_doc`，`knowledge_base=复盘总结`）→ 主管在中枢「改进建议」页审核入库。账号数据可以写进去；评论私信里其他用户的昵称 / 联系方式、登录凭证、无关隐私不放；自动任务里不提交；没有中枢工具时只存本地知识库。规则写在 `playbooks/analytics.md`，提示词指引见 `prompt.mjs`。
+
 ### 成果上报（v0.7.3 起）
 
 接入器启动工作台时设置环境变量 **`HUB_WORK_OUTBOX=<~/.hub-agent/outbox/xhs-workbench.jsonl>`**。工作台在关键产出变化时往该文件**追加一行** JSON：

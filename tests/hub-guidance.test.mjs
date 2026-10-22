@@ -23,7 +23,7 @@ test('接入中枢的普通对话任务：带中枢指引', () => {
   process.env[HUB_ENV] = file;
   try {
     const p = make(true);
-    for (const must of ['企业中枢', 'read_skill', '优先级', '不要重试', 'propose_improvement', '不要自己改']) assert.ok(p.includes(must), must);
+    for (const must of ['企业中枢', 'read_skill', '优先级', '不要重试', 'propose_improvement', '不要自己改', '复盘总结', '明确确认']) assert.ok(p.includes(must), must);
     assert.ok(p.indexOf('企业中枢') < p.indexOf('## 用户的新消息'));
   } finally { delete process.env[HUB_ENV]; }
 });
@@ -38,7 +38,7 @@ test('受控任务 / 只读采集任务（allowHub 为 false）不带；没接�
 test('指引不把提示词里的数据当指令的边界不变：指引只出现一次，且在用户消息之前', () => {
   process.env[HUB_ENV] = file;
   try { assert.equal(make(true).split('## 企业中枢').length - 1, 1); } finally { delete process.env[HUB_ENV]; }
-  assert.equal(hubGuidance().length, 5);
+  assert.equal(hubGuidance().length, 6);
 });
 
 const PLAYBOOK_SKILLS = { 'topics.md': ['xhs-topic'], 'benchmark.md': ['xhs-breakdown'], 'copywriting.md': ['xhs-writing', 'xhs-compliance'],
@@ -54,4 +54,10 @@ test('手册开头声明对应的中枢技能，README 写明分工和优先级'
   }
   const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
   for (const must of ['与中枢技能的分工', '优先级', '先停下来说明', '不要重试', 'propose_improvement']) assert.ok(readme.includes(must), must);
+});
+
+test('数据复盘手册：沉淀到「复盘总结」要先问用户确认，自动任务不提交，不放他人个人信息', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'xhs-workbench', 'playbooks');
+  const text = fs.readFileSync(path.join(root, 'analytics.md'), 'utf8');
+  for (const must of ['沉淀到公司知识库「复盘总结」', '等用户明确说要', 'propose_improvement', 'new_doc', '未经用户确认不提交', '定时 / 自动任务', '昵称、联系方式', '账号数据']) assert.ok(text.includes(must), must);
 });
