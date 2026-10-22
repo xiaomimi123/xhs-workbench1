@@ -55,3 +55,14 @@ test('damaged queue cannot prevent persistent restriction lock',async()=>{
  policy.lockBrowserAccess('damaged','restriction','损坏时也停止');
  assert.throws(()=>policy.assertBrowserAccess('damaged'),/损坏时也停止/);
 });
+
+test('锁由工作台写入时带 source 标记；外部直接写的锁，提示里说明并给出关闭浏览器控制的办法', async () => {
+  const fs = await import('node:fs'); const path = await import('node:path');
+  const {accountDir} = await server('paths.mjs');
+  const mine = policy.lockBrowserAccess('default','paused','用户暂停自动访问');
+  assert.equal(mine.source,'workbench');
+  assert.throws(()=>policy.assertBrowserAccess('default'),(e)=>/自动访问已锁定：用户暂停自动访问/.test(e.message)&&!/来源标记/.test(e.message)&&/关掉/.test(e.message));
+  fs.writeFileSync(path.join(accountDir('default'),'browser-access.json'),JSON.stringify({kind:'restriction',reason:'用户提供平台处罚截图'}));
+  assert.throws(()=>policy.assertBrowserAccess('default'),(e)=>/来源标记/.test(e.message)&&/关掉/.test(e.message));
+  fs.rmSync(path.join(accountDir('default'),'browser-access.json'),{force:true});
+});

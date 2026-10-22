@@ -10,7 +10,15 @@ export function browserAccessStatus(id){
  if(v&&['open','paused','login','restriction'].includes(v.kind)&&typeof v.reason==='string')return v;
  return {kind:'restriction',reason:'访问锁文件损坏，需人工确认修复'};
 }
-export function assertBrowserAccess(id){const s=browserAccessStatus(id);if(s.kind!=='open')throw httpError(409,`自动访问已锁定：${s.reason}`);}
+export function assertBrowserAccess(id){
+ const s=browserAccessStatus(id);
+ if(s.kind==='open')return;
+ // 没有 source 标记：旧版本写的，或某个 agent 直接改了文件（Codex 就发生过），要让用户知道并核对
+ const external=s.source!=='workbench'&&!s.manuallyResolvedAt;
+ throw httpError(409,`自动访问已锁定：${s.reason}`
+  +(external?'（这个锁没有工作台的来源标记：可能是旧版本写的，也可能是某个 agent 直接改了文件。请先核对账号是否真的被限制；确认没有，可在网页里人工解除）':'')
+  +'。只想聊天、不用浏览器的话，到「连接与设置」把浏览器控制关掉就能继续对话。');
+}
 function disarmCollection(id, reason) {
  const p=path.join(accountDir(id),'benchmarks','collection.json');const q=readJson(p,null);
  if(q?.schema===1&&Array.isArray(q.items)){q.paused=true;q.reason=reason;for(const item of q.items)if(item && typeof item==='object')item.authorized=false;writeJson(p,q);}
@@ -21,7 +29,7 @@ export function lockBrowserAccess(id,kind,reason){
  disarmCollection(id,prior.kind==='restriction'?prior.reason:String(reason));
  // Ordinary pause/login must never downgrade a platform restriction.
  if(prior.kind==='restriction')return prior;
- const next={kind,reason:String(reason).slice(0,500),updatedAt:new Date().toISOString()};writeJson(file(id),next);return next;
+ const next={kind,reason:String(reason).slice(0,500),source:'workbench',updatedAt:new Date().toISOString()};writeJson(file(id),next);return next;
 }
 export function resumeBrowserAccess(id){
  if(browserAccessStatus(id).kind==='restriction')throw httpError(409,'平台限制尚未解除，请通过独立的人工确认恢复操作处理');
