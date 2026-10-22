@@ -178,8 +178,9 @@ export function applyBrowser(adapter, engine, pkg) {
 export const CODEBUDDY_TEST_DENY = ['file_upload', 'evaluate', 'run_code_unsafe'].map((t) => `mcp__playwright__browser_${t}`);
 export const CODEBUDDY_TEST_BLOCKED_ORIGINS = ['https://creator.xiaohongshu.com'];
 export const CODEBUDDY_BASE_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
+// 只读档只禁「能改变页面状态、提交内容或绕过限制」的工具；悬停、改窗口大小、处理弹窗、模拟媒体特性只影响显示，放开（读帖子、滚动加载需要）
 export const CODEBUDDY_BROWSER_DENY = ['click', 'type', 'fill_form', 'file_upload', 'press_key', 'drag', 'drop', 'select_option',
-  'evaluate', 'run_code_unsafe', 'handle_dialog', 'hover', 'resize', 'emulate_media'].map((t) => `mcp__playwright__browser_${t}`);
+  'evaluate', 'run_code_unsafe'].map((t) => `mcp__playwright__browser_${t}`);
 
 /** Per-process Codex overrides; never modify global config or login data. */
 export function codexBrowserArgs(adapter,accountId){

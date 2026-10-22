@@ -35,6 +35,7 @@ test('只读档（默认）：浏览器写类工具全部禁用，不屏蔽任�
   for (const t of ['click', 'type', 'fill_form', 'file_upload', 'press_key', 'evaluate', 'run_code_unsafe']) {
     assert.ok(CODEBUDDY_BROWSER_DENY.includes(`mcp__playwright__browser_${t}`), t);
   }
+  for (const t of ['hover', 'resize', 'handle_dialog', 'emulate_media']) assert.ok(!CODEBUDDY_BROWSER_DENY.includes(`mcp__playwright__browser_${t}`), `${t} 只影响显示，不该禁`);
   assert.ok(multi(a.args, '--allowedTools').includes('mcp__playwright'));
   assert.ok(a.args.includes('{mcpConfig}'));
   assert.equal(a.blockedOrigins, undefined);
@@ -74,4 +75,12 @@ test('mcpConfigFor：blockedOrigins 写成分号分隔的 --blocked-origins；�
   assert.ok(!plain.includes('--blocked-origins'));
   const blocked = cfg({ headless: false, blockedOrigins: ['https://creator.xiaohongshu.com', 'https://example.org'] });
   assert.equal(blocked[blocked.indexOf('--blocked-origins') + 1], 'https://creator.xiaohongshu.com;https://example.org');
+});
+
+test('切换 agent 时 applyBrowser 可把 Playwright 浏览器控制套到新适配器（server 切换逻辑用它）', () => {
+  const cb = applyBrowser(base, 'playwright', PKG);
+  assert.equal(cb.browserMode, 'readonly');
+  const again = applyBrowser({ ...cb, browserMode: 'test' }, 'playwright', PKG);
+  assert.equal(again.browserMode, 'test');
+  assert.deepEqual(again.blockedOrigins, CODEBUDDY_TEST_BLOCKED_ORIGINS);
 });

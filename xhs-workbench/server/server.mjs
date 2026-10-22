@@ -29,7 +29,7 @@ import { ADAPTERS, findAdapter, findDesktopAgent, detectDesktopAgents } from './
 import { buildPrompt } from './prompt.mjs';
 import * as content from './content.mjs';
 import * as ops from './automation.mjs';
-import { browserStatus, detectRealBrowser } from './browser.mjs';
+import { browserStatus, detectRealBrowser, applyBrowser } from './browser.mjs';
 import { BrowserWorker } from './browser-worker.mjs';
 import { browserRuntimeStatus } from './browser-runtime.mjs';
 import { canonicalProfileUrl } from './browser-read.mjs';
@@ -735,7 +735,18 @@ async function handleApi(req, res, url) {
       if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请稍后切换连接');
       await bridge.closeBrowsers();
       delete prev.hostAgent;
-      store.saveBridgeConfig({ ...prev, mode: 'cli', adapter, browser: 'none', testedAt: new Date().toISOString() });
+      // 切换 agent 不能悄悄关掉浏览器控制：之前开着 Playwright，新 agent 也支持的话就沿用（权限档按新 agent 的默认）
+      let next = adapter, browser = 'none', kept = false;
+      if (prev.browser === 'playwright' && prev.adapter?.playwrightMcp && ['codebuddy', 'codex'].includes(adapter.id)) {
+        try {
+          next = applyBrowser(adapter, 'playwright', prev.adapter.playwrightMcp);
+          next.headless = prev.adapter.headless; next.browserChannel = prev.adapter.browserChannel;
+          if (adapter.id === 'codebuddy' && prev.adapter.id === 'codebuddy') { next = applyBrowser({ ...next, browserMode: prev.adapter.browserMode }, 'playwright', prev.adapter.playwrightMcp); next.headless = prev.adapter.headless; next.browserChannel = prev.adapter.browserChannel; }
+          browser = 'playwright'; kept = true;
+        } catch { next = adapter; }
+      }
+      store.saveBridgeConfig({ ...prev, mode: 'cli', adapter: next, browser, testedAt: new Date().toISOString() });
+      if (!kept && prev.browser && prev.browser !== 'none') result.notice = '浏览器控制没有沿用到新的 agent，已关闭；需要的话到「连接与设置」重新开启。';
       broadcast({ type: 'bridge.changed' });
       return sendJson(res, 200, result);
     }
