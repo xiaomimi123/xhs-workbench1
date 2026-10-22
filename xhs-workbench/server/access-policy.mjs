@@ -1,9 +1,27 @@
 // Persistent account-wide circuit breaker. Never touches cookies or browser profiles.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {accountDir} from './paths.mjs';
 import {readJson,writeJson,httpError} from './store.mjs';
-function file(id){if(!/^[\w-]+$/.test(id||''))throw httpError(400,'账号 id 不合法');return path.join(accountDir(id),'browser-access.json');}
+// 锁放在哪：企业中枢接入器启动时传入 HUB_APP_STATE_DIR（在应用根目录之外，被允许读写数据目录的 agent 碰不到——Codex 曾直接改过数据目录里的锁）；
+// agent 直接运行命令时没有这个变量，按默认位置找同一处。单独使用（没接中枢）或测试时仍放在账号数据目录里
+export function stateRoot(env = process.env, home = os.homedir(), exists = fs.existsSync) {
+  if (env.HUB_APP_STATE_DIR) return env.HUB_APP_STATE_DIR;
+  if (env.XHS_WORKSPACE) return '';
+  const d = path.join(env.HUB_AGENT_HOME || path.join(home, '.hub-agent'), 'state', 'xhs-workbench');
+  return exists(d) ? d : '';
+}
+function file(id){
+ if(!/^[\w-]+$/.test(id||''))throw httpError(400,'账号 id 不合法');
+ const legacy=path.join(accountDir(id),'browser-access.json'), root=stateRoot();
+ if(!root)return legacy;
+ const p=path.join(root,'accounts',id,'browser-access.json');
+ if(!fs.existsSync(p)&&fs.existsSync(legacy)){ // 第一次换位置：原样搬过去（包括限制状态），旧文件改名，避免有人以为改它还有用
+  try{fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(legacy,p);fs.renameSync(legacy,legacy+'.migrated');}catch{}
+ }
+ return p;
+}
 export function browserAccessStatus(id){
  const p=file(id),v=readJson(p,null);
  if(!fs.existsSync(p))return {kind:'open',reason:''};

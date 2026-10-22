@@ -108,6 +108,19 @@ node xhs-workbench/scripts/workbench.mjs start --open
 
 工作台：每次使用时重读；仅当 `capabilities.browser.ready === false` 时拒绝浏览器专用任务（409，写明缺什么与第一条处理方法）；无变量 / 文件不存在 / 不合法时不拦。文件不含任何密钥。
 
+### 应用根目录与应用健康（v0.8.0 起）
+
+中枢接入器（0.5.0 起）把运行环境、应用包、应用数据、健康日志都放在员工电脑的 `~/HubApps` 下，启动工作台时多传四个环境变量：
+
+| 变量 | 工作台怎么用 |
+|---|---|
+| `HUB_APP_DATA_DIR` | 数据目录（`~/HubApps/data/xhs-workbench`）。`XHS_WORKSPACE` 优先；已有 `~/XHS-Workbench` 时继续用它，不搬数据 |
+| `HUB_APP_STATE_DIR` | 访问锁的位置（`~/.hub-agent/state/xhs-workbench`，在应用根目录之外，agent 碰不到）。第一次原样搬旧锁，旧文件改名 `.migrated` |
+| `HUB_HEALTH_OUTBOX` | 任务失败、连接测试结果写到这里（一行一条 JSON），接入器转发到中枢「应用健康」 |
+| `HUB_DEVICE_ID` | 本机设备号，事件和接入器的归到同一台设备 |
+
+agent 直接运行 `workbench.mjs` 命令时没有这些变量：数据目录按 `~/HubApps/data/xhs-workbench` 是否存在找到，锁按 `~/.hub-agent/state/xhs-workbench` 是否存在找到，和工作台服务用的是同一处。
+
 ## 5. 已验证与未验证
 
 **已验证（Windows）**

@@ -27,6 +27,7 @@ import * as store from './store.mjs';
 import { Bridge, detectAdapters, pingAdapter } from './bridge.mjs';
 import { ADAPTERS, findAdapter, findDesktopAgent, detectDesktopAgents } from './adapters.mjs';
 import { buildPrompt } from './prompt.mjs';
+import { reportHealth } from './health-outbox.mjs';
 import * as content from './content.mjs';
 import * as ops from './automation.mjs';
 import { browserStatus, detectRealBrowser, applyBrowser } from './browser.mjs';
@@ -415,6 +416,8 @@ bridge.on('done', ({ taskId, text, agentSessionId }) => {
 });
 
 bridge.on('error', ({ taskId, message }) => {
+  // 应用健康：任务失败回传企业中枢（用户取消、切换连接这类不是故障的不记）
+  if (!/^(已取消|连接模式已变更)/.test(message || '')) reportHealth({ stage: 'task', ok: false, message, agent: bridge.config()?.adapter?.name || bridge.config()?.hostAgent?.name || '' });
   engageWorkflow.finish(taskId, message);
   analyticsWorkflow.finish(taskId, message);
   topicWorkflow.finish(taskId, message);
@@ -709,6 +712,7 @@ async function handleApi(req, res, url) {
       if (!cfg) throw store.httpError(409, '尚未配置连接');
       if (cfg.mode === 'inbox') return sendJson(res, 200, { ok: bridge.status().inboxOnline, mode: 'inbox' });
       const result = await pingAdapter(cfg.adapter);
+      reportHealth({ stage: 'doctor', ok: result.ok, message: result.error || '', agent: cfg.adapter?.name });
       if (result.ok) store.saveBridgeConfig({ ...cfg, testedAt: new Date().toISOString() });
       broadcast({ type: 'bridge.changed' });
       return sendJson(res, 200, { ...result, mode: 'cli' });
@@ -731,6 +735,7 @@ async function handleApi(req, res, url) {
       if (!base || !found) throw store.httpError(400, '本机未检测到该 agent');
       const adapter = { ...base, command: found.command };
       const result = await pingAdapter(adapter);
+      reportHealth({ stage: 'doctor', ok: result.ok, message: result.error || '', agent: adapter.name });
       if (!result.ok) return sendJson(res, 200, result);
       if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请稍后切换连接');
       await bridge.closeBrowsers();
