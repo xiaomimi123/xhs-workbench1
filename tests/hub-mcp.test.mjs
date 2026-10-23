@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { useTempWorkspace, server } from './helpers.mjs';
+import { useTempWorkspace, server, SKILL } from './helpers.mjs';
 
 useTempWorkspace();
 const { readHubServers, mergeHubServers, withHubMcp, writeHubConfig, sanitizeServer } = await server('hub-mcp.mjs');
@@ -143,4 +143,26 @@ test('runCli 端到端：中枢服务文件存在时，普通任务的 agent 命
   } finally {
     for (const [k, v] of [['HUB_MCP_SERVERS_FILE', prevEnv.f], ['FAKE_AGENT_AUDIT_DIR', prevEnv.a], ['FAKE_AGENT_MODE', prevEnv.m]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   }
+});
+
+test('withHubMcp：CodeBuddy 的放行名单是多值参数，中枢工具每个单独一项插在名单末尾；不重复；重建名单后再补回', () => {
+  const cb = ['-p', '--allowedTools', 'Read', 'Glob', 'mcp__browser', '--mcp-config', '/wb.json', '--disallowedTools', 'mcp__browser__cua_click'];
+  const a = withHubMcp(cb, { adapterId: 'codebuddy', useHub: true, servers, hubFile: '/h/hub.json' });
+  assert.deepEqual(a, ['-p', '--allowedTools', 'Read', 'Glob', 'mcp__browser', 'mcp__enterprise-hub', '--mcp-config', '/wb.json', '--disallowedTools', 'mcp__browser__cua_click']);
+  assert.deepEqual(withHubMcp(a, { adapterId: 'codebuddy', useHub: true, servers, hubFile: '/h/hub.json' }), a);  // 幂等
+  // 没开浏览器（没有 --mcp-config）：加上中枢的配置文件
+  const plain = withHubMcp(['-p', '--allowedTools', 'Read'], { adapterId: 'codebuddy', useHub: true, servers, hubFile: '/h/hub.json' });
+  assert.deepEqual(plain, ['-p', '--allowedTools', 'Read', 'mcp__enterprise-hub', '--mcp-config', '/h/hub.json']);
+  assert.deepEqual(withHubMcp(['-p'], { adapterId: 'codebuddy', useHub: true, servers, hubFile: 'h' }).slice(-2), ['--allowedTools', 'mcp__enterprise-hub']);
+});
+
+test('子进程不弹黑窗口：调用 agent 命令行和探测命令时都隐藏窗口', async () => {
+  const fs = await import('node:fs'); const path = await import('node:path');
+  const src = (f) => fs.readFileSync(path.join(SKILL, 'server', f), 'utf8');
+  const bridge = src('bridge.mjs');
+  const run = bridge.slice(bridge.indexOf('export function runCli'), bridge.indexOf('let text = \'\';'));
+  assert.match(run, /windowsHide: true/);
+  assert.match(bridge, /spawnSync\('where', \[bin\], \{ encoding: 'utf8', windowsHide: true \}\)/);
+  assert.match(src('binaries.mjs'), /run\('where', \[name\], \{ encoding: 'utf8', windowsHide: true \}\)/);
+  for (const f of ['video-references.mjs', 'video-workflow.mjs']) assert.match(src(f), /windowsHide:true/);
 });

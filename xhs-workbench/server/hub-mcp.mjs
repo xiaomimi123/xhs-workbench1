@@ -81,11 +81,21 @@ export function mergeHubServers(want, env = process.env) {
  */
 export function withHubMcp(args, { adapterId, useHub, servers, hubFile }) {
   const names = Object.keys(servers || {});
-  if (!useHub || adapterId !== 'claude-code' || !names.length || args.includes('--strict-mcp-config')) return args;
+  if (!useHub || !['claude-code', 'codebuddy'].includes(adapterId) || !names.length || args.includes('--strict-mcp-config')) return args;
   const next = [...args];
   if (!next.includes('--mcp-config')) next.push('--mcp-config', hubFile);
   const tools = names.map((n) => `mcp__${n}`);
   const i = next.indexOf('--allowedTools');
+  if (adapterId === 'codebuddy') {
+    // CodeBuddy 的 --allowedTools 是多值参数（每个工具单独一项，逗号拼成一项不生效）；-p 非交互模式下白名单外的工具直接被拒，
+    // 中枢的知识库、技能、出图出视频工具不在白名单里就一个都用不了（员工电脑上踩过）
+    if (i < 0) return [...next, '--allowedTools', ...tools];
+    let j = i + 1;
+    while (j < next.length && !String(next[j]).startsWith('-')) j++;
+    const have = next.slice(i + 1, j);
+    next.splice(j, 0, ...tools.filter((t) => !have.includes(t)));
+    return next;
+  }
   if (i >= 0) {
     const have = String(next[i + 1] || '').split(',').filter(Boolean);
     next[i + 1] = [...have, ...tools.filter((t) => !have.includes(t))].join(',');

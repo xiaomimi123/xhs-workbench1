@@ -31,7 +31,7 @@ const EXTRA_BIN_DIRS = [
 
 export function which(bin) {
   const res = IS_WIN
-    ? spawnSync('where', [bin], { encoding: 'utf8' })
+    ? spawnSync('where', [bin], { encoding: 'utf8', windowsHide: true })
     : spawnSync('sh', ['-c', `command -v ${bin}`], { encoding: 'utf8' });
   const found = res.status === 0 && res.stdout.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
   if (found) return found;
@@ -81,6 +81,8 @@ export function runCli(adapter, prompt, opts = {}) {
     shell: useShell,
     detached: !IS_WIN, // 独立进程组，取消时能连同子进程一起结束
     stdio: ['pipe', 'pipe', 'pipe'],
+    // 工作台服务本身没有控制台（detached 启动），子进程不隐藏的话 Windows 每次都会新开一个黑窗口，看起来一直在闪（员工电脑上踩过）
+    windowsHide: true,
   });
 
   let text = '';

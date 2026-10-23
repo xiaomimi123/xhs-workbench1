@@ -6,7 +6,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {accRoot} from './content.mjs';
 import {readJson,writeJson,httpError} from './store.mjs';
-const exec=promisify(execFile);
+const execAsync=promisify(execFile);const exec=(file,args,opts={})=>execAsync(file,args,{windowsHide:true,...opts}); // 不弹黑窗口
 export const MAX_SOURCE_BYTES=60_000_000;
 export const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const bin=name=>findBinary(name)||name;

@@ -142,7 +142,7 @@ function openBrowser(url) {
         ? // explorer 直接打开 URL：不经过 shell，URL 里的 & 不会被截断，也没有 shell:true 传参的安全告警（DEP0190）
           ['explorer.exe', [url]]
         : ['xdg-open', [url]];
-  spawn(bin, args, { detached: true, stdio: 'ignore' }).unref();
+  spawn(bin, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
 }
 
 function storeWorkerSetting(enabled) {
@@ -391,7 +391,7 @@ const commands = {
     const plan = [];
     let pkg = null;
     if (engine === 'playwright') {
-      const v = spawnSync('npm', ['view', '@playwright/mcp', 'version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+      const v = spawnSync('npm', ['view', '@playwright/mcp', 'version'], { encoding: 'utf8', shell: process.platform === 'win32', windowsHide: true });
       const version = v.status === 0 ? v.stdout.trim() : '';
       if (!/^\d+\.\d+\.\d+/.test(version)) fail('无法查询 @playwright/mcp 版本，请确认已安装 Node.js 并能访问 npm');
       pkg = `@playwright/mcp@${version}`;

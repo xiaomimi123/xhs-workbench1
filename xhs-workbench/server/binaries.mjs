@@ -28,7 +28,7 @@ export function commonBinDirs({ platform = process.platform, env = process.env, 
 export function findBinary(name, opts = {}) {
   const { platform = process.platform, exists = fs.existsSync, run = spawnSync } = opts;
   const exts = platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
-  const res = platform === 'win32' ? run('where', [name], { encoding: 'utf8' }) : run('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' });
+  const res = platform === 'win32' ? run('where', [name], { encoding: 'utf8', windowsHide: true }) : run('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' });
   const onPath = res && res.status === 0 && String(res.stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean);
   if (onPath) return onPath;
   for (const dir of commonBinDirs(opts)) {
