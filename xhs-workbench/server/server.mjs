@@ -1015,7 +1015,7 @@ async function handleContentApi(route, q, req) {
       return livePhotoWorkflow.start(acc,await body());
     case 'POST /api/live/confirm':
       return livePhotoWorkflow.confirm(acc,await body());
-    case 'GET /api/videos/service': return videoService.settings();
+    case 'GET /api/videos/service': return {...videoService.settings(),hubAvailable:videoWorkflow.hub.available()};
     case 'PUT /api/videos/service': return videoService.save(await body());
     case 'POST /api/videos/service/test': return await videoService.test();
     case 'GET /api/videos/reference-videos': return {items:videoWorkflow.videoReferences.list(acc)};

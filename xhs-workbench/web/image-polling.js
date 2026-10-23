@@ -22,7 +22,7 @@ export function startImagePolling({ root = null, formatElapsed = null, current, 
     let failed = false;
     let pending = [];
     try {
-      pending = jobs().filter((j) => j.provider === 'apimart' && ACTIVE.includes(j.status) && age(j) < GIVE_UP_AFTER);
+      pending = jobs().filter((j) => (j.provider === 'apimart' || j.provider === 'hub') && ACTIVE.includes(j.status) && age(j) < GIVE_UP_AFTER);
       if (pending.length && !paused()) {
         for (const j of pending) {
           if (stopped || !current()) break;

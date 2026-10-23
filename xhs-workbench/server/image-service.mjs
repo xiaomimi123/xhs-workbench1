@@ -3,17 +3,20 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {WORKSPACE} from './paths.mjs';
 import {httpError} from './store.mjs';
+import {hubGen} from './hub-gen.mjs';
 const BASE='https://api.apimart.ai';
 const DEFAULTS={defaultProvider:'current-agent',baseUrl:BASE,model:'gpt-image-2',size:'16:9',resolution:'2k'};
 const SIZES=['1:1','16:9','9:16','4:3','3:4','3:2','2:3','5:4','4:5','2:1','1:2','3:1','1:3','21:9','9:21'];
 export function validateImageOptions(input){
- if(!['current-agent','apimart'].includes(input.defaultProvider)||!['gpt-image-2','gpt-image-2-ext'].includes(input.model)||!SIZES.includes(input.size)||!['1k','2k','4k'].includes(input.resolution))throw httpError(400,'生图服务、模型、比例或清晰度无效');
+ if(!['hub','current-agent','apimart'].includes(input.defaultProvider)||!['gpt-image-2','gpt-image-2-ext'].includes(input.model)||!SIZES.includes(input.size)||!['1k','2k','4k'].includes(input.resolution))throw httpError(400,'生图服务、模型、比例或清晰度无效');
  return input;
 }
 export class ImageService {
- constructor({file=path.join(WORKSPACE,'.secrets','image-service.json'),fetchImpl=globalThis.fetch}={}){this.file=file;this.fetch=fetchImpl;}
- read(){try{return {...DEFAULTS,...JSON.parse(fs.readFileSync(this.file,'utf8')),baseUrl:BASE};}catch(e){if(e.code!=='ENOENT')throw httpError(500,'无法读取本机生图设置');return {...DEFAULTS};}}
- settings(){const {apiKey,...s}=this.read();return {...s,hasKey:!!apiKey,keyMasked:apiKey?'••••••••':''};}
+ // 从中枢打开（接上了中枢）时默认走公司中枢配置的出图通道；员工自己选过的服务以保存的为准
+ constructor({file=path.join(WORKSPACE,'.secrets','image-service.json'),fetchImpl=globalThis.fetch,hubAvailable=()=>hubGen.available()}={}){this.file=file;this.fetch=fetchImpl;this.hubAvailable=hubAvailable;}
+ defaults(){return {...DEFAULTS,defaultProvider:this.hubAvailable()?'hub':DEFAULTS.defaultProvider};}
+ read(){try{return {...this.defaults(),...JSON.parse(fs.readFileSync(this.file,'utf8')),baseUrl:BASE};}catch(e){if(e.code!=='ENOENT')throw httpError(500,'无法读取本机生图设置');return this.defaults();}}
+ settings(){const {apiKey,...s}=this.read();return {...s,hasKey:!!apiKey,keyMasked:apiKey?'••••••••':'',hubAvailable:this.hubAvailable()};}
  save(input={}){
  const s=this.read();for(const k of ['defaultProvider','model','size','resolution'])if(input[k]!==undefined)s[k]=input[k];validateImageOptions(s);
  if(input.apiKey!==undefined&&(typeof input.apiKey!=='string'||input.apiKey.length>4096||/[\r\n]/.test(input.apiKey)))throw httpError(400,'API Key格式无效');

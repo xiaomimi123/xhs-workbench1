@@ -123,6 +123,15 @@ node xhs-workbench/scripts/workbench.mjs start --open
 
 agent 直接运行 `workbench.mjs` 命令时没有这些变量：数据目录按 `~/HubApps/data/xhs-workbench` 是否存在找到，锁按 `~/.hub-agent/state/xhs-workbench` 是否存在找到，和工作台服务用的是同一处。
 
+### 出图出视频走中枢（v0.8.7 起）
+
+工作台网页里的生图（图片创作、自由海报）和视频创作可以选「公司中枢」：走中枢的 HTTP 接口 `/api/v1/images`、`/api/v1/videos`、`/api/v1/videos/from-image`、`/api/v1/tasks/{id}`（`server/hub-gen.mjs`），用的是中枢「模型」页配置的通道，权限、GPU 额度、审计按员工岗位包，员工电脑上不存密钥。
+
+- 身份：从 `HUB_MCP_SERVERS_FILE` 里找到接入器（`uv run …/hub_agent.py`），运行 `hub_agent.py token`（接入器 0.5.6 起）拿 `{hub, access_token, expires_at}`；快过期先续期，401 时换一次令牌重试。
+- 下载：只接受这个中枢的 `/api/files/` 签名链接；图片加 `fmt=png` 让中枢转成 PNG（中枢 0.8.7 对应版本起支持），再走工作台原有的 PNG 校验入库。
+- 限制：出图不支持参考图；视频只支持文生视频和首帧生视频，其余模式走视频网关。
+- 接上中枢时默认用「公司中枢」；员工在设置里保存过的选择优先。APIMart 和视频网关保留，作为备选。
+
 ## 5. 已验证与未验证
 
 **已验证（Windows）**
@@ -140,4 +149,4 @@ agent 直接运行 `workbench.mjs` 命令时没有这些变量：数据目录按
 
 1. ~~`skills/运营部/xhs-*` 目前是通用占位内容~~（已完成：七个运营技能已改写成业务标准并发布，与本包的操作手册叠加使用，见上面「与中枢技能的分工」）。
 2. 知识库 `vault/历史爆款笔记`、`品牌调性与人设` 与工作台自己的知识库（`~/XHS-Workbench/knowledge`）目前是两套；先分别使用，需要打通时再定同步方向。
-3. 工作台自己的生图 / 视频密钥（APIMart、视频网关）可以逐步改成走中枢的 `generate_image` / `generate_video`，这样额度和审计都在中枢。这一步需要在工作台里新增“中枢通道”，目前还没做。
+3. ~~工作台自己的生图 / 视频密钥改成走中枢~~（v0.8.7 已加「公司中枢」通道，见上面「出图出视频走中枢」；参考图出图、参考主体 / 复刻视频还要中枢先支持）。
