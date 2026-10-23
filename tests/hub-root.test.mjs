@@ -68,3 +68,25 @@ test('应用健康：写到接入器指定的文件，去隐私、归类、10 �
   assert.equal(health.classify('Authentication required. Please run /login'), 'CLI_NOT_LOGGED_IN');
   assert.equal(health.classify('奇怪'), 'UNKNOWN');
 });
+
+test('不是由中枢接入器启动时（agent 直接跑技能包副本），自动接上本机接入器的配置', async () => {
+  const { applyHubDefaults } = await server('hub-env.mjs');
+  const home = '/h', agent = path.join(home, '.hub-agent');
+  const has = (...ps) => (p) => ps.includes(p);
+  const files = has(path.join(agent, 'credentials.json'), path.join(agent, 'hub-mcp.json'));
+  const env = {};
+  assert.equal(applyHubDefaults(env, home, files, () => 'dev123\n'), true);
+  assert.equal(env.HUB_MCP_SERVERS_FILE, path.join(agent, 'hub-mcp.json'));
+  assert.equal(env.HUB_WORK_OUTBOX, path.join(agent, 'outbox', 'xhs-workbench.jsonl'));
+  assert.equal(env.HUB_HEALTH_OUTBOX, path.join(home, 'HubApps', 'logs', 'health-xhs-workbench.jsonl'));
+  assert.equal(env.HUB_APP_STATE_DIR, path.join(agent, 'state', 'xhs-workbench'));
+  assert.equal(env.HUB_DEVICE_ID, 'dev123');
+  assert.equal(env.HUB_SELF_STARTED, '1');
+  assert.equal(env.HUB_CAPABILITIES_FILE, undefined);  // 文件不存在就不设
+  // 已由接入器启动、没有接入器、测试 / 自定义数据目录：都不动
+  const launched = { HUB_MCP_SERVERS_FILE: '/x' };
+  assert.equal(applyHubDefaults(launched, home, files), false);
+  assert.deepEqual(launched, { HUB_MCP_SERVERS_FILE: '/x' });
+  assert.equal(applyHubDefaults({}, home, has()), false);
+  assert.equal(applyHubDefaults({ XHS_WORKSPACE: '/w' }, home, files), false);
+});

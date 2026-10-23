@@ -22,6 +22,15 @@ test('在 WorkBuddy 沙箱里启动时，去掉沙箱的配置目录、端口和
   assert.equal(env.SERVER__PORT, undefined);
 });
 
+test('在 WorkBuddy 沙箱里启动时，沙箱注入的整套 CODEBUDDY_* 全部去掉（SERVICE_PROXY_URL 会导致子进程端口冲突）', () => {
+  const env = sanitizeAgentEnv({ PATH: 'x', WORKBUDDY_X: '1', CODEBUDDY_SERVICE_PROXY_URL: 'http://127.0.0.1:38126/internal/hooks/services/invoke',
+    CODEBUDDY_SESSION_ID: 's', codebuddy_lower: 'y', CODEBUDDYISH: 'keep?' });
+  assert.deepEqual(Object.keys(env).filter((k) => /^codebuddy_/i.test(k)), []);
+  assert.equal(env.PATH, 'x');
+  // 不在沙箱里时一个都不动
+  assert.equal(sanitizeAgentEnv({ CODEBUDDY_SERVICE_PROXY_URL: 'u' }).CODEBUDDY_SERVICE_PROXY_URL, 'u');
+});
+
 test('沙箱里指向本机回环的代理会被去掉，真实代理保留', () => {
   const env = sanitizeAgentEnv({ WORKBUDDY_X: '1', http_proxy: 'http://127.0.0.1:7890', HTTPS_PROXY: 'http://localhost:7890', all_proxy: 'http://proxy.corp:8080' });
   assert.equal(env.http_proxy, undefined);

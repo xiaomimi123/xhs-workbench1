@@ -1,5 +1,12 @@
 # 更新日志
 
+## v0.8.1（2026-10-23）员工电脑排查出的三个问题
+
+- **CodeBuddy 一启动就崩（网页显示「回复为空」）**：0.7.6 在 WorkBuddy 沙箱里只清了 `CODEBUDDY_CONFIG_DIR`，WorkBuddy 给自己会话注入的另外 60 个 `CODEBUDDY_*` 还在，其中 `CODEBUDDY_SERVICE_PROXY_URL` 让子进程 codebuddy 去监听 WorkBuddy 正在用的端口，启动即 `EADDRINUSE` 退出。现在检测到沙箱时把 `CODEBUDDY_*` 全部清掉（不在沙箱里时一个都不动）
+- **连接测试把真实原因藏起来了**：Windows 上经 `.cmd` 垫片启动时退出码可能被吞成 0，回复为空时只显示「实际回复：空」。现在回复为空时附上错误输出的最后几行（比如 `EADDRINUSE`、`Authentication required`），应用健康也能据此归类
+- **不是从中枢打开时也接上中枢**：agent 直接运行技能包副本、开机自启或自己运行 `start` 时，没有接入器传的环境变量，中枢 MCP、成果上报、应用健康全断，中枢也看不到任何报错。现在发现本机装了中枢接入器（`~/.hub-agent/credentials.json`）时自动用它留下的配置（中枢 MCP 配置、成果和健康上报文件、访问锁位置、设备号），「连接与设置」里提示建议以后从中枢打开；已由接入器启动、没装接入器、或指定了 `XHS_WORKSPACE` 时不动
+- 新增 `server/hub-env.mjs`；测试新增 3 项（agent-env、bridge、hub-root）
+
 ## v0.8.0（2026-10-22）企业中枢应用根目录：数据目录、访问锁位置、运行错误回传「应用健康」
 
 - **数据目录**：仍是 `XHS_WORKSPACE` 优先；已有 `~/XHS-Workbench` 的电脑继续用它（不搬用户数据）；新电脑由中枢接入器启动时用应用根目录的 `~/HubApps/data/xhs-workbench`（`HUB_APP_DATA_DIR`）。agent 直接运行 `workbench.mjs` 命令时没有这个变量，按目录是否存在找到同一处，不会一边一个

@@ -1,3 +1,4 @@
+import { applyHubDefaults } from './hub-env.mjs';
 import { decodeText } from './inbox-files.mjs';
 import { readHubServers } from './hub-mcp.mjs';
 import { readHubCapabilities, assertBrowserCapability } from './hub-capabilities.mjs';
@@ -41,6 +42,9 @@ import * as materials from './materials.mjs';
 
 import { VERSION } from './version.mjs';
 import { runStartupUpgrade, upgradeSummary } from './upgrade.mjs';
+
+// 不是由中枢接入器启动时（agent 直接跑技能包副本、开机自启），自动接上本机接入器的配置；所有用到这些变量的地方都是用时才读
+applyHubDefaults();
 export { VERSION };
 const PORT_RANGE = [17890, 17910];
 
@@ -694,7 +698,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, {
         version: VERSION,
         upgrade: upgradeSummary(VERSION, startupUpgrade),
-        hub: (() => { const h = readHubServers(); return { connected: Object.keys(h.servers).length > 0, servers: Object.keys(h.servers), problem: h.problem, capabilities: readHubCapabilities() }; })(),
+        hub: (() => { const h = readHubServers(); return { connected: Object.keys(h.servers).length > 0, servers: Object.keys(h.servers), problem: h.problem, capabilities: readHubCapabilities(), selfStarted: process.env.HUB_SELF_STARTED === '1' }; })(),
         workspace: WORKSPACE,
         skillDir: SKILL_DIR,
         bridge: { ...bridge.status(), browserWorker: workerInfo() },

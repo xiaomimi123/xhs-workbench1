@@ -41,6 +41,9 @@ import { readVersionRecord, installPackage, ensureWorkspaceStamped, DATA_VERSION
 import { createBackup } from '../server/backup.mjs';
 import { decodeText, writeTaskFile } from '../server/inbox-files.mjs';
 import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
+import { applyHubDefaults } from '../server/hub-env.mjs';
+
+applyHubDefaults();  // 由 agent 直接运行命令时也接上本机中枢接入器（start 启动的服务会继承这些变量）
 
 const [cmd, ...rest] = process.argv.slice(2);
 const flags = parseFlags(rest);

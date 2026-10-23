@@ -119,6 +119,8 @@ node xhs-workbench/scripts/workbench.mjs start --open
 | `HUB_HEALTH_OUTBOX` | 任务失败、连接测试结果写到这里（一行一条 JSON），接入器转发到中枢「应用健康」 |
 | `HUB_DEVICE_ID` | 本机设备号，事件和接入器的归到同一台设备 |
 
+**不是由接入器启动时（v0.8.1 起）**：本机装了中枢接入器（有 `~/.hub-agent/credentials.json`）就自动补上这些变量（`server/hub-env.mjs`）：`HUB_MCP_SERVERS_FILE` 用 `~/.hub-agent/hub-mcp.json`（接入器 0.5.1 起在接入时就写好），成果上报、健康上报、访问锁、设备号用接入器的默认位置。
+
 agent 直接运行 `workbench.mjs` 命令时没有这些变量：数据目录按 `~/HubApps/data/xhs-workbench` 是否存在找到，锁按 `~/.hub-agent/state/xhs-workbench` 是否存在找到，和工作台服务用的是同一处。
 
 ## 5. 已验证与未验证

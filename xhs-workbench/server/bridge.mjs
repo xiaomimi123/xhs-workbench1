@@ -173,7 +173,8 @@ export function runCli(adapter, prompt, opts = {}) {
       if (code !== 0 && !text.trim()) {
         return reject(new Error(`agent 退出码 ${code}${stderr ? `：${stderr.trim().slice(-800)}` : ''}`));
       }
-      resolve({ text: text.trim(), agentSessionId: sessionId });
+      // 错误输出也带回去：Windows 上经 .cmd 垫片启动时退出码可能被吞成 0，回复为空时只有它能说明真正的原因
+      resolve({ text: text.trim(), agentSessionId: sessionId, stderr: stderr.trim().slice(-800) });
     });
   });
 
@@ -602,9 +603,10 @@ export async function pingAdapter(adapter, timeoutMs = 180_000, attempts = 2) {
   let last = null;
   for (let i = 0; i < attempts; i++) {
     try {
-      const { text } = await runCli(adapter, PING_PROMPT, { timeoutMs }).promise;
+      const { text, stderr } = await runCli(adapter, PING_PROMPT, { timeoutMs }).promise;
       const ok = /PONG/i.test(text);
-      last = { ok, ms: Date.now() - started, output: text.slice(0, 300), error: ok ? null : `回复中没有 PONG（实际回复：${text.slice(0, 120) || '空'}）` };
+      const why = !text && stderr ? `；错误输出：${stderr.slice(-400)}` : '';
+      last = { ok, ms: Date.now() - started, output: text.slice(0, 300), error: ok ? null : `回复中没有 PONG（实际回复：${text.slice(0, 120) || '空'}）${why}` };
     } catch (err) {
       last = { ok: false, ms: Date.now() - started, output: '', error: err.message };
     }

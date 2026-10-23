@@ -112,3 +112,12 @@ test('local description runs under account restriction without closing browser o
  b.submitLocalDescription({id:'vdesc_locktest',accountId:'default',prompt:'local only'});await done;
  assert.equal(closes,0);assert.equal(browserAccessStatus('default').kind,'restriction');assert.throws(()=>b.submit({id:'normal',accountId:'default',prompt:'browser'}),/锁定/);
 }));
+
+test('连接测试：回复为空、退出码为 0 时也把错误输出带出来（Windows 上 .cmd 垫片会吞掉退出码）', async () => {
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const script = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-ping-')), 'quiet.mjs');
+  fs.writeFileSync(script, "process.stdin.resume(); process.stdin.on('end', () => { process.stderr.write('Error: listen EADDRINUSE: address already in use 127.0.0.1:38126'); process.exit(0); });");
+  const r = await pingAdapter({ id: 'fake', name: 'Fake', bins: ['node'], command: process.execPath, args: [script], promptVia: 'stdin', parser: 'text' }, 10_000, 1);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /实际回复：空）；错误输出：.*EADDRINUSE/);
+});

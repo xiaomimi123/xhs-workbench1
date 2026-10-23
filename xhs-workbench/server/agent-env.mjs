@@ -14,9 +14,12 @@ export function sanitizeAgentEnv(src = process.env) {
     // 只在确认是沙箱拉起时才清理：用户自己常驻的本机代理（Clash 等也是 127.0.0.1）不能误删
     for (const k of Object.keys(env)) {
       if (/^WORKBUDDY_/i.test(k)) delete env[k];
+      // WorkBuddy 内置的就是 CodeBuddy，它给自己的会话注入了一整套 CODEBUDDY_*（实测 60 个），必须全清，不能只清 CONFIG_DIR：
+      // 其中 CODEBUDDY_SERVICE_PROXY_URL 指向 WorkBuddy 自己的本机端口，子进程 codebuddy 会去监听同一个端口，
+      // 启动即 EADDRINUSE 退出，网页上看到的就是「回复为空」（员工电脑上踩过）
+      else if (/^CODEBUDDY_/i.test(k)) delete env[k];
       else if (PROXY_KEYS.includes(k.toLowerCase()) && LOOPBACK.test(String(env[k] || '').trim())) delete env[k];
     }
-    delete env.CODEBUDDY_CONFIG_DIR;
     delete env.SERVER__PORT;
   }
   return env;
