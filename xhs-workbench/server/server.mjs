@@ -29,6 +29,7 @@ import { Bridge, detectAdapters, pingAdapter } from './bridge.mjs';
 import { ADAPTERS, findAdapter, findDesktopAgent, detectDesktopAgents } from './adapters.mjs';
 import { buildPrompt } from './prompt.mjs';
 import { reportHealth } from './health-outbox.mjs';
+import { ensureDefaultConnection, codebuddyStatus, checkCodebuddy, openCodebuddyLogin, setBrowserEngine, setBrowserMode, browserOptions } from './agent-setup.mjs';
 import * as content from './content.mjs';
 import * as ops from './automation.mjs';
 import { browserStatus, detectRealBrowser, applyBrowser } from './browser.mjs';
@@ -45,6 +46,11 @@ import { runStartupUpgrade, upgradeSummary } from './upgrade.mjs';
 
 // 不是由中枢接入器启动时（agent 直接跑技能包副本、开机自启），自动接上本机接入器的配置；所有用到这些变量的地方都是用时才读
 applyHubDefaults();
+// 没有连接配置、本机装了 CodeBuddy CLI 时直接连它；然后在后台检查一次它有没有登录（网页上显示）
+if (process.env.XHS_NO_AUTO_CONNECT !== '1') {  // 测试里关掉：不去碰开发机上真实的 CodeBuddy
+  if (ensureDefaultConnection()) console.log('已自动连接 CodeBuddy CLI（可在「连接与设置」里修改）');
+  if (codebuddyStatus().installed) checkCodebuddy().catch(() => {});
+}
 export { VERSION };
 const PORT_RANGE = [17890, 17910];
 
@@ -826,6 +832,32 @@ async function handleApi(req, res, url) {
       const { session } = sendChat(sent);
       broadcast({ type: 'chats.changed' });
       return sendJson(res, 200, session);
+    }
+    // ----- 网页里完成 agent 设置（第一阶段：网页为主界面，CodeBuddy CLI 是唯一执行者） -----
+    case 'GET /api/agent-setup':
+      return sendJson(res, 200, { codebuddy: codebuddyStatus(), browser: browserOptions() });
+    case 'POST /api/codebuddy/check':
+      return sendJson(res, 200, await checkCodebuddy());
+    case 'POST /api/codebuddy/login':
+      return sendJson(res, 200, openCodebuddyLogin());
+    case 'POST /api/bridge/browser': {
+      const { engine } = await readBody(req);
+      if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请完成或取消后再切换');
+      const result = await setBrowserEngine(engine);
+      // 后台读取组件跟「工作台独立浏览器」配套；换成别的方式时关掉它（登录账号不需要它开着）
+      const settings = store.readJson(P.settings, {});
+      if (engine !== 'playwright' && settings.backgroundBrowser) {
+        store.writeJson(P.settings, { ...settings, backgroundBrowser: false });
+        await bridge.closeBrowsers();
+      }
+      broadcast({ type: 'bridge.changed' });
+      return sendJson(res, 200, result);
+    }
+    case 'POST /api/bridge/browser-mode': {
+      const { mode, confirmed } = await readBody(req);
+      const result = setBrowserMode(mode, confirmed);
+      broadcast({ type: 'bridge.changed' });
+      return sendJson(res, 200, result);
     }
     case 'POST /api/browser/runtime': {
       // 「登录账号」第一次用时自动安装浏览器组件（playwright-core，浏览器用电脑上的 Edge / Chrome）

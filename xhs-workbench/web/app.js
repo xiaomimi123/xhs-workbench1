@@ -1,6 +1,7 @@
 import * as video from './modules/video-creation.js';
 import {mountVideoSettings} from './video-service-settings.js';
 import {mountImageServiceSettings} from './image-service-settings.js';
+import {mountAgentSetup} from './agent-setup.js';
 import { md, esc, stripFrontmatter } from './md.js';
 import { S, $, api, acc, toast, showOverlay, fmtTime, currentAccount, withBusy, setHooks, confirmDialog, confirmLeave } from './core.js';
 import * as benchmark from './modules/benchmark.js';
@@ -655,10 +656,11 @@ function viewSettings() {
   const detectedDesktop = S.detectedDesktop || [];
   $('#main').innerHTML = `
     <h1 class="page-title">${icon("plug")} 连接与设置</h1>
-    <p class="page-sub">这里选择工作台实际调用的 Agent；不会自动跟随当前聊天应用切换。</p>
+    <p class="page-sub">网页里的对话和任务由 CodeBuddy CLI 执行；登录、浏览器方式和权限档都在这里设置，不用再去终端里运行命令。</p>
+    <div class="card" id="agent-setup-card" style="max-width:760px;margin-bottom:16px">执行 Agent 与浏览器：加载中…</div>
     <div class="card" id="curator-card" style="max-width:760px;margin-bottom:16px">${icon("book")} 知识库管家：加载中…</div>
     <div class="card" style="max-width:760px">
-      <h3 style="margin-top:0">Agent 连接</h3>
+      <h3 style="margin-top:0">Agent 连接（高级）</h3>
       <dl class="kv">
         <dt>连接模式</dt><dd>${esc(modeText)}</dd>
         ${b.mode === 'cli' && b.adapter ? `<dt>Agent</dt><dd>${esc(b.adapter.name)} <code>${esc(b.adapter.command)}</code></dd>` : ''}
@@ -681,11 +683,8 @@ function viewSettings() {
           ${detectedDesktop.map((a) => `<div class="row" style="padding:6px 0;border-top:1px solid var(--line)"><span>${esc(a.name)}</span>${b.mode === 'inbox' && b.hostAgent?.id === a.id ? '<span class="muted">（当前）</span>' : ''}<span class="muted">收件箱模式 · 需要它的窗口保持打开并值守</span><div class="spacer"></div><button class="btn small" data-use-host="${esc(a.id)}">使用它值守</button></div>`).join('')}
           ${!detected.length && !detectedDesktop.length ? '<div class="muted">本机没有检测到支持的 agent，可使用收件箱模式，让你正在用的 agent 值守。</div>' : ''}
         </div>` : ''}
-      ${b.mode === 'cli' && !b.browser ? `
-        <div class="chat-banner" style="margin:14px 0 0">
-          需要配置只读采集浏览器？回到你的 agent，发送：<br>
-          <code>为小红书工作台开启浏览器控制</code>
-        </div>` : ''}
+      ${b.mode === 'cli' && (!b.browser || b.browser === 'none') ? `
+        <div class="chat-banner" style="margin:14px 0 0">需要打开网页的工作（对标核实、看主页）：在上面「执行 Agent 与浏览器」里选一种浏览器方式。</div>` : ''}
       ${b.mode === 'inbox' ? `
         <div class="chat-banner" style="margin:14px 0 0">
           收件箱模式需要 agent 在它自己的窗口里「值守」。回到你的 agent，发送：<br>
@@ -707,6 +706,7 @@ function viewSettings() {
       </dl>
     </div>`;
   renderSystem($('#system-panels'));
+  mountAgentSetup($('#agent-setup-card'));
   mountImageServiceSettings($('#image-service-settings'));
   mountVideoSettings($('#video-service-settings'));
   loadCuratorCard();

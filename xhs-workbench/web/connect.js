@@ -36,8 +36,10 @@ export function connectOptionsHtml() {
       <div><strong>${esc(name)}</strong><div class="muted" style="font-size:13px">${esc(note)}</div></div>
       <div class="spacer"></div><button class="btn primary small" ${attr}>${esc(label)}</button></div>`;
   const rows = [
-    ...cli.map((a) => row(a.name, '工作台直接调用它，不需要一直开着它的窗口', `data-quick-connect="cli:${esc(a.id)}"`, '使用它')),
-    ...desktop.map((a) => row(a.name, '需要保持它的窗口打开，并让它在会话里值守接收任务', `data-quick-connect="host:${esc(a.id)}"`, '使用它')),
+    // CodeBuddy CLI 是网页工作台推荐的执行者（中枢的模型、浏览器方式、权限档都按它配置），排第一；桌面 agent 只作后备
+    ...[...cli].sort((x, y) => (y.id === 'codebuddy') - (x.id === 'codebuddy')).map((a) => row(a.id === 'codebuddy' ? `${a.name}（推荐）` : a.name,
+      a.id === 'codebuddy' ? '工作台直接调用它执行任务，不需要开着任何窗口；登录和浏览器在「连接与设置」里设置' : '工作台直接调用它，不需要一直开着它的窗口', `data-quick-connect="cli:${esc(a.id)}"`, '使用它')),
+    ...desktop.map((a) => row(`${a.name}（后备）`, '只在没有命令行 agent 时用：需要保持它的窗口打开，并让它在会话里值守接收任务', `data-quick-connect="host:${esc(a.id)}"`, '使用它')),
   ];
   const other = `<div class="row" style="padding:10px 0;border-top:1px solid var(--line)">
       <div><strong>其他 agent</strong><div class="muted" style="font-size:13px">你正在用的 agent 不在上面？选这个，再回到它的窗口让它值守</div></div>

@@ -216,7 +216,9 @@ const commands = {
     console.log(`数据目录已就绪：${WORKSPACE}`);
     console.log(`技能包目录：${SKILL_DIR}`);
     console.log(`Node.js 版本：${process.versions.node}`);
-    console.log(getBridgeConfig() ? '连接配置：已存在（可直接 start）' : '连接配置：尚未配置，下一步运行 bridge-test');
+    const { ensureDefaultConnection } = await import('../server/agent-setup.mjs');
+    if (process.env.XHS_NO_AUTO_CONNECT !== '1' && ensureDefaultConnection()) console.log('连接配置：已自动连接 CodeBuddy CLI（网页「连接与设置」里可以检查登录、选择浏览器）');
+    else console.log(getBridgeConfig() ? '连接配置：已存在（可直接 start）' : '连接配置：尚未配置（本机没有 CodeBuddy CLI）；在网页「连接与设置」里选择 agent');
   },
 
   async 'bridge-test'() {

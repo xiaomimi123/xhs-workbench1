@@ -12,6 +12,7 @@ export const FAKE_AGENT = path.join(ROOT, 'tests', 'fixtures', 'fake-agent.mjs')
 export function useTempWorkspace() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-test-'));
   process.env.XHS_WORKSPACE = dir;
+  process.env.XHS_NO_AUTO_CONNECT = '1';  // 测试里不自动连接 / 检查开发机上真实的 CodeBuddy
   return dir;
 }
 
