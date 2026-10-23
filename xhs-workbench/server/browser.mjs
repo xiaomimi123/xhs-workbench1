@@ -95,6 +95,31 @@ export function mcpConfigFor(accountId, pkg, opts = {}) {
   return file;
 }
 
+// ---------- WorkBuddy 浏览器插件（用员工自己的 Edge / Chrome） ----------
+// WorkBuddy 的 browser-use 插件自带一个标准 stdio MCP 服务 browser-mcp，通过浏览器里的 WorkBuddy 扩展操作员工自己正在用的浏览器
+// （沿用已有登录、真人的浏览器环境）。它本身就是 CodeBuddy 插件格式，CodeBuddy CLI 直接把它当 MCP 服务用即可，不需要 WorkBuddy 开着对话。
+export function detectWorkbuddyBrowserMcp(home = os.homedir(), exists = fs.existsSync, list = (d) => { try { return fs.readdirSync(d); } catch { return []; } }) {
+  const exe = process.platform === 'win32' ? 'browser-mcp.exe' : 'browser-mcp';
+  const cache = path.join(home, '.workbuddy', 'plugins', 'cache', 'workbuddy-browser-use', 'browser-use');
+  const versions = list(cache).filter((v) => /^\d+(\.\d+)*$/.test(v)).sort((a, b) => b.split('.').map(Number).reduce((r, n, i) => r || n - (a.split('.').map(Number)[i] || 0), 0));
+  for (const v of versions) {
+    const p = path.join(cache, v, 'bin', exe);
+    if (exists(p)) return p;
+  }
+  const runtime = path.join(home, '.workbuddy', 'native-runtimes', 'browser-use', 'browser-use', 'bin', exe);
+  return exists(runtime) ? runtime : null;
+}
+
+export function workbuddyMcpConfigFor(accountId, exe) {
+  if (!exe) throw new Error('WorkBuddy 浏览器插件配置不完整，请重新运行 browser-setup --engine workbuddy');
+  if (!/^[\w-]+$/.test(accountId || '')) accountId = getAccounts().defaultAccountId || 'default';
+  const file = path.join(P.config, 'mcp', `${accountId}.workbuddy.json`);
+  const want = { mcpServers: { browser: { command: exe, args: [], env: { BROWSER_MCP_SESSION_ID: `xhs-workbench-${accountId}` } } } };
+  mergeHubServers(want);
+  if (JSON.stringify(readJson(file, null)) !== JSON.stringify(want)) writeJson(file, want);
+  return file;
+}
+
 /** agent 登录检查后写的 accounts/<id>/browser.json */
 export function browserStatus(accountId) {
   return readJson(path.join(P.accountsDir, accountId, 'browser.json'), null);
@@ -112,7 +137,7 @@ export function applyBrowser(adapter, engine, pkg) {
     return next;
   }
   if (adapter.id === 'codebuddy') {
-    if (engine && engine !== 'playwright') throw new Error('CodeBuddy 仅支持 Playwright 浏览器连接（只读）');
+    if (engine && engine !== 'playwright' && engine !== 'workbuddy') throw new Error('CodeBuddy 支持 Playwright 或 WorkBuddy 浏览器插件');
     // CodeBuddy 的 --allowedTools / --disallowedTools 是多值参数：每个工具要单独一项（实测把工具名用逗号拼成一项，放行不生效）。
     const args = [...adapter.args];
     const stripMulti = (flag) => {
@@ -126,9 +151,10 @@ export function applyBrowser(adapter, engine, pkg) {
     stripMulti('--disallowedTools');
     const m = args.indexOf('--mcp-config');
     if (m >= 0) args.splice(m, 2);
-    args.push('--allowedTools', ...CODEBUDDY_BASE_TOOLS, ...(engine === 'playwright' ? ['mcp__playwright'] : []));
+    args.push('--allowedTools', ...CODEBUDDY_BASE_TOOLS, ...(engine === 'playwright' ? ['mcp__playwright'] : engine === 'workbuddy' ? ['mcp__browser'] : []));
     const next = { ...adapter };
     delete next.playwrightMcp;
+    if (engine !== 'workbuddy') delete next.workbuddyMcp;
     // 两档权限（adapter.browserMode）：
     //  readonly（默认）：点击 / 输入 / 填表 / 上传 / 按键 / 拖放 / 选择 / 执行脚本 / 弹窗处理一律禁用（被禁的工具对 agent 不可见），
     //    只留打开网址、快照、截图、等待、查找、标签页等读取类工具——用于分析数据和学习博主帖子，不允许自动发布。
@@ -136,7 +162,13 @@ export function applyBrowser(adapter, engine, pkg) {
     //    所以发布做不了；点赞 / 评论 / 关注这类站内操作靠提示词约束，测完用 browser-mode readonly 收回。
     const mode = adapter.browserMode === 'test' ? 'test' : 'readonly';
     delete next.blockedOrigins;
-    if (engine === 'playwright') {
+    if (engine === 'workbuddy') {
+      // 同样两档：只读档只留看、滚动、截图；测试档放开点击和输入，仍禁执行脚本和关掉员工自己的标签页。
+      // 这种方式操作的是员工自己的浏览器，没法像 Playwright 那样屏蔽创作者中心域名，「不自动发布」在测试档只能靠提示词和员工在场。
+      args.push('--mcp-config', '{mcpConfig}', '--disallowedTools', ...(mode === 'test' ? WORKBUDDY_TEST_DENY : WORKBUDDY_BROWSER_DENY));
+      next.workbuddyMcp = pkg;
+      next.browserMode = mode;
+    } else if (engine === 'playwright') {
       args.push('--mcp-config', '{mcpConfig}', '--disallowedTools', ...(mode === 'test' ? CODEBUDDY_TEST_DENY : CODEBUDDY_BROWSER_DENY));
       next.playwrightMcp = pkg;
       next.browserMode = mode;
@@ -175,6 +207,10 @@ export function applyBrowser(adapter, engine, pkg) {
   return next;
 }
 
+const WB = (t) => `mcp__browser__${t}`;
+export const WORKBUDDY_BROWSER_DENY = ['cua_click', 'cua_double_click', 'cua_drag', 'cua_keypress', 'cua_type', 'cua_execute',
+  'dom_cua_click', 'dom_cua_double_click', 'dom_cua_keypress', 'dom_cua_type', 'tabs_close'].map(WB);
+export const WORKBUDDY_TEST_DENY = ['cua_execute', 'tabs_close'].map(WB);
 export const CODEBUDDY_TEST_DENY = ['file_upload', 'evaluate', 'run_code_unsafe'].map((t) => `mcp__playwright__browser_${t}`);
 export const CODEBUDDY_TEST_BLOCKED_ORIGINS = ['https://creator.xiaohongshu.com'];
 export const CODEBUDDY_BASE_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];

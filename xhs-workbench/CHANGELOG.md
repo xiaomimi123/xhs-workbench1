@@ -1,5 +1,13 @@
 # 更新日志
 
+## v0.8.3（2026-10-23）CodeBuddy 通过 WorkBuddy 浏览器插件操作员工自己的 Edge / Chrome
+
+- WorkBuddy 的「浏览器操控」自带一个标准 stdio MCP 服务 `browser-mcp`（通过浏览器里的 WorkBuddy 扩展操作员工自己正在用的浏览器，沿用已有登录）。新增浏览器方式 `browser-setup --engine workbuddy`：自动找到 `~/.workbuddy/plugins/cache/workbuddy-browser-use/browser-use/<版本>/bin/browser-mcp(.exe)`，CodeBuddy CLI 直接把它当 MCP 服务用，不需要 WorkBuddy 开着对话
+- 两档权限照旧：只读档只留看、滚动、截图（禁点击、输入、按键、拖拽、执行脚本、关标签页）；测试档放开点击和输入，仍禁执行脚本、不关员工自己的标签页。这种方式操作的是员工自己的浏览器，没法像 Playwright 那样屏蔽创作者中心，测试档的「不自动发布」靠提示词和员工在场
+- 对标「核实」在这种方式下交给 CodeBuddy 按手册只读核实（只读档读不到笔记详情，结果会是部分完成）；网页里切换 agent 时保留这种浏览器方式；`browser-mode readonly|test` 也支持它
+- 浏览器手册新增「用 WorkBuddy 浏览器插件时」：新开标签页做事、不动员工已开的页面、每次先核对当前登录的小红书号
+- 测试新增 2 项（权限两档、找 browser-mcp）。**还没在真实电脑上跑过这条链路**，见中枢仓库 docs/测试流程-WorkBuddy浏览器插件.md
+
 ## v0.8.2（2026-10-23）「登录账号」不再处处被限制
 
 - **一律由工作台自己的浏览器完成，不经过 agent**：以前只有「后台浏览器组件已安装 + 设置里已开启 + agent 已配成 CLI 的 Playwright 浏览器」三条都满足才走工作台自己的浏览器，否则退回到在聊天里让 agent 打开浏览器，而聊天里的 agent 没有浏览器工具、没有 Bash，处处被拦。现在点「登录账号」就打开这个账号自己的浏览器（电脑上的 Edge / Chrome）；第一次用时自动安装浏览器组件（只装 playwright-core，约 1 分钟，不阻塞工作台），不要求先连 agent、不要求在设置里开启

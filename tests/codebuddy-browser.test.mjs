@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { useTempWorkspace, server } from './helpers.mjs';
 
 useTempWorkspace(); // 必须先于加载 server 模块：隔离数据目录，不碰真实的 ~/XHS-Workbench
@@ -66,7 +67,7 @@ test('applyBrowser 幂等；关闭浏览器控制后回到基础参数，不留�
 });
 
 test('CodeBuddy 只支持 Playwright 方式的浏览器控制', () => {
-  assert.throws(() => applyBrowser(base, 'chrome', PKG), /仅支持 Playwright/);
+  assert.throws(() => applyBrowser(base, 'chrome', PKG), /支持 Playwright 或 WorkBuddy/);
 });
 
 test('mcpConfigFor：blockedOrigins 写成分号分隔的 --blocked-origins；没有时不加', () => {
@@ -83,4 +84,33 @@ test('切换 agent 时 applyBrowser 可把 Playwright 浏览器控制套到新�
   const again = applyBrowser({ ...cb, browserMode: 'test' }, 'playwright', PKG);
   assert.equal(again.browserMode, 'test');
   assert.deepEqual(again.blockedOrigins, CODEBUDDY_TEST_BLOCKED_ORIGINS);
+});
+
+test('WorkBuddy 浏览器插件：只读档只留看 / 滚动 / 截图，测试档放开点击输入但仍禁脚本和关标签页', async () => {
+  const { WORKBUDDY_BROWSER_DENY, WORKBUDDY_TEST_DENY, workbuddyMcpConfigFor } = await server('browser.mjs');
+  const exe = 'C:/wb/browser-mcp.exe';
+  const a = applyBrowser(base, 'workbuddy', exe);
+  assert.equal(a.browserMode, 'readonly');
+  assert.equal(a.workbuddyMcp, exe);
+  assert.equal(a.playwrightMcp, undefined);
+  assert.ok(multi(a.args, '--allowedTools').includes('mcp__browser'));
+  assert.deepEqual(multi(a.args, '--disallowedTools'), WORKBUDDY_BROWSER_DENY);
+  for (const t of ['dom_cua_click', 'cua_click', 'dom_cua_type', 'cua_type', 'cua_keypress', 'cua_execute', 'tabs_close']) assert.ok(WORKBUDDY_BROWSER_DENY.includes(`mcp__browser__${t}`), t);
+  for (const t of ['dom_cua_get_visible_dom', 'tab_screenshot', 'dom_cua_scroll', 'tab_goto', 'tabs_new']) assert.ok(!WORKBUDDY_BROWSER_DENY.includes(`mcp__browser__${t}`), t);
+  const t = applyBrowser({ ...a, browserMode: 'test' }, 'workbuddy', exe);
+  assert.deepEqual(multi(t.args, '--disallowedTools'), WORKBUDDY_TEST_DENY);
+  // 换回 Playwright 时去掉 WorkBuddy 的配置
+  assert.equal(applyBrowser(a, 'playwright', PKG).workbuddyMcp, undefined);
+  // MCP 配置：标准 stdio，带每个账号固定的会话号
+  const cfg = JSON.parse(fs.readFileSync(workbuddyMcpConfigFor('default', exe), 'utf8'));
+  assert.deepEqual(cfg.mcpServers.browser, { command: exe, args: [], env: { BROWSER_MCP_SESSION_ID: 'xhs-workbench-default' } });
+});
+
+test('找到 WorkBuddy 插件里的 browser-mcp（取最新版本），没有时返回 null', async () => {
+  const { detectWorkbuddyBrowserMcp } = await server('browser.mjs');
+  const exe = process.platform === 'win32' ? 'browser-mcp.exe' : 'browser-mcp';
+  const cache = path.join('/h', '.workbuddy', 'plugins', 'cache', 'workbuddy-browser-use', 'browser-use');
+  const files = new Set([path.join(cache, '1.1.0', 'bin', exe), path.join(cache, '1.10.0', 'bin', exe)]);
+  assert.equal(detectWorkbuddyBrowserMcp('/h', (p) => files.has(p), () => ['1.1.0', '1.10.0', 'junk']), path.join(cache, '1.10.0', 'bin', exe));
+  assert.equal(detectWorkbuddyBrowserMcp('/h', () => false, () => []), null);
 });

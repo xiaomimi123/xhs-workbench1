@@ -24,6 +24,15 @@
 - CLI 模式下启用 Playwright 浏览器控制后，**每个工作台账号都有自己的一份浏览器资料**（`browser-profiles/<账号id>/`）。你打开的浏览器自动就是当前账号的，登录状态与其他账号互不影响。
 - 用 Claude in Chrome，或收件箱模式下用你自带的浏览器时，所有账号共用一个浏览器。这时更要严格执行下面的「账号核对」。
 
+## 用 WorkBuddy 浏览器插件时（browser-setup --engine workbuddy）
+
+这时操作的是**员工自己正在用的 Edge / Chrome**（通过 WorkBuddy 扩展），工具是 `mcp__browser__*`，不是 Playwright：
+
+- 开始时先 `mcp__browser__browsers_list`、`mcp__browser__browser_info`；**新开标签页**（`tabs_new`）做事，不要动员工已经开着的页面；用完 `tabs_finalize`，不要关员工的标签页。
+- 读页面优先 `dom_cua_get_visible_dom`，需要看图时 `tab_screenshot`；滚动用 `dom_cua_scroll`。
+- 所有工作台账号共用这一个浏览器：**每次操作前都要核对当前登录的小红书号**是不是这个工作台账号，不一致就停下请员工切换，不要替员工登录或切号。
+- 只读档下点击、输入工具不可用（被禁用的工具你看不到）；需要点进笔记时如实说明「只读档读不到笔记详情」，不要想办法绕过。
+
 ## 登录检查
 
 > 员工在网页「账号管理」点「登录账号」时，由工作台自己的浏览器打开创作者中心并等本人扫码 / 完成验证（v0.8.2 起），不经过 agent。agent 不需要、也不应该自己去打开浏览器帮员工登录。下面的步骤只在 agent 做采集前核对登录状态时使用。

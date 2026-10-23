@@ -755,7 +755,12 @@ async function handleApi(req, res, url) {
       delete prev.hostAgent;
       // 切换 agent 不能悄悄关掉浏览器控制：之前开着 Playwright，新 agent 也支持的话就沿用（权限档按新 agent 的默认）
       let next = adapter, browser = 'none', kept = false;
-      if (prev.browser === 'playwright' && prev.adapter?.playwrightMcp && ['codebuddy', 'codex'].includes(adapter.id)) {
+      if (prev.browser === 'workbuddy' && prev.adapter?.workbuddyMcp && adapter.id === 'codebuddy') {
+        try {
+          next = applyBrowser({ ...adapter, browserMode: prev.adapter.browserMode }, 'workbuddy', prev.adapter.workbuddyMcp);
+          browser = 'workbuddy'; kept = true;
+        } catch { next = adapter; }
+      } else if (prev.browser === 'playwright' && prev.adapter?.playwrightMcp && ['codebuddy', 'codex'].includes(adapter.id)) {
         try {
           next = applyBrowser(adapter, 'playwright', prev.adapter.playwrightMcp);
           next.headless = prev.adapter.headless; next.browserChannel = prev.adapter.browserChannel;

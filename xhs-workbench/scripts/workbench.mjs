@@ -375,7 +375,8 @@ const commands = {
     const cfg = getBridgeConfig();
     if (!cfg) fail('请先运行 bridge-test 完成连接设置');
     if (readJson(P.settings, {}).backgroundBrowser) fail('请先在设置页关闭后台有头读取，再修改 agent 浏览器配置');
-    const engine = flags.engine === 'chrome' ? 'chrome' : 'playwright';
+    const engine = flags.engine === 'chrome' ? 'chrome' : flags.engine === 'workbuddy' ? 'workbuddy' : 'playwright';
+    if (engine === 'workbuddy' && cfg.adapter?.id !== 'codebuddy') fail('WorkBuddy 浏览器插件目前只接 CodeBuddy CLI：请先 bridge-test --agent codebuddy');
     if (cfg.mode !== 'cli' || !cfg.adapter || !['claude-code','codex','codebuddy'].includes(cfg.adapter.id)) {
       console.log('当前不是 Claude Code / Codex / CodeBuddy 的 CLI 模式，无法自动配置。');
       console.log('- 收件箱模式：你（agent）在自己的会话里用自带的浏览器 / 电脑控制能力完成任务即可，无需配置。');
@@ -398,6 +399,12 @@ const commands = {
       const nameMap = { msedge: '系统 Microsoft Edge', chrome: '系统 Google Chrome', chromium: 'Playwright 内置浏览器' };
       plan.push(`使用 Playwright MCP ${version}，浏览器：${nameMap[real]}——独立资料目录（${path.join(WORKSPACE, 'browser-profiles', '<账号id>')}），不碰你日常浏览器的登录状态；每个账号第一次使用时需要在打开的窗口里登录`);
       if (flags.headless) plan.push('无头模式：抓取在后台运行，不弹出浏览器窗口（风控更敏感，弹窗异常时改回有头模式）');
+    } else if (engine === 'workbuddy') {
+      const { detectWorkbuddyBrowserMcp } = await import('../server/browser.mjs');
+      pkg = detectWorkbuddyBrowserMcp();
+      if (!pkg) fail('没有找到 WorkBuddy 的浏览器插件（browser-mcp）。请在 WorkBuddy「设置 > 智能体 > 浏览器操控」里打开「让 WorkBuddy 控制浏览器」并安装 Edge / Chrome 扩展');
+      plan.push(`使用 WorkBuddy 浏览器插件（${pkg}）：直接操作你自己正在用的 Edge / Chrome，沿用已有登录；需要浏览器里的 WorkBuddy 扩展已启用。注意所有工作台账号共用这一个浏览器，操作前要核对当前登录的是哪个号`);
+      plan.push(`权限：${cfg.adapter.browserMode === 'test' ? '测试档（可点击、输入；仍禁执行脚本、不关你的标签页）' : '只读档（只能看、滚动、截图；不能点击、输入）'}`);
     } else {
       plan.push('启用 Claude in Chrome：直接使用你日常 Chrome 里的登录状态（需要已安装 Claude 浏览器扩展）。注意：这种方式所有账号共用一个浏览器，多账号时请用 Playwright');
     }
@@ -431,8 +438,8 @@ const commands = {
     const mode = rest[0] || '';
     const cfg = getBridgeConfig();
     if (!['readonly', 'test'].includes(mode)) fail('用法：browser-mode readonly|test');
-    if (!cfg?.adapter || cfg.adapter.id !== 'codebuddy' || cfg.browser !== 'playwright') fail('当前不是 CodeBuddy 的 Playwright 浏览器控制，请先运行 browser-setup');
-    const adapter = applyBrowser({ ...cfg.adapter, browserMode: mode }, 'playwright', cfg.adapter.playwrightMcp);
+    if (!cfg?.adapter || cfg.adapter.id !== 'codebuddy' || !['playwright', 'workbuddy'].includes(cfg.browser)) fail('当前不是 CodeBuddy 的浏览器控制，请先运行 browser-setup');
+    const adapter = applyBrowser({ ...cfg.adapter, browserMode: mode }, cfg.browser, cfg.browser === 'workbuddy' ? cfg.adapter.workbuddyMcp : cfg.adapter.playwrightMcp);
     adapter.headless = cfg.adapter.headless; adapter.browserChannel = cfg.adapter.browserChannel;
     saveBridgeConfig({ ...cfg, adapter });
     console.log(mode === 'test'
