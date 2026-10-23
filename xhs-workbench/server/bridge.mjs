@@ -302,6 +302,11 @@ export class Bridge extends EventEmitter {
 
   /** task: { id, sessionId, prompt, agentSessionId } */
   submit(task) {
+    // 登录账号由工作台自己的浏览器完成，不经过 agent：不要求先连好 agent，也不查访问锁和中枢能力（员工本人扫码，不是自动访问）
+    if (task.kind === 'browser.prepare') {
+      if (!this.browserWorker) throw new Error('浏览器组件未就绪');
+      return this.#schedule(this.config() || { mode: 'none' }, task, true);
+    }
     const cfg = this.config();
     if (!cfg) throw new Error('尚未完成连接设置，请让 agent 运行连接自检');
     if (cfg.mode === 'inbox' && cfg.browser && cfg.browser !== 'none') throw new Error('收件箱不支持可撤销的浏览器任务，请切换 CLI 只读组件；收件箱仅可用于本地资料任务');
@@ -350,7 +355,7 @@ export class Bridge extends EventEmitter {
   }
 
   #schedule(cfg, task, exclusive) {
-    if (exclusive || task.kind) {
+    if ((exclusive || task.kind) && task.kind !== 'browser.prepare') {
       try { assertBrowserAccess(task.accountId); } catch (err) { this.emit('error', {taskId:task.id,message:err.message}); return; }
     }
     if (exclusive && this.activeProfiles.has(task.accountId)) {
@@ -381,7 +386,7 @@ export class Bridge extends EventEmitter {
         if (task.kind === 'benchmark.verify' || task.kind === 'browser.prepare') {
           this.emit('claimed', { taskId: task.id });
           const result = task.kind === 'browser.prepare'
-            ? await this.browserWorker.prepare(task.account, { signal: abort.signal })
+            ? await this.browserWorker.prepare(task.account, { signal: abort.signal, waitMs: task.waitMs ?? 0 })
             : await this.browserWorker.verify(task.account, task.benchmark, {
               signal: abort.signal,
               onProgress: (name, detail) => this.emit('tool', { taskId: task.id, name, detail }),
@@ -405,13 +410,16 @@ export class Bridge extends EventEmitter {
                   : summary);
               },
             });
-          const blockedKind = warningKind(result.reason);
+          const blockedKind = task.kind === 'browser.prepare' ? null : warningKind(result.reason);  // 登录流程的上锁由浏览器组件自己决定（只记「需要登录」）
           if (blockedKind) lockBrowserAccess(task.accountId, blockedKind, result.reason);
           if (cancelled || timedOut) throw new Error(timedOut ? '超时' : '已取消');
           let text;
           if (task.kind === 'browser.prepare') {
             if (result.state === 'ready') await this.onBrowserPrepared?.(task, result);
-            text = result.state === 'ready' ? `已核对当前账号，浏览器窗口状态：${result.window === 'minimized' ? '已尝试最小化' : '可见有头模式'}。` : result.reason;
+            text = result.state === 'ready'
+              ? `登录成功：小红书号 ${result.xhsId}${result.filledXhsId ? '（已填进这个工作台账号）' : ''}。浏览器窗口${result.window === 'minimized' ? '已最小化' : '保持打开'}，之后的采集会复用这个登录。`
+              : result.state === 'needsLogin' ? '等了 5 分钟还没扫码登录，浏览器窗口仍开着；扫完码后再点一次「登录账号」即可。'
+              : /验证|访问限制|操作频繁|风险/.test(result.reason || '') ? '小红书要求的验证 5 分钟内没有完成，浏览器窗口仍开着；在窗口里完成验证后再点一次「登录账号」即可。' : result.reason;
           } else if (result.state === 'verified') {
             if (!profileSaved) {
               await this.onBrowserPrepared?.(task, { xhsId: task.account.xhsId });

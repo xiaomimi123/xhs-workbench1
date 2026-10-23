@@ -33,7 +33,7 @@ import * as content from './content.mjs';
 import * as ops from './automation.mjs';
 import { browserStatus, detectRealBrowser, applyBrowser } from './browser.mjs';
 import { BrowserWorker } from './browser-worker.mjs';
-import { browserRuntimeStatus } from './browser-runtime.mjs';
+import { browserRuntimeStatus, installBrowserRuntimeAsync } from './browser-runtime.mjs';
 import { canonicalProfileUrl } from './browser-read.mjs';
 import { createZip } from './zip.mjs';
 import * as system from './system.mjs';
@@ -154,7 +154,10 @@ function writeObservationCheckpoint(task, result) {
 
 const bridge = new Bridge({ inboxFile: path.join(P.run, 'inbox-tasks.json'), browserWorker, onBenchmarkVerified: writeVerifiedCheckpoint, onBenchmarkObservation: writeObservationCheckpoint,
   onBrowserPrepared: (task, result) => {
+    const acc = store.getAccount(task.accountId);
+    if (acc && !acc.xhsId && result.filledXhsId) store.saveAccount({ id: acc.id, xhsId: result.xhsId });  // 没填小红书号：用扫码登录的这个
     if (store.getAccount(task.accountId)?.xhsId !== result.xhsId) throw new Error('账号设置已变化，请重新核对登录账号');
+    if (browserAccessStatus(task.accountId).kind === 'login') resumeBrowserAccess(task.accountId);  // 「需要登录」的锁：登录好了就解开
     const file = path.join(P.accountsDir, task.accountId, 'browser.json');
     const previous = store.readJson(file, {});
     store.writeJson(file, { loggedIn: true, xhsId: result.xhsId,
@@ -449,10 +452,15 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
   let benchmark = null;
   if (taskKind !== undefined) {
     if (!['benchmark.verify', 'browser.prepare'].includes(taskKind)) throw store.httpError(400, '任务类型不支持');
-    assertBrowserCapability(); // 中枢判定缺浏览器能力时只拦浏览器功能（先于访问锁：缺能力不该被记成平台风控）
-    assertBrowserAccess(account.id);
     const worker = workerInfo();
-    if (!worker.enabled || !worker.available || !worker.compatible) throw store.httpError(409, '后台有头读取尚未就绪，请在设置页开启并安装组件，或使用原 agent 路径');
+    if (taskKind === 'browser.prepare') {
+      // 登录账号：员工本人扫码，由工作台自己的浏览器完成，只要求浏览器组件已安装（网页会先自动安装），不查 agent 连接、中枢能力和访问锁
+      if (!worker.available) throw store.httpError(409, '浏览器组件还没安装，请再点一次「登录账号」（会自动安装，约 1 分钟）');
+    } else {
+      assertBrowserCapability(); // 中枢判定缺浏览器能力时只拦浏览器功能（先于访问锁：缺能力不该被记成平台风控）
+      assertBrowserAccess(account.id);
+      if (!worker.enabled || !worker.available || !worker.compatible) throw store.httpError(409, '后台有头读取尚未就绪，请在设置页开启并安装组件，或使用原 agent 路径');
+    }
     if (taskKind === 'benchmark.verify') {
       if (!/^b_[\w-]+$/.test(benchmarkId || '')) throw store.httpError(400, '对标 id 不合法');
       benchmark = content.benchmarkDetail(account.id, benchmarkId).item;
@@ -518,7 +526,8 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
   try {
     bridge.submit({ id: taskId, sessionId: session.id, accountId: account.id, prompt,
       agentSessionId: canResume ? session.agentSessionId : null, kind: taskKind,
-      account, benchmark, timeoutMs: taskKind === 'benchmark.verify' ? 180_000 : undefined,
+      account, benchmark, timeoutMs: taskKind === 'benchmark.verify' ? 180_000 : taskKind === 'browser.prepare' ? 6 * 60_000 : undefined,
+      waitMs: taskKind === 'browser.prepare' ? 5 * 60_000 : undefined,  // 登录：停在登录页等员工扫码，最多 5 分钟
       fastModel: taskKind === 'benchmark.verify' ? workerInfo().fastModel : '' });
   } catch (err) {
     taskIndex.delete(taskId);
@@ -812,6 +821,17 @@ async function handleApi(req, res, url) {
       const { session } = sendChat(sent);
       broadcast({ type: 'chats.changed' });
       return sendJson(res, 200, session);
+    }
+    case 'POST /api/browser/runtime': {
+      // 「登录账号」第一次用时自动安装浏览器组件（playwright-core，浏览器用电脑上的 Edge / Chrome）
+      try {
+        const runtime = await installBrowserRuntimeAsync();
+        broadcast({ type: 'bridge.changed' });
+        return sendJson(res, 200, { ok: true, version: runtime.version });
+      } catch (err) {
+        reportHealth({ stage: 'runtime', ok: false, message: err.message });
+        throw store.httpError(502, err.message);
+      }
     }
     case 'POST /api/browser/worker': {
       const body = await readBody(req);

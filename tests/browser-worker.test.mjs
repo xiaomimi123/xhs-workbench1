@@ -360,13 +360,46 @@ test('restriction invalidates preparation and locks access; randomized pacing is
  assert.ok(total<=100);assert.equal(paced.events.filter(e=>e[0]==='click').length,0);await paced.worker.closeAll();
 });
 
-test('production access policy persists restrictions and blocks prepare without navigation', async () => {
+test('production access policy persists restrictions: automatic reading is blocked without navigation, login stays allowed', async () => {
  const policy=await server('access-policy.mjs');
  const {worker,events}=workerFor({noteCount:2,challengeAt:1,workerOptions:{assertAccess:policy.assertBrowserAccess,lockAccess:policy.lockBrowserAccess}});
- await worker.prepare(account);await worker.verify(account,benchmark);
- assert.equal(policy.browserAccessStatus(account.id).kind,'restriction');const before=events.length;
- await assert.rejects(worker.prepare(account),/锁定/);assert.equal(events.length,before);
- await worker.closeAll();policy.resolveBrowserRestriction(account.id,true);
+ try {
+  await worker.prepare(account);await worker.verify(account,benchmark);
+  assert.equal(policy.browserAccessStatus(account.id).kind,'restriction');
+  // 锁住后，核实（自动访问）在任何跳转之前就被拒
+  worker.instances.get(account.id).proof={xhsId:account.xhsId,checkedAt:Date.now()};const before=events.length;
+  await assert.rejects(worker.verify(account,benchmark),/锁定/);assert.equal(events.filter((e,i)=>i>=before&&e[0]==='goto').length,0);
+  // 登录是员工本人的操作：照常打开创作者中心
+  assert.equal((await worker.prepare(account)).state,'ready');
+  assert.equal(policy.browserAccessStatus(account.id).kind,'restriction');  // 登录不会解除平台限制
+ } finally { await worker.closeAll();policy.resolveBrowserRestriction(account.id,true); }
+});
+
+test('login waits on the login page until the user scans, then fills an empty xhsId; mismatch is reported clearly', async () => {
+ let reads=0;
+ const {worker}=workerFor({creator:()=>'my-account'});
+ const real=worker.instances;
+ // 前 5 次读到的是登录页（扫码前），之后是创作者中心
+ const fake=mockBrowser({creator:()=>'my-account'});
+ const w=new BrowserWorker({assertAccess:()=>{throw new Error('自动访问已锁定：需要登录');},lockAccess:()=>{},load:async()=>{const {chromium}=await fake.load();return {chromium:{async launchPersistentContext(d,o){const ctx=await chromium.launchPersistentContext(d,o);const page=ctx.pages()[0];const ev=page.evaluate.bind(page);page.evaluate=async(...a)=>{if(page.current.startsWith('https://creator.')&&++reads<=5)return {url:'https://creator.xiaohongshu.com/login',header:'',accountMenu:'',text:'扫码登录'};return ev(...a);};return ctx;}}};},
+  profileRoot:fs.mkdtempSync(path.join(WS,'profiles-')),detect:()=>'chrome',delay:async()=>{}});
+ try {
+  const r=await w.prepare({id:'default',name:'我的账号',xhsId:''},{waitMs:60_000});
+  assert.equal(r.state,'ready'); assert.equal(r.xhsId,'my-account'); assert.equal(r.filledXhsId,true);  // 等到扫码完成；没填小红书号时用登录的这个
+  assert.ok(reads>5);
+  const other=await w.prepare({id:'default',name:'我的账号',xhsId:'someone-else'});
+  assert.equal(other.state,'needsReview'); assert.match(other.reason,/my-account.*someone-else/);
+ } finally { await w.closeAll(); await worker.closeAll(); void real; }
+});
+
+test('login gives up after waitMs and leaves the window open', async () => {
+ const fake=mockBrowser();
+ const w=new BrowserWorker({assertAccess:()=>{},lockAccess:()=>{},load:async()=>{const {chromium}=await fake.load();return {chromium:{async launchPersistentContext(d,o){const ctx=await chromium.launchPersistentContext(d,o);const page=ctx.pages()[0];page.evaluate=async()=>({url:'https://creator.xiaohongshu.com/login',header:'',accountMenu:'',text:'扫码登录'});return ctx;}}};},
+  profileRoot:fs.mkdtempSync(path.join(WS,'profiles-')),detect:()=>'chrome',delay:async()=>{}});
+ try {
+  const r=await w.prepare(account,{waitMs:30});
+  assert.equal(r.state,'needsLogin');
+ } finally { await w.closeAll(); }
 });
 
 test('long capture errors cannot truncate a later restriction before persistent locking', async () => {
@@ -388,4 +421,23 @@ test('return error restriction is classified before its displayed error is short
  const result=await worker.verify(account,benchmark);assert.equal(result.captured,1);
  assert.equal(policy.browserAccessStatus(account.id).kind,'restriction');assert.equal(worker.instances.get(account.id).proof,undefined);
  await worker.closeAll();policy.resolveBrowserRestriction(account.id,true);
+});
+
+test('login: a captcha on the creator page waits for the user instead of stopping and locking', async () => {
+ let reads=0;const locks=[];
+ const fake=mockBrowser();
+ const w=new BrowserWorker({assertAccess:()=>{},lockAccess:(id,kind)=>locks.push(kind),load:async()=>{const {chromium}=await fake.load();return {chromium:{async launchPersistentContext(d,o){const ctx=await chromium.launchPersistentContext(d,o);const page=ctx.pages()[0];const ev=page.evaluate.bind(page);page.evaluate=async(...a)=>{if(page.current.startsWith('https://creator.')&&++reads<=4)return {url:'https://creator.xiaohongshu.com/',header:'',accountMenu:'',text:'请完成安全验证'};return ev(...a);};return ctx;}}};},
+  profileRoot:fs.mkdtempSync(path.join(WS,'profiles-')),detect:()=>'chrome',delay:async()=>{}});
+ try {
+  const r=await w.prepare(account,{waitMs:60_000});
+  assert.equal(r.state,'ready'); assert.deepEqual(locks,[]);  // 本人处理完验证后继续，没有上锁
+ } finally { await w.closeAll(); }
+ // 一直没处理：停下但不记成平台限制
+ const fake2=mockBrowser();const locks2=[];
+ const w2=new BrowserWorker({assertAccess:()=>{},lockAccess:(id,kind)=>locks2.push(kind),load:async()=>{const {chromium}=await fake2.load();return {chromium:{async launchPersistentContext(d,o){const ctx=await chromium.launchPersistentContext(d,o);ctx.pages()[0].evaluate=async()=>({url:'https://creator.xiaohongshu.com/',header:'',accountMenu:'',text:'请完成安全验证'});return ctx;}}};},
+  profileRoot:fs.mkdtempSync(path.join(WS,'profiles-')),detect:()=>'chrome',delay:async()=>{}});
+ try {
+  const r=await w2.prepare(account,{waitMs:30});
+  assert.notEqual(r.state,'ready'); assert.ok(!locks2.includes('restriction'));
+ } finally { await w2.closeAll(); }
 });

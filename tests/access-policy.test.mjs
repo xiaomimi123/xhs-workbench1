@@ -19,9 +19,14 @@ test('manual worker and agent submissions are rejected before execution while lo
  store.saveBridgeConfig({mode:'cli',browser:'playwright',adapter:fakeAdapter()});
  const bridge=new Bridge({browserWorker:{},onBenchmarkVerified(){}});
  policy.lockBrowserAccess('default','paused','用户暂停');
- for(const kind of ['benchmark.verify','browser.prepare',undefined]) assert.throws(()=>bridge.submit({id:'denied',accountId:'default',kind,prompt:'read'}),/用户暂停/);
- assert.equal(bridge.running.size,0); assert.equal(bridge.cliQueue.length,0);
- policy.resumeBrowserAccess('default');
+ try {
+  for(const kind of ['benchmark.verify',undefined]) assert.throws(()=>bridge.submit({id:'denied',accountId:'default',kind,prompt:'read'}),/用户暂停/);
+  assert.equal(bridge.running.size,0); assert.equal(bridge.cliQueue.length,0);
+  // 登录是员工本人扫码，不是自动访问：锁住时也能发起（否则「需要登录」的锁会把登录本身锁死）
+  bridge.on('error',()=>{});
+  assert.doesNotThrow(()=>bridge.submit({id:'login',accountId:'default',account:{id:'default'},kind:'browser.prepare',prompt:'login'}));
+  bridge.cancelAccount('default');
+ } finally { policy.resumeBrowserAccess('default'); }
 });
 
 test('stop cancels current and queued account work and restart retains lock',async()=>{

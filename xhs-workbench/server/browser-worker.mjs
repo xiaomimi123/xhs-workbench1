@@ -172,8 +172,8 @@ export class BrowserWorker {
     this.lockAccess(accountId, kind, reason);
   }
 
-  async #goto(accountId, page, url, signal) {
-    this.assertAccess(accountId);
+  async #goto(accountId, page, url, signal, { login = false } = {}) {
+    if (!login) this.assertAccess(accountId);
     interrupted(signal);
     if (!isXhsPage(url)) throw new Error('只允许访问小红书页面');
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
@@ -182,21 +182,25 @@ export class BrowserWorker {
     interrupted(signal);
   }
 
-  async #creator(accountId, signal) {
+  async #snapshot(page) {
+    return page.evaluate(() => {
+      const top = document.querySelector('header, [class*="header"], [class*="Header"]');
+      const menu = top?.querySelector('[class*="account-info"], [class*="user-info"], [class*="userInfo"]');
+      const panels = [...document.querySelectorAll('.personal .base')].filter(el => el.querySelector('.account-name') && el.getClientRects().length);
+      return { url: location.href, accountPanel: panels.map(el => el.innerText).join('\n').slice(0, 1200), header: top?.innerText?.slice(0, 1000) || '',
+        accountMenu: menu?.innerText?.slice(0, 600) || '', text: document.body?.innerText?.slice(0, 5000) || '' };
+    });
+  }
+
+  async #creator(accountId, signal, { login = false } = {}) {
     const { page } = await this.#open(accountId);
     this.#set(accountId, { phase: 'checking-login' });
-    await this.#goto(accountId, page, CREATOR, signal);
+    await this.#goto(accountId, page, CREATOR, signal, { login });
     await this.#ready(page, 'creator', signal).catch(err => { if (signal?.aborted) throw err; });
     let snapshot;
     for (let i = 0; i < 3; i++) {
       interrupted(signal);
-      snapshot = await page.evaluate(() => {
-        const top = document.querySelector('header, [class*="header"], [class*="Header"]');
-        const menu = top?.querySelector('[class*="account-info"], [class*="user-info"], [class*="userInfo"]');
-        const panels = [...document.querySelectorAll('.personal .base')].filter(el => el.querySelector('.account-name') && el.getClientRects().length);
-        return { url: location.href, accountPanel: panels.map(el => el.innerText).join('\n').slice(0, 1200), header: top?.innerText?.slice(0, 1000) || '',
-          accountMenu: menu?.innerText?.slice(0, 600) || '', text: document.body?.innerText?.slice(0, 5000) || '' };
-      });
+      snapshot = await this.#snapshot(page);
       const identity = readCreatorIdentity(snapshot);
       if (identity.state === 'ready') return { page, identity };
       if (identity.state !== 'needsLogin' && (i > 0 || /验证码|访问限制|操作频繁/.test(identity.reason))) return { page, identity };
@@ -205,20 +209,34 @@ export class BrowserWorker {
     return { page, identity: readCreatorIdentity(snapshot) };
   }
 
-  async prepare(account, { signal } = {}) {
-    this.assertAccess(account.id);
+  /**
+   * 「登录账号」：打开这个账号自己的浏览器到创作者中心；没登录就把窗口亮出来，停在登录页等员工本人扫码（最多 waitMs），
+   * 扫完自动核对。登录是员工本人的操作，不受自动访问锁限制（锁拦的是自动访问；否则「需要登录」锁会把登录本身锁死）。
+   * 工作台账号还没填小红书号时，用浏览器里登录的这个（由调用方保存）；填了但不一致时不放行，请员工换号。
+   */
+  async prepare(account, { signal, waitMs = 0 } = {}) {
     const existing = this.instances.get(account.id);
     if (existing) delete existing.proof;
-    const { identity } = await this.#creator(account.id, signal);
+    let { page, identity } = await this.#creator(account.id, signal, { login: true });
+    const deadline = this.now() + waitMs;
+    // 员工就在浏览器前：要扫码、或小红书弹了验证码 / 安全验证，都把窗口亮出来等本人处理，不像自动采集那样立刻停手上锁
+    const needsUser = (id) => id.state === 'needsLogin' || (id.state === 'needsReview' && /验证|访问限制|操作频繁|风险/.test(id.reason || ''));
+    while (needsUser(identity) && this.now() < deadline) {
+      await this.#window(account.id, 'visible');
+      this.#set(account.id, { phase: identity.state === 'needsLogin' ? 'needsLogin' : 'needsUser',
+        reason: identity.state === 'needsLogin' ? '请在弹出的浏览器里用小红书 App 扫码登录' : '小红书要求验证：请在弹出的浏览器里完成验证' });
+      await this.#pace(signal, 3000, 4000);
+      identity = readCreatorIdentity(await this.#snapshot(page).catch(() => ({ url: '' })));
+    }
     if (identity.state !== 'ready') {
-      this.#warning(account.id, identity.reason);
+      // 登录流程里只记「需要登录」（登录好会自动解开）；验证码没处理完不记成平台限制——那是给自动采集的规则，之后采集再遇到会照常停手
+      if (identity.state === 'needsLogin') this.#warning(account.id, identity.reason);
       await this.#window(account.id, 'visible');
       this.#set(account.id, { phase: identity.state, reason: identity.reason });
       return identity;
     }
-    if (!account.xhsId || account.xhsId.trim() !== identity.xhsId) {
-      const reason = !account.xhsId ? '工作台账号未填写小红书号，请先填写并核对浏览器中的登录账号'
-        : `当前浏览器登录的小红书号与工作台账号不一致，请切换账号后重试`;
+    if (account.xhsId && account.xhsId.trim() !== identity.xhsId) {
+      const reason = `当前浏览器登录的小红书号（${identity.xhsId}）与工作台账号填写的（${account.xhsId.trim()}）不一致，请在浏览器里换成对应的账号后再点一次`;
       await this.#window(account.id, 'visible');
       this.#set(account.id, { phase: 'needsReview', reason });
       return { state: 'needsReview', reason };
@@ -226,7 +244,7 @@ export class BrowserWorker {
     this.instances.get(account.id).proof = { xhsId: identity.xhsId, checkedAt: this.now() };
     await this.#window(account.id, 'minimized');
     this.#set(account.id, { phase: 'ready', reason: '' });
-    return { state: 'ready', xhsId: identity.xhsId, window: this.status(account.id).window };
+    return { state: 'ready', xhsId: identity.xhsId, filledXhsId: !account.xhsId, window: this.status(account.id).window };
   }
 
   async verify(account, benchmark, { signal, onProgress = () => {}, onVerified = async () => {}, onNote = async () => {}, onFinish = async () => {} } = {}) {

@@ -83,11 +83,13 @@ test('桥：缺浏览器能力时，浏览器专用任务在执行前被拒绝�
   const prev = process.env[CAP_ENV];
   process.env[CAP_ENV] = write(doc({ ready: false, missing: ['CodeBuddy CLI'], fixes: ['npm install -g @tencent-ai/codebuddy-code'] }))[CAP_ENV];
   try {
-    for (const kind of ['benchmark.verify', 'browser.prepare']) {
-      assert.throws(() => bridge.submit({ id: 'x', accountId: 'default', kind, prompt: 'read' }), /中枢能力检查.*CodeBuddy CLI/);
-    }
+    assert.throws(() => bridge.submit({ id: 'x', accountId: 'default', kind: 'benchmark.verify', prompt: 'read' }), /中枢能力检查.*CodeBuddy CLI/);
     assert.equal(bridge.running.size, 0);
     assert.equal(bridge.cliQueue.length, 0);
+    // 登录用工作台自己的浏览器，不需要 CodeBuddy CLI：缺这项能力不拦登录
+    bridge.on('error', () => {});
+    assert.doesNotThrow(() => bridge.submit({ id: 'login', accountId: 'default', account: { id: 'default' }, kind: 'browser.prepare', prompt: 'login' }));
+    bridge.cancelAccount('default');
     assert.equal(policy.browserAccessStatus('default').kind, 'open'); // 缺能力不是风控，不上锁
   } finally {
     if (prev === undefined) delete process.env[CAP_ENV]; else process.env[CAP_ENV] = prev;

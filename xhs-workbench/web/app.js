@@ -545,12 +545,21 @@ function browserLine(a) {
   return `${b.loggedIn ? `${icon("check", "icon-ok")} 上次已登录` : `${icon("warning", "icon-warn")} 上次未登录`}${who ? `：${who}` : ''}${b.checkedAt ? `<span class="muted">（${fmtTime(b.checkedAt)} 检查，以实时页面为准）</span>` : ''}${mismatch ? `<div class="error-line">登录的小红书号和账号信息里填的（${esc(a.xhsId)}）不一致，自动操作会被拦下</div>` : ''}${state}`;
 }
 
-function loginAccount(id) {
+async function loginAccount(id) {
   if (id !== S.accountId) switchAccount(id);
-  if (S.bridge?.browserWorker?.enabled && S.bridge.browserWorker.available && S.bridge.browserWorker.compatible) {
-    return sendMessage('检查浏览器登录账号', { taskKind: 'browser.prepare' });
+  // 登录账号由工作台自己打开浏览器、停在登录页等员工本人扫码，不经过 agent（聊天里的 agent 没有浏览器权限，处处被拦）。
+  // 第一次用时先自动安装浏览器组件（只装 playwright-core，浏览器用电脑上的 Edge / Chrome）
+  if (!S.bridge?.browserWorker?.available) {
+    toast('第一次登录：正在安装浏览器组件（约 1 分钟），装好会自动打开浏览器…');
+    try {
+      await api('POST', '/api/browser/runtime');
+      const { status } = await api('GET', '/api/bridge');
+      S.bridge = status;
+    } catch (err) {
+      return toast(`浏览器组件安装失败：${err.message}`);
+    }
   }
-  sendMessage('请按 playbooks/browser.md 打开小红书创作者中心，检查这个账号的浏览器登录状态；没登录就停在登录页等我本人登录（每 15 秒检查一次，最多等 5 分钟）。完成后更新登录状态文件，不要做任何其他操作。');
+  return sendMessage('登录账号：打开浏览器，扫码登录', { taskKind: 'browser.prepare' });
 }
 
 async function saveAccountForm(form) {
