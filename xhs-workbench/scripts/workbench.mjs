@@ -42,6 +42,7 @@ import { createBackup } from '../server/backup.mjs';
 import { decodeText, writeTaskFile } from '../server/inbox-files.mjs';
 import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
 import { applyHubDefaults } from '../server/hub-env.mjs';
+import { reportHealth } from '../server/health-outbox.mjs';
 
 applyHubDefaults();  // 由 agent 直接运行命令时也接上本机中枢接入器（start 启动的服务会继承这些变量）
 
@@ -269,6 +270,7 @@ const commands = {
     for (const adapter of candidates) {
       process.stdout.write(`测试 ${adapter.name} … `);
       const r = await pingAdapter(adapter);
+      reportHealth({ stage: 'doctor', ok: r.ok, message: r.error || '', agent: adapter.name });  // 命令行的连接测试也回传「应用健康」
       results.push({ id: adapter.id, command: adapter.command, ok: r.ok, ms: r.ms, error: r.error });
       console.log(r.ok ? `通过（${(r.ms / 1000).toFixed(1)} 秒）` : `失败：${r.error}`);
       if (r.ok && !chosen) {
@@ -421,6 +423,7 @@ const commands = {
     if(engine==='playwright'){adapter.headless=!!flags.headless;adapter.browserChannel=adapterBrowserChannel;}
     process.stdout.write('测试连接 … ');
     const r = await pingAdapter(adapter, 300_000);
+    reportHealth({ stage: 'doctor', ok: r.ok, message: r.ok ? '' : `浏览器配置（${engine}）连接测试失败：${r.error}`, agent: adapter.name });
     if (!r.ok) {
       console.log(`失败：${r.error}`);
       fail('浏览器配置未生效，原配置保持不变');

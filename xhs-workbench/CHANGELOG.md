@@ -1,5 +1,12 @@
 # 更新日志
 
+## v0.8.4（2026-10-23）WorkBuddy 浏览器插件第一轮测试的修正
+
+- **写清只读档的边界**：只读档是「不改变任何东西」——不点击、不输入、不按键、不执行脚本（所以不会点赞、评论、关注、私信、发布）；打开网址、跳转、滚动、截图、读页面都算「看」。第一轮测试里 agent 用打开网址的方式进了笔记详情，这符合只读档，不是漏洞（测试流程把预期写错了）
+- **只读档也能完成对标核实**：用 WorkBuddy 插件时没有点击工具，手册改为用 `tab_goto` 打开页面上笔记卡片链接的**原文**（带 `xsec_token` 等全部参数，等同于点进去），不许自己拼接或删参数；对标「核实」交给 CodeBuddy 的提示里也写明了
+- 浏览器手册补充：插件方式用的是员工自己浏览器里的登录，未登录或「设备登录超限」时停下请员工本人扫码（超限要先在 App 里退掉一台旧设备）
+- 命令行的 `bridge-test`、`browser-setup` 连接测试结果也回传中枢「应用健康」（以前只有网页里的连接测试会回传）
+
 ## v0.8.3（2026-10-23）CodeBuddy 通过 WorkBuddy 浏览器插件操作员工自己的 Edge / Chrome
 
 - WorkBuddy 的「浏览器操控」自带一个标准 stdio MCP 服务 `browser-mcp`（通过浏览器里的 WorkBuddy 扩展操作员工自己正在用的浏览器，沿用已有登录）。新增浏览器方式 `browser-setup --engine workbuddy`：自动找到 `~/.workbuddy/plugins/cache/workbuddy-browser-use/browser-use/<版本>/bin/browser-mcp(.exe)`，CodeBuddy CLI 直接把它当 MCP 服务用，不需要 WorkBuddy 开着对话

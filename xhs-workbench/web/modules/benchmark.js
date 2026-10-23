@@ -387,7 +387,7 @@ function bind(main) {
         if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
           // 浏览器方式是 WorkBuddy 插件（员工自己的 Edge / Chrome）：交给 CodeBuddy 按手册只读核实，逐步写检查点
           return ask(`请按 playbooks/benchmark.md「主页资料与近 5 篇笔记观察」只读核实对标账号「${b.name}」（对标 id：${b.id}，主页：${b.url || '未提供：先用站内搜索找到唯一匹配的主页，找不到或有多个就停下说明'}）。` +
-            `用 WorkBuddy 浏览器工具（mcp__browser__*）在用户自己的浏览器里新开标签页操作，按 playbooks/browser.md 先核对登录账号；逐步写检查点；不点赞、不评论、不关注、不私信、不发布；遇到验证码或风险提示立即停止并说明。`, true);
+            `用 WorkBuddy 浏览器工具（mcp__browser__*）在用户自己的浏览器里新开标签页操作，按 playbooks/browser.md 先核对登录账号；只读档没有点击工具，看笔记时用 tab_goto 打开页面上卡片链接的原文（带全部参数，不拼接不删参数）；逐步写检查点；不点赞、不评论、不关注、不私信、不发布；遇到验证码或风险提示立即停止并说明。`, true);
         }
         return toast('只读采集组件不可用，请先在连接设置中配置；不会自动切换采集工具');
       case 'analyze': {
