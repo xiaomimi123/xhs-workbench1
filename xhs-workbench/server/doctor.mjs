@@ -75,7 +75,7 @@ export function runDoctor(deps = {}) {
 
   for (const tool of ['ffmpeg', 'ffprobe']) {
     const where = find(tool);
-    add({ id: tool, label: tool, level: 'recommended', ok: !!where, detail: where || '未找到', affects: '参考视频的上传校验、抽帧与视频创作不可用（图文笔记不受影响）',
+    add({ id: tool, label: tool, level: 'recommended', ok: !!where, detail: where || '未找到', affects: '参考视频的上传与抽帧不可用；生成的视频只做基础校验（文生视频、图片动起来和图文笔记不受影响）',
       fix: where ? null : installHint('ffmpeg', platform, managers) });
   }
 

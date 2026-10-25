@@ -10,12 +10,16 @@ const execAsync=promisify(execFile);const exec=(file,args,opts={})=>execAsync(fi
 export const MAX_SOURCE_BYTES=60_000_000;
 export const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const bin=name=>findBinary(name)||name;
+// 参考视频（复刻动作 / 换产品）要读出时长帧率、抽 12 帧给描述助手看，离不开 ffmpeg；文生视频、图片动起来不走这里，不受影响
+export const FFMPEG_HINT=process.platform==='win32'?'Windows 在终端运行 winget install Gyan.FFmpeg，或把 ffmpeg essentials 压缩包解压到 %USERPROFILE%\\ffmpeg（工作台会自动查找），装好后重试':process.platform==='darwin'?'在终端运行 brew install ffmpeg，装好后重试':'用系统包管理器安装 ffmpeg，装好后重试';
+function need(name,find=findBinary){const file=find(name);if(!file)throw httpError(400,`本机没有安装 ${name}：参考视频的上传和抽帧需要 ffmpeg（含 ffprobe）。${FFMPEG_HINT}。文生视频和图片动起来不需要它。`);return file;}
 export function readVideoFile(file,root,max=MAX_SOURCE_BYTES){
  let p=file;while(p!==root){if(fs.lstatSync(p).isSymbolicLink())throw httpError(400,'文件路径不能包含软链接');p=path.dirname(p);if(p===path.dirname(p))throw httpError(400,'文件不在账号内');}
  const s=fs.statSync(file);if(!s.isFile()||s.size>max)throw httpError(400,'参考视频不能超过60MB');return fs.readFileSync(file);
 }
 function extension(bytes){if(bytes.toString('ascii',4,8)==='ftyp')return '.mp4';if(bytes.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3])))return '.mkv';if(bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='AVI ')return '.avi';throw httpError(400,'请选择有效的 MP4/MOV/WebM/MKV/AVI 视频');}
 export class VideoReferences {
+ constructor({find=findBinary}={}){this.find=find;}
  dir(a){return path.join(accRoot(a),'video-references');}
  list(a){const dir=this.dir(a);return fs.existsSync(dir)?fs.readdirSync(dir).filter(f=>/^vref_[a-f0-9]{64}\.json$/.test(f)).map(f=>readJson(path.join(dir,f),null)).filter(r=>r?.accountId===a).sort((x,y)=>y.createdAt.localeCompare(x.createdAt)):[];}
  get(a,id){if(typeof id!=='string'||!/^vref_[a-f0-9]{64}$/.test(id))throw httpError(400,'参考视频编号无效');const r=this.list(a).find(r=>r.id===id);if(!r)throw httpError(404,'当前账号没有这段参考视频');return r;}
@@ -28,7 +32,7 @@ export class VideoReferences {
   fs.mkdirSync(this.dir(a),{recursive:true});const temp=fs.mkdtempSync(path.join(this.dir(a),'.upload-')),file='source'+ext;
   try{
    fs.writeFileSync(path.join(temp,file),bytes,{flag:'wx'});
-   let info;try{const r=await exec(bin('ffprobe'),['-v','error','-protocol_whitelist','file','-show_streams','-show_format','-of','json',path.join(temp,file)],{timeout:20000,maxBuffer:1024*1024});info=JSON.parse(r.stdout);}catch{throw httpError(400,'视频无法读取，请确认文件有效且已安装 ffprobe');}
+   const ffprobe=need('ffprobe',this.find);let info;try{const r=await exec(ffprobe,['-v','error','-protocol_whitelist','file','-show_streams','-show_format','-of','json',path.join(temp,file)],{timeout:20000,maxBuffer:1024*1024});info=JSON.parse(r.stdout);}catch{throw httpError(400,'视频无法读取，请确认文件是有效的视频');}
    const s=info.streams?.find(s=>s.codec_type==='video'),duration=Number(info.format?.duration);
    if(!s?.width||!s.height||s.width>8192||s.height>8192||!Number.isFinite(duration)||duration<=0||duration>120)throw httpError(400,'参考视频须有有效画面，时长不超过120秒，分辨率不超过8192');
    const [rateNum,rateDen]=String(s.avg_frame_rate||'0/1').split('/').map(Number);const fps=rateNum/rateDen;
@@ -38,9 +42,9 @@ export class VideoReferences {
   }finally{fs.rmSync(temp,{recursive:true,force:true});}
  }
  async frames(a,id,destination){
-  const source=this.read(a,id);fs.mkdirSync(destination,{recursive:true});const frames=[];
+  const ffmpeg=need('ffmpeg',this.find),source=this.read(a,id);fs.mkdirSync(destination,{recursive:true});const frames=[];
   for(let i=0;i<12;i++){const time=Number((Math.max(0,source.media.duration-Math.max(0.15,2/source.media.fps))*i/11).toFixed(3)),file=path.join(destination,`frame-${String(i).padStart(2,'0')}.jpg`);
-   try{await exec(bin('ffmpeg'),['-v','error','-nostdin','-protocol_whitelist','file','-ss',String(time),'-i',source.absolutePath,'-map','0:v:0','-frames:v','1','-vf','scale=640:640:force_original_aspect_ratio=decrease','-y',file],{timeout:20000,maxBuffer:1024*1024});if(!fs.existsSync(file))throw Error();}catch{throw httpError(400,'参考视频抽帧失败，请确认已安装 ffmpeg 并使用可解码的视频');}
+   try{await exec(ffmpeg,['-v','error','-nostdin','-protocol_whitelist','file','-ss',String(time),'-i',source.absolutePath,'-map','0:v:0','-frames:v','1','-vf','scale=640:640:force_original_aspect_ratio=decrease','-y',file],{timeout:20000,maxBuffer:1024*1024});if(!fs.existsSync(file))throw Error();}catch{throw httpError(400,'参考视频抽帧失败，请使用可解码的视频');}
    frames.push({time,path:file});
   }return frames;
  }
