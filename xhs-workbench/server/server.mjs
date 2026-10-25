@@ -4,6 +4,7 @@ import { readHubServers } from './hub-mcp.mjs';
 import { readHubCapabilities, assertBrowserCapability } from './hub-capabilities.mjs';
 import {VideoDescriptionWorkflow} from './video-description-workflow.mjs';
 import {VideoRetrieval} from './video-retrieval.mjs';
+import { hubGen } from './hub-gen.mjs';
 import {videoService} from './video-service.mjs';
 import {VideoWorkflow} from './video-workflow.mjs';
 import { getImageServiceSettings, saveImageServiceSettings, testImageServiceConnection } from './image-service.mjs';
@@ -1036,8 +1037,13 @@ async function handleContentApi(route, q, req) {
       if(typeof b.data!=='string'||b.data.length>14000000)throw store.httpError(400,'视频参考图不能超过10MB');
       return imageWorkflow.uploadReference(acc,{...b,role:'product'});
     }
-    case 'GET /api/images/service':
-      return getImageServiceSettings();
+    case 'GET /api/images/service': {
+      // 接上中枢时顺带告诉网页：中枢出图现在走哪条通道、能不能带参考图（查不到不影响设置页）
+      const s = getImageServiceSettings();
+      if (!s.hubAvailable) return s;
+      try { const c = await hubGen.capabilities(); return { ...s, hubImage: { via: c.image_via, references: !!c.image_references, maxReferences: c.max_references } }; }
+      catch { return s; }
+    }
     case 'PUT /api/images/service': {
       const result = saveImageServiceSettings(await body());
       broadcast({type:'config.changed'}); return result;

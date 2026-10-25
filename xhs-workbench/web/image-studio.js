@@ -1,4 +1,4 @@
-import {initializeImageService,imageServiceFields,imageJobStatus,imageJobProgress,imageSendNotice,elapsedLabel} from './image-service-settings.js';
+import {initializeImageService,imageServiceFields,imageJobStatus,imageJobProgress,imageSendNotice,elapsedLabel,hubRefsAllowed,hubRefsText} from './image-service-settings.js';
 import {esc} from './md.js';
 import {startImagePolling} from './image-polling.js';
 import {S,api,fileUrl,toast} from './core.js';
@@ -15,7 +15,7 @@ export async function mountImageStudio(root,note,onApply){
  ${imageServiceFields(v,'data-image-field')}
  <label class="field-label">画面要求</label><textarea data-image-prompt rows="3" placeholder="描述主体、场景、风格；底图留出标题空间">${esc(v.prompt)}</textarea>
  <div class="row"><label>候选数量 <select data-image-count>${[1,2,3].map(n=>`<option ${v.provider==='apimart'&&n>1?'disabled':''} ${n===v.count?'selected':''}>${n}</option>`).join('')}</select></label><label class="btn small">上传参考图<input type="file" accept="image/png,image/jpeg,image/webp" data-image-upload hidden></label></div>
- <p class="muted">参考图最多3张；不选则文字生图。${v.provider==='hub'?'公司中枢暂不使用参考图，只按文字要求生成；需要参考图时请在设置里换生图服务。':`选中的图片会交给${v.provider==='apimart'?'第三方 APIMart':' Agent 生图工具'}处理。`}</p>
+ <p class="muted">参考图最多3张；不选则文字生图。${v.provider==='hub'?hubRefsText(v):`选中的图片会交给${v.provider==='apimart'?'第三方 APIMart':' Agent 生图工具'}处理。`}</p>
  <div class="option-grid">${note.images.map(f=>`<label class="option"><img style="width:100%;height:90px;object-fit:cover" src="${fileUrl(`notes/${note.id}/images/${f}`)}"><input type="checkbox" data-image-ref="${esc(f)}" ${v.references.includes(f)?'checked':''}>${esc(f)}</label>`).join('')}</div>
  ${imageSendNotice(v.provider,v.references.length,true)}
  <div class="row"><button class="btn primary" data-image-action="start" ${v.busy?'disabled':''}>创建生图任务</button><button class="btn" data-image-action="round" ${v.busy?'disabled':''}>按当前要求新生成一轮</button></div>
@@ -33,7 +33,7 @@ export async function mountImageStudio(root,note,onApply){
   if(e.target.matches('[data-image-upload]')){const file=e.target.files[0];if(!file)return;if(file.size>20*1024*1024){toast('参考图不能超过20MB');return;}v.busy=true;try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});const r=await api('POST',`/api/notes/upload?${query}`,{id:note.id,filename:file.name,data});if(current()){note.images.push(r.name);if(v.references.length<3)v.references.push(r.name);draw();}}catch(e){toast(e.message);}finally{v.busy=false;if(current())draw();}}
  };
  root.onclick=async e=>{const b=e.target.closest('[data-image-action]');if(!b)return;e.stopPropagation();const action=b.dataset.imageAction;if(action==='copy'){try{await navigator.clipboard.writeText(jobs.find(j=>j.id===b.dataset.job).handoff);toast('交接指令已复制，发给当前 Agent 即可');}catch{toast('请展开交接指令，手动复制');}return;}if(v.busy)return;v.busy=true;draw();
- try{if(action==='start'||action==='round'){await api('POST',`/api/images/start?${query}`,{noteId:note.id,prompt:v.prompt,count:v.provider==='apimart'?1:v.count,provider:v.provider,model:v.model,size:v.size,resolution:v.resolution,references:v.provider==='hub'?[]:v.references,newRound:action==='round'});toast(v.provider!=='current-agent'?'任务已提交，可查询进度':'任务已保存，请将交接指令交给当前 Agent');}
+ try{if(action==='start'||action==='round'){await api('POST',`/api/images/start?${query}`,{noteId:note.id,prompt:v.prompt,count:v.provider==='apimart'?1:v.count,provider:v.provider,model:v.model,size:v.size,resolution:v.resolution,references:v.provider==='hub'&&!hubRefsAllowed(v)?[]:v.references,newRound:action==='round'});toast(v.provider!=='current-agent'?'任务已提交，可查询进度':'任务已保存，请将交接指令交给当前 Agent');}
  else if(action==='query')await api('POST',`/api/images/refresh?${query}`,{id:b.dataset.job});
  else if(action==='complete')await api('POST',`/api/images/complete?${query}`,{id:b.dataset.job});
  else if(action==='apply'){const result=await api('POST',`/api/images/apply?${query}`,{id:b.dataset.job,index:Number(b.dataset.index)});if(current())onApply(result);return;}

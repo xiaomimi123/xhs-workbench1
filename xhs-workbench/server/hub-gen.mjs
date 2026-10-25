@@ -1,5 +1,6 @@
 // 公司中枢的出图 / 出视频服务：走企业中枢的 HTTP 接口（/api/v1），用的是中枢「模型」页配置的通道
-// （本机 ComfyUI / 第三方出图 API / H3 网关），权限、GPU 额度、审计都按员工的岗位包，员工电脑上不存任何密钥。
+// （本机 ComfyUI / 第三方出图 API / H3 网关），权限、额度、审计都按员工的岗位包，员工电脑上不存任何密钥。
+// 参考图出图只有中枢的出图通道是第三方 API 时支持，用 capabilities() 查。
 // 身份：向本机的中枢接入器要令牌（hub_agent.py token，快过期会先续期），和员工在 agent 里用的是同一个令牌。
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -78,10 +79,24 @@ export class HubGen {
     return data;
   }
 
-  /** 文生图：返回任务号 */
-  async submitImage({ prompt, aspect = '1:1', count = 1 }) {
+  /** 中枢现在出图 / 出视频走哪条通道、出图能不能带参考图；缓存 1 分钟 */
+  async capabilities() {
+    if (this.caps && Date.now() - this.caps.at < 60_000) return this.caps.value;
+    const value = await this.request('GET', '/capabilities');
+    this.caps = { at: Date.now(), value };
+    return value;
+  }
+
+  /** 出图：返回任务号。references 是参考图 [{data: Buffer, filename}]，只有中枢出图通道是第三方 API 时支持 */
+  async submitImage({ prompt, aspect = '1:1', count = 1, references = [] }) {
     if (!HUB_IMAGE_ASPECTS.includes(aspect)) throw httpError(400, `公司中枢出图支持的画幅：${HUB_IMAGE_ASPECTS.join('、')}`);
-    return (await this.request('POST', '/images', { json: { prompt, aspect, count } })).task_id;
+    if (!references.length) return (await this.request('POST', '/images', { json: { prompt, aspect, count } })).task_id;
+    const form = new FormData();
+    for (const r of references) form.append('images', new Blob([r.data]), r.filename || 'reference.png');
+    form.append('prompt', prompt);
+    form.append('aspect', aspect);
+    form.append('count', String(count));
+    return (await this.request('POST', '/images/with-references', { form })).task_id;
   }
 
   async submitCover({ title, description }) {

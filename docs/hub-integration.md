@@ -129,7 +129,8 @@ agent 直接运行 `workbench.mjs` 命令时没有这些变量：数据目录按
 
 - 身份：从 `HUB_MCP_SERVERS_FILE` 里找到接入器（`uv run …/hub_agent.py`），运行 `hub_agent.py token`（接入器 0.5.6 起）拿 `{hub, access_token, expires_at}`；快过期先续期，401 时换一次令牌重试。
 - 下载：只接受这个中枢的 `/api/files/` 签名链接；图片加 `fmt=png` 让中枢转成 PNG（中枢 0.8.7 对应版本起支持），再走工作台原有的 PNG 校验入库。
-- 限制：出图不支持参考图；视频只支持文生视频和首帧生视频，其余模式走视频网关。
+- 参考图（v0.8.10 起）：中枢出图通道是第三方 API 时支持，走 `/api/v1/images/with-references`；工作台先查 `/api/v1/capabilities` 决定界面上能不能选参考图。本机 GPU / H3 网关通道不支持。
+- 限制：视频只支持文生视频和首帧生视频，其余模式走视频网关。
 - 接上中枢时默认用「公司中枢」；员工在设置里保存过的选择优先。APIMart 和视频网关保留，作为备选。
 
 ## 5. 已验证与未验证

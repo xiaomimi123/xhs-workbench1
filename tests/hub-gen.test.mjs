@@ -51,6 +51,7 @@ function fakeGen({available=true,images=[],status='done',submitError}={}){
  const submitted=[];
  return {submitted,available:()=>available,
   submitImage:async a=>{if(submitError)throw submitError;submitted.push(a);return 'task-img';},
+  capabilities:async()=>({image_via:'第三方 API',image_references:true}),
   poll:async()=>({status,images,videos:['http://hub.test/api/files/v/out.mp4'],error:status==='failed'?'显卡忙':'',ahead:status==='queued'?2:undefined}),
   download:async(url,o)=>{assert.equal(o.png,true);return png;}};
 }
@@ -75,8 +76,6 @@ test('公司中枢出图：失败、数量不符、拒绝提交、参考图和�
  const denied=Object.assign(Error('企业中枢：本月 GPU 额度已用完'),{status:403,notSubmitted:true,upstreamStatus:403});
  w=new ImageWorkflow({hubGen:fakeGen({submitError:denied})});j=w.start(a,{prompt:'额度',provider:'hub',size:'1:1'});await w.active.get(j.id);
  assert.equal(w.find(a,j.id).status,'error');assert.match(w.find(a,j.id).error,/额度.*没有创建任务/);
- const ref=w.uploadReference(a,{filename:'r.png',data:png.toString('base64')});
- assert.throws(()=>w.start(a,{prompt:'参考',provider:'hub',size:'1:1',references:[{file:ref.file,source:'studio'}]}),/参考图/);
  assert.throws(()=>w.start(a,{prompt:'比例',provider:'hub',size:'21:9'}),/比例/);
  assert.throws(()=>new ImageWorkflow({hubGen:fakeGen({available:false})}).start(a,{prompt:'未接',provider:'hub',size:'1:1'}),/没有接上企业中枢/);
 });
@@ -109,4 +108,31 @@ test('下载断流自动重试两次；链接过期（4xx）不重试（XHS-04�
  assert.deepEqual(await g.download(`${HUB}/api/files/t1/a.png`),png);assert.equal(n,3);assert.deepEqual(waits,[1500,3000]);
  n=0;await assert.rejects(g.download(`${HUB}/api/files/t1/old.png`),/HTTP 403/);assert.equal(n,1);
  n=0;await assert.rejects(g.download(`${HUB}/api/files/t1/bad.png`),/已自动重试 2 次/);assert.equal(n,3);
+});
+
+test('公司中枢出图带参考图：参考图快照和角色说明交给中枢；通道不支持时中枢拒绝、不建任务',async()=>{
+ const a=account();let gen=fakeGen({status:'queued'}),w=new ImageWorkflow({hubGen:gen});
+ const prod=w.uploadReference(a,{filename:'产品.png',data:png.toString('base64'),role:'product'});
+ const j=w.start(a,{prompt:'换成秋天背景',provider:'hub',size:'3:4',references:[{file:prod.file,source:'studio',role:'product'}]});
+ await w.active.get(j.id);
+ assert.equal(gen.submitted[0].references.length,1);assert.deepEqual(gen.submitted[0].references[0].data,png);
+ assert.match(gen.submitted[0].prompt,/参考图1：保持实际产品包装/);
+ const denied=Object.assign(Error('企业中枢：当前出图通道（本机 GPU）不支持参考图，只有第三方 API 通道支持'),{status:400,notSubmitted:true,upstreamStatus:400});
+ w=new ImageWorkflow({hubGen:fakeGen({submitError:denied})});
+ const k=w.start(a,{prompt:'换成冬天背景',provider:'hub',size:'3:4',references:[{file:prod.file,source:'studio',role:'product'}]});await w.active.get(k.id);
+ assert.equal(w.find(a,k.id).status,'error');assert.match(w.find(a,k.id).error,/不支持参考图.*没有创建任务/);
+});
+
+test('HubGen 带参考图走 /images/with-references，不带走 /images；能力查询有缓存',async()=>{
+ const dir=fs.mkdtempSync(path.join(process.env.XHS_WORKSPACE||'.','hubgen-'));let capCalls=0;const forms=[];
+ const hub=fakeHub({routes:{
+  'POST /api/v1/images/with-references':(u,o)=>{forms.push(o.body);return json({task_id:'r1'},202);},
+  'POST /api/v1/images':()=>json({task_id:'p1'},202),
+  'GET /api/v1/capabilities':()=>{capCalls++;return json({image_via:'第三方 API',image_references:true});},
+ }});
+ const g=new HubGen({env:{HUB_MCP_SERVERS_FILE:serversFile(dir)},fetchImpl:hub.fetchImpl,runToken:hub.runToken});
+ assert.equal(await g.submitImage({prompt:'p',aspect:'1:1',references:[{data:png,filename:'a.png'},{data:png,filename:'b.png'}]}),'r1');
+ assert.equal(forms[0].getAll('images').length,2);assert.equal(forms[0].get('prompt'),'p');
+ assert.equal(await g.submitImage({prompt:'p',aspect:'1:1'}),'p1');
+ assert.equal((await g.capabilities()).image_references,true);await g.capabilities();assert.equal(capCalls,1);
 });
