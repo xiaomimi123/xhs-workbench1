@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { useTempWorkspace, server } from './helpers.mjs';
 useTempWorkspace();
 const store = await server('store.mjs'); store.ensureWorkspace();
-const { BenchmarkQueue, collectionStatus, enqueueCollection, recordCollectionObservation } = await server('benchmark-queue.mjs');
+const { BenchmarkQueue, collectionRoute, collectionStatus, enqueueCollection, recordCollectionObservation } = await server('benchmark-queue.mjs');
 const complete = () => ({ state: 'complete', avatar: { path: 'avatar.png' }, profile: { bio: {} }, discoveredCount: 2, attemptedCount: 2, notes: [{}, {}] });
 
 test('六目标串行，第三个中断后重启仅恢复未完成项，重复通知不重复派发', () => {
@@ -97,4 +97,14 @@ test('新增推荐仅登记待办；明确启动后才执行且不包含后来�
  q.control(a,'resume');enqueueCollection(a,['b_later']);q.tick();assert.deepEqual(sent,['b_one']);
  q.finish(collectionStatus(a).items[0].taskId,'没有结果');
  assert.equal(collectionStatus(a).items[1].authorized,false);
+});
+
+test('批量采集选路：后台组件优先；WorkBuddy 插件方式走 agent；都不行才拒绝（XHS-02）', () => {
+  const ready = { enabled: true, available: true, compatible: true };
+  assert.equal(collectionRoute(ready, { mode: 'cli', browser: 'playwright' }), 'worker');
+  assert.equal(collectionRoute({ ...ready, compatible: false }, { mode: 'cli', browser: 'workbuddy' }), 'agent');
+  assert.equal(collectionRoute({ enabled: false }, { mode: 'cli', browser: 'workbuddy' }), 'agent');
+  assert.equal(collectionRoute({ enabled: false }, { mode: 'cli', browser: 'playwright' }), null);
+  assert.equal(collectionRoute({ enabled: false }, { mode: 'inbox', browser: 'workbuddy' }), null);
+  assert.equal(collectionRoute({ enabled: false }, { mode: 'cli', browser: 'none' }), null);
 });

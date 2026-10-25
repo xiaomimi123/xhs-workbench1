@@ -281,3 +281,20 @@ test('对标检查点：不同账号隔离，损坏的旧列表不能被空数�
   fs.writeFileSync(index, saved);
   assert.ok(content.listBenchmarks(other.id).some((b) => b.id === 'b_should_wait'));
 });
+
+test('删除一个素材只移走它自己的文件，其它素材的文件还在（XHS-01）', () => {
+  const a = mats.saveMaterial({ title: '素材 A', file: mats.uploadMaterial('a.png', PNG_1PX.toString('base64')) });
+  const b = mats.saveMaterial({ title: '素材 B', file: mats.uploadMaterial('b.png', PNG_1PX.toString('base64')) });
+  const files = path.join(WS, 'accounts', ACC, 'materials', 'files');
+  mats.deleteMaterial(a.id);
+  assert.ok(fs.existsSync(files), 'files 目录本身不能被移走');
+  assert.equal(fs.existsSync(path.join(files, a.file)), false);
+  assert.ok(fs.existsSync(path.join(files, b.file)));
+  assert.ok(mats.listMaterials().some((x) => x.id === b.id));
+  mats.deleteMaterial(b.id);
+});
+
+test('safeJoin 多传参数直接报错，不再静默丢掉', () => {
+  assert.throws(() => store.safeJoin(WS, 'files', 'x.png'), /两个参数/);
+  assert.equal(store.safeJoin(WS, path.join('files', 'x.png')), path.join(WS, 'files', 'x.png'));
+});

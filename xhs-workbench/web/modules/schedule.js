@@ -1,3 +1,4 @@
+import { readonlyNotice } from '../readonly-notice.js';
 import {renderDraft,draftBusy} from '../schedule-draft.js';
 // 发布排期：安排发布时间 → 到点提醒手动发布（附发布助手）
 import { esc } from '../md.js';
@@ -164,6 +165,7 @@ function draw(main) {
       <div class="spacer"></div>
       <button class="btn" data-act="toggle-settings">${icon("sliders")} 发布设置</button>
     </div>
+    ${readonlyNotice('发布笔记')}
     ${V.showSettings ? settingsHtml() : ''}
     ${attention.length ? `<h3 class="section-title">需要处理（${attention.length}）</h3>${attention.map(attentionCard).join('')}` : ''}
     <div class="card" id="draft-panel" style="margin:16px 0"></div>

@@ -100,7 +100,10 @@ export function deleteMaterial(id) {
   const idx = items.findIndex((x) => x.id === id);
   if (idx < 0) throw httpError(404, '素材不存在');
   const [removed] = items.splice(idx, 1);
-  moveToTrash(safeJoin(libraryDir(), 'files', removed.file), 'materials', { label: `素材：${removed.title || removed.file}` });
+  // 只移走这一个素材的文件：文件名必须是单个文件名，空名字时不能落到 files 目录本身
+  const file = typeof removed.file === 'string' && removed.file && path.basename(removed.file) === removed.file
+    ? safeJoin(libraryDir(), path.join('files', removed.file)) : null;
+  if (file && fs.existsSync(file) && fs.lstatSync(file).isFile()) moveToTrash(file, 'materials', { label: `素材：${removed.title || removed.file}` });
   writeJson(indexFile(), { items });
   return removed;
 }

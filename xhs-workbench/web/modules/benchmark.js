@@ -211,7 +211,7 @@ function collectionCardHtml() {
       ${kind !== 'restriction' ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">遇到验证码或访问受限时</summary>
         <p class="muted" style="margin:6px 0">如果你在小红书看到验证码、账号异常提示，点下面的按钮立刻停止所有自动访问，避免继续触发风控。</p>
         <button class="btn small" data-act="lock-restriction">遇到验证码/受限，立刻暂停自动访问</button></details>` : ''}
-      ${items.filter((x) => ['running', 'partial', 'blocked'].includes(x.state)).map((x) => `<div>${esc(V.items.find((b) => b.id === x.id)?.name || x.id)}：${x.state === 'running' ? '采集中' : '未完整采集'} · 尝试 ${x.attempts} 次 ${esc(x.reason || '')}</div>`).join('')}
+      ${items.filter((x) => ['running', 'partial', 'blocked'].includes(x.state)).map((x) => `<div>${esc(V.items.find((b) => b.id === x.id)?.name || x.id)}：${x.state === 'running' ? `采集中${x.route === 'agent' ? '（agent 读页面，每个目标可能要几分钟）' : x.route === 'worker' ? '（后台只读组件）' : ''}` : '未完整采集'} · 尝试 ${x.attempts} 次 ${esc(x.reason || '')}</div>`).join('')}
     </div>`;
 }
 

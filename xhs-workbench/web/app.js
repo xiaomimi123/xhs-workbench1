@@ -551,7 +551,10 @@ async function loginAccount(id) {
   // 登录账号由工作台自己打开浏览器、停在登录页等员工本人扫码，不经过 agent（聊天里的 agent 没有浏览器权限，处处被拦）。
   // 第一次用时先自动安装浏览器组件（只装 playwright-core，浏览器用电脑上的 Edge / Chrome）
   if (!S.bridge?.browserWorker?.available) {
-    toast('第一次登录：正在安装浏览器组件（约 1 分钟），装好会自动打开浏览器…');
+    // 先征求同意：员工可能不想在电脑上装东西（XHS-08）。只装 playwright-core，不下载浏览器
+    const ok = await confirmDialog({ title: '第一次登录要先装浏览器组件', message: '工作台要装一个浏览器控制组件（playwright-core，约 1 分钟，装在工作台自己的目录里）。不会下载新的浏览器：用你电脑上已有的 Edge / Chrome 打开小红书登录页，由你本人扫码。不想装可以取消，改用自己的浏览器登录小红书。', confirmLabel: '安装并打开登录页', cancelLabel: '先不装' });
+    if (!ok) return toast('没有安装：要登录时再点「登录账号」');
+    toast('正在安装浏览器组件（约 1 分钟），装好会自动打开浏览器…');
     try {
       await api('POST', '/api/browser/runtime');
       const { status } = await api('GET', '/api/bridge');

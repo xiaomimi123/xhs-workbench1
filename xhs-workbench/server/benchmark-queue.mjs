@@ -35,6 +35,13 @@ export function observationComplete(s) {
     && Number.isInteger(s.discoveredCount) && s.attemptedCount >= Math.min(s.discoveredCount, 5)
     && s.notes.length >= Math.min(s.discoveredCount, 5));
 }
+/** 批量采集走哪条路：后台只读组件（确定性读取）→ 'worker'；浏览器方式是 WorkBuddy 插件 → 'agent'（CodeBuddy 按手册读）；都不行 → null */
+export function collectionRoute(worker, cfg) {
+  if (worker?.enabled && worker.available && worker.compatible) return 'worker';
+  if (cfg?.mode === 'cli' && cfg?.browser === 'workbuddy') return 'agent';
+  return null;
+}
+
 export class BenchmarkQueue {
   constructor({ accounts, detail, busy, dispatch, changed }) {
     Object.assign(this, { accounts, detail, busy, dispatch, changed });
@@ -110,7 +117,7 @@ export class BenchmarkQueue {
         item.state = 'running'; item.attempts++; item.startedAt = new Date().toISOString();
         item.taskId = `collect_${account}_${item.id}_${Date.now()}`;
         this.save(account, q); // 派发前写意图，崩溃不会无记录重放。
-        try { this.dispatch(account, item.id, item.taskId); }
+        try { const route = this.dispatch(account, item.id, item.taskId); if (route === 'worker' || route === 'agent') { item.route = route; this.save(account, q); } }
         catch (err) { this.finish(item.taskId, err.message); }
         dirty = false; break; // 每账号每轮至多一个目标
       }

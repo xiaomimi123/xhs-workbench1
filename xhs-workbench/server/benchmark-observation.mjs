@@ -142,13 +142,25 @@ function validatedNotes(notes, observedAt, source) {
   });
 }
 
+const sameName = (value) => String(value || '').replace(/\s+/g, '').toLowerCase();
+
+// 身份以主页链接为准（/user/profile/<id> 是账号唯一 id，比可改的小红书号稳定）；小红书号和昵称是附加核对：
+// 双方都有小红书号时必须一致；没读到（手册允许留空）或已核实记录里没有时，昵称必须和已核实记录一致。
+// 身份字段一律取已核实记录，检查点不能改写身份。
 function verifiedIdentity(entry, item) {
   if (!item || !item.verifiedAt || !item.url) throw new Error('请先核实对标主页，再保存观察数据');
   const url = canonicalProfileUrl(entry.url);
   if (!url || url !== canonicalProfileUrl(item.url)) throw new Error('观察主页与已核实主页不一致');
-  const xhsId = text(entry.xhsId, 120, true);
-  if (!item.xhsId || xhsId !== item.xhsId) throw new Error('观察的小红书号与已核实账号不一致');
-  return { url, xhsId };
+  const reported = entry.xhsId === undefined || entry.xhsId === null ? '' : text(entry.xhsId, 120);
+  if (reported && item.xhsId) {
+    if (reported !== item.xhsId) throw new Error('观察的小红书号与已核实账号不一致');
+  } else {
+    const name = sameName(entry.profileName);
+    if (!name || ![item.profileName, item.name].map(sameName).filter(Boolean).includes(name)) {
+      throw new Error(`${reported ? '已核实记录里没有小红书号' : '没有读到小红书号'}，且主页昵称与已核实账号不一致，无法确认是同一个账号`);
+    }
+  }
+  return { url, xhsId: item.xhsId };
 }
 
 function capturedAvatar(dir, id, name, observedAt, source) {

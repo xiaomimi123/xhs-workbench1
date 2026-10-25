@@ -1,3 +1,4 @@
+import { readonlyNotice } from '../readonly-notice.js';
 import {renderEngageReview,reviewBusy} from '../engage-review.js';
 // 评论私信：agent 抓取新评论 / 私信并起草回复 → 用户修改确认 → agent 发送
 import { esc } from '../md.js';
@@ -117,6 +118,7 @@ function draw(main) {
       <button class="btn" data-act="toggle-settings">${icon("sliders")} 设置</button>
       <button class="btn" data-act="fetch">让 agent 检查新消息</button>
     </div>
+    ${readonlyNotice('正式发送回复')}
     <div id="local-reply-review" class="card" style="margin-bottom:16px"></div>
     <details><summary>原消息与正式发送操作（独立于本地审核）</summary>
     ${V.showSettings ? settingsHtml() : ''}

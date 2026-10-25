@@ -19,7 +19,7 @@ import { TopicWorkflow, topicSources } from './topic-workflow.mjs';
 import { stageDownloadedAvatar, stageVisualEvidence } from './benchmark-observation.mjs';
 // 小红书运营工作台 · 本地服务（基础功能零依赖；后台只读浏览器按需加载）
 import http from 'node:http';
-import { BenchmarkQueue, collectionStatus, observationComplete } from './benchmark-queue.mjs';
+import { BenchmarkQueue, collectionRoute, collectionStatus, observationComplete } from './benchmark-queue.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -557,15 +557,20 @@ const collectionQueue = new BenchmarkQueue({
     const benchmark = content.benchmarkDetail(accountId, benchmarkId).item;
     const worker = workerInfo();
     const cfg = bridge.config();
-    const useWorker = worker.enabled && worker.available && worker.compatible;
-    if (!useWorker) throw new Error('只读采集组件不可用；不会自动改用 agent 浏览器');
-    const text = `按 playbooks/benchmark.md 自动接续对标资料采集，仅处理 id=${benchmarkId}。读取已登记目标，实时核对当前登录账号与目标身份；同一次浏览器占用内保存头像元素局部 PNG、主页字段、最多五篇可见笔记。先写 verified，再逐篇写独立 observation 检查点并写收尾；不要只回复文字。已有有效笔记保留，仅补缺项。登录/风控立即停止并报告原因。`;
-    bridge.submit({ id, accountId, account, benchmark, timeoutMs: 180_000,
+    // 三条路：后台只读组件（Playwright，确定性读取）/ agent 浏览器（浏览器方式是 WorkBuddy 插件时，CodeBuddy 按手册读）/ 拒绝。
+    // WorkBuddy 插件方式本来就只能走 agent（单个「核实主页」也是这样），批量队列以前漏了这条路，导致一律失败。
+    const route = collectionRoute(worker, cfg), useWorker = route === 'worker', viaAgent = route === 'agent';
+    if (!route) throw new Error('只读采集组件不可用：请在「连接与设置」开启后台组件，或把浏览器方式设为 WorkBuddy 插件；不会自动改用其它浏览器');
+    const timeoutMs = useWorker ? 180_000 : 600_000;  // agent 读页面慢：实测光核对登录就要约 3 分钟
+    const text = `按 playbooks/benchmark.md 自动接续对标资料采集，仅处理 id=${benchmarkId}。读取已登记目标，实时核对当前登录账号与目标身份；同一次浏览器占用内保存头像元素局部 PNG、主页字段、最多五篇可见笔记。先写 verified，再逐篇写独立 observation 检查点并写收尾；不要只回复文字。已有有效笔记保留，仅补缺项。登录/风控立即停止并报告原因。` +
+      (viaAgent ? `用 WorkBuddy 浏览器工具（mcp__browser__*）在用户自己的浏览器里新开标签页操作，按 playbooks/browser.md 先核对登录账号；只读档没有点击工具，看笔记时用 tab_goto 打开页面上卡片链接的原文（带全部参数，不拼接不删参数）；不点赞、不评论、不关注、不私信、不发布；遇到验证码或风险提示立即停止并说明。` : '');
+    bridge.submit({ id, accountId, account, benchmark, timeoutMs,
       kind: useWorker ? 'benchmark.verify' : undefined,
       prompt: buildPrompt({ session: { messages: [] }, account, text, includeHistory: false }) });
     if (cfg?.mode === 'inbox') setTimeout(() => {
       if (bridge.tasks.has(id)) bridge.cancel(id);
-    }, 180_000).unref();
+    }, timeoutMs).unref();
+    return useWorker ? 'worker' : 'agent';
   },
 });
 collectionQueue.recover();

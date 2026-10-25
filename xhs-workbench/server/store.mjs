@@ -31,8 +31,10 @@ export function newId(prefix = '') {
   return prefix + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
 }
 
-// 把相对路径限制在 base 目录内，防止 ../ 越界
-export function safeJoin(base, rel) {
+// 把相对路径限制在 base 目录内，防止 ../ 越界。只收两个参数：多段路径先用 path.join 拼好再传，
+// 多传的参数以前会被静默丢掉（删素材时因此把整个 files 目录移进了回收站）
+export function safeJoin(base, rel, ...extra) {
+  if (extra.length) throw new Error('safeJoin 只接受 (base, rel) 两个参数，多段路径请先 path.join');
   const target = path.resolve(base, rel || '');
   if (target !== base && !target.startsWith(base + path.sep)) {
     throw httpError(400, '路径不合法');

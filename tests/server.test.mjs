@@ -310,3 +310,18 @@ test('收件箱接口：peek 只看队列不领取；requeue 对不存在的任�
   assert.equal(typeof peek.body.pending, 'number');
   assert.equal((await api('POST', '/api/agent/requeue', { taskId: 'nope' })).status, 404);
 });
+
+test('素材：通过接口删一个素材，另一个素材的文件还在（XHS-01）', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const ids = [];
+  for (const n of ['http-a.png', 'http-b.png']) {
+    const up = await api('POST', '/api/materials/upload?account=default', { filename: n, data: png });
+    assert.equal(up.status, 200);
+    ids.push((await api('POST', '/api/materials?account=default', { title: n, file: up.body.name })).body);
+  }
+  assert.equal((await api('DELETE', `/api/materials?account=default&id=${ids[0].id}`)).status, 200);
+  const files = path.join(WS, 'accounts', 'default', 'materials', 'files');
+  assert.equal(fs.existsSync(path.join(files, ids[0].file)), false);
+  assert.ok(fs.existsSync(path.join(files, ids[1].file)));
+  assert.ok((await api('GET', '/api/materials?account=default')).body.items.some((x) => x.id === ids[1].id));
+});

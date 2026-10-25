@@ -293,6 +293,8 @@ export class Bridge extends EventEmitter {
       hostAgent: cfg && cfg.mode === 'inbox' && cfg.hostAgent ? { id: cfg.hostAgent.id, name: cfg.hostAgent.name } : null,
       testedAt: cfg ? cfg.testedAt : null,
       browser: cfg ? cfg.browser || null : null,
+      // 浏览器权限档：只读档不能点击、输入（界面据此说明为什么发送 / 发布要本人来做）
+      browserMode: cfg?.browser && cfg.browser !== 'none' ? (cfg.adapter?.browserMode === 'test' ? 'test' : 'readonly') : null,
       // agent 领到任务后在处理（可能几分钟不再轮询），这段时间也算在线，否则界面会误报“离线”
       // 正在长轮询（waiters 里有它）一定在线：一次长轮询最长 110 秒，超过 45 秒的窗口，不算的话每次轮询中途都会闪成“离线”
       inboxOnline: this.waiters.length > 0 || Date.now() - this.lastPoll < INBOX_ONLINE_MS || inboxTasks.some((t) => t.state === 'claimed' && Date.now() - new Date(t.lastReplyAt || t.claimedAt).getTime() < INBOX_WORKING_MS),

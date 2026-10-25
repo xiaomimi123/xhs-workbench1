@@ -101,3 +101,12 @@ test('视频创作选公司中枢：任务记录服务来源，查询下载走�
  assert.throws(()=>w.start(a,{mode:'r2v',prompt:'x',references:['ref:a.png']}),/只支持/);
  const old=new VideoWorkflow({service:gateway,hub:{...hub,available:()=>false}});assert.equal(old.defaultProvider(),'gateway');
 });
+
+test('下载断流自动重试两次；链接过期（4xx）不重试（XHS-04）',async()=>{
+ const dir=fs.mkdtempSync(path.join(process.env.XHS_WORKSPACE||'.','hubgen-'));let n=0;const waits=[];
+ const hub=fakeHub({routes:{'GET /api/files/t1/a.png':()=>{n++;if(n<3)throw new TypeError('fetch failed');return new Response(png);},'GET /api/files/t1/old.png':()=>{n++;return new Response('',{status:403});},'GET /api/files/t1/bad.png':()=>{n++;return new Response('',{status:502});}}});
+ const g=new HubGen({env:{HUB_MCP_SERVERS_FILE:serversFile(dir)},fetchImpl:hub.fetchImpl,runToken:hub.runToken,sleep:async ms=>{waits.push(ms);}});
+ assert.deepEqual(await g.download(`${HUB}/api/files/t1/a.png`),png);assert.equal(n,3);assert.deepEqual(waits,[1500,3000]);
+ n=0;await assert.rejects(g.download(`${HUB}/api/files/t1/old.png`),/HTTP 403/);assert.equal(n,1);
+ n=0;await assert.rejects(g.download(`${HUB}/api/files/t1/bad.png`),/已自动重试 2 次/);assert.equal(n,3);
+});

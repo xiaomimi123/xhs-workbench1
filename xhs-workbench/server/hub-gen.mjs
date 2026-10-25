@@ -26,8 +26,8 @@ export function locateConnector(env = process.env, read = (p) => fs.readFileSync
 }
 
 export class HubGen {
-  constructor({ env = process.env, fetchImpl = globalThis.fetch, runToken } = {}) {
-    this.env = env; this.fetch = fetchImpl; this.cached = null;
+  constructor({ env = process.env, fetchImpl = globalThis.fetch, runToken, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+    this.env = env; this.fetch = fetchImpl; this.cached = null; this.sleep = sleep;
     this.runToken = runToken || ((c) => new Promise((resolve, reject) => {
       const child = spawn(c.command, [...c.pre, c.script, 'token'], { env: sanitizeAgentEnv(env), windowsHide: true });
       let out = '', err = '';
@@ -116,12 +116,21 @@ export class HubGen {
     try { u = new URL(url); } catch { throw httpError(502, '中枢返回的下载链接无效'); }
     if (u.origin !== new URL(t.hub).origin || !u.pathname.startsWith('/api/files/')) throw httpError(502, '下载链接不是这个中枢的');
     if (png) u.searchParams.set('fmt', 'png');
-    let res;
-    try { res = await this.fetch(u.href, { redirect: 'error', signal: AbortSignal.timeout(300_000) }); } catch { throw httpError(502, '下载生成结果失败，可稍后刷新任务重试'); }
-    if (!res.ok) throw httpError(502, `下载生成结果失败（HTTP ${res.status}），链接可能已过期，刷新任务会拿到新链接`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > max) throw httpError(502, '生成结果超过大小上限');
-    return buf;
+    // 中枢到上游偶尔断流（SSL EOF 等）：网络错误和 5xx 自动再试两次（隔 1.5 秒、3 秒），4xx（链接过期等）不重试
+    for (let attempt = 0; ; attempt++) {
+      let res, buf;
+      try {
+        res = await this.fetch(u.href, { redirect: 'error', signal: AbortSignal.timeout(300_000) });
+        if (res.ok) buf = Buffer.from(await res.arrayBuffer());
+      } catch { res = null; }
+      if (buf) {
+        if (buf.length > max) throw httpError(502, '生成结果超过大小上限');
+        return buf;
+      }
+      if (res && res.status < 500) throw httpError(502, `下载生成结果失败（HTTP ${res.status}），链接可能已过期，刷新任务会拿到新链接`);
+      if (attempt >= 2) throw httpError(502, `下载生成结果失败（${res ? `HTTP ${res.status}` : '网络中断'}，已自动重试 2 次），稍后刷新任务会再下载`);
+      await this.sleep(1500 * (attempt + 1));
+    }
   }
 }
 
