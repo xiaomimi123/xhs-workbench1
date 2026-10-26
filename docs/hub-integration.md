@@ -141,6 +141,7 @@ agent 直接运行 `workbench.mjs` 命令时没有这些变量：数据目录按
 - 读得太快：两篇笔记的检查点相隔不到 20 秒 → 取消正在跑的 agent 任务、暂停队列、自动关总开关。一份检查点里装多篇、补合并的旧检查点不触发。
 - 策略（`pace-policy.json`）放在 `HUB_APP_STATE_DIR`（和访问锁一起，agent 碰不到）；没接中枢时放账号数据目录。接口：`GET /api/browse/pace`、`POST /api/browse/policy`（`enable` / `disable` / `set-cooldown` / `clear-cooldown` / `set-limits`）。
 - 这些数只是控制读取量，**不保证不触发平台风控**；agent 在一次会话里每一步怎么点，工作台管不到。
+- **后台 Playwright 采集和登录核对已停用（v0.8.11 起）**：采集只走员工自己浏览器里的 WorkBuddy 插件。组件的 `verify` / `prepare` 拒绝，相关接口 409，队列只选 agent 路径；`XHS_ALLOW_WORKER_COLLECT=1` 只给开发 / 自动测试放开。图片封面渲染（headless Edge 画本地 HTML）不受影响。
 - `XHS_PACE_RELAX=1` 只给开发 / 自动测试：关掉「时段 / 采集间隔 / 读得太快」三项，生产里不要设。
 
 ## 5. 已验证与未验证

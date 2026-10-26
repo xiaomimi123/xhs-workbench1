@@ -10,6 +10,13 @@ const CREATOR = 'https://creator.xiaohongshu.com/';
 const SEARCH = 'https://www.xiaohongshu.com/search_result?keyword=';
 const NAV_TIMEOUT = 22_000;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * 后台 Playwright 组件读小红书（采集、登录核对）已停用：采集只走员工自己浏览器里的 WorkBuddy 插件。
+ * 原因：Playwright 直连带自动化特征（navigator.webdriver、调试通道的启动参数），且用的是工作台专用的浏览器资料，不是员工日常浏览器。
+ * 只有开发 / 自动测试才设 XHS_ALLOW_WORKER_COLLECT=1 放开；生产里不要设。封面渲染用的 headless Edge 不经过这里，不受影响。
+ */
+export const workerCollectAllowed = () => process.env.XHS_ALLOW_WORKER_COLLECT === '1';
+export const WORKER_DISABLED = '后台 Playwright 采集已停用：采集和登录核对只在你自己的浏览器里、由 agent 通过 WorkBuddy 浏览器插件完成';
 /** 后台组件读两篇笔记之间的随机间隔（毫秒） */
 export const NOTE_GAP_MS = [20_000, 45_000];
 const interrupted = (signal) => { if (signal?.aborted) throw new Error('已取消'); };
@@ -217,6 +224,7 @@ export class BrowserWorker {
    * 工作台账号还没填小红书号时，用浏览器里登录的这个（由调用方保存）；填了但不一致时不放行，请员工换号。
    */
   async prepare(account, { signal, waitMs = 0 } = {}) {
+    if (!workerCollectAllowed()) throw new Error(WORKER_DISABLED);
     const existing = this.instances.get(account.id);
     if (existing) delete existing.proof;
     let { page, identity } = await this.#creator(account.id, signal, { login: true });
@@ -251,6 +259,7 @@ export class BrowserWorker {
 
   async verify(account, benchmark, { signal, onProgress = () => {}, onVerified = async () => {}, onNote = async () => {}, onFinish = async () => {} } = {}) {
     const started = Date.now();
+    if (!workerCollectAllowed()) throw new Error(WORKER_DISABLED);
     this.assertAccess(account.id);
     const instance = this.instances.get(account.id);
     const proof = instance?.proof;

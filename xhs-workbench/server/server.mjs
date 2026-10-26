@@ -35,7 +35,7 @@ import { ensureDefaultConnection, codebuddyStatus, checkCodebuddy, openCodebuddy
 import * as content from './content.mjs';
 import * as ops from './automation.mjs';
 import { browserStatus, detectRealBrowser, applyBrowser } from './browser.mjs';
-import { BrowserWorker } from './browser-worker.mjs';
+import { BrowserWorker, workerCollectAllowed, WORKER_DISABLED } from './browser-worker.mjs';
 import { browserRuntimeStatus, installBrowserRuntimeAsync } from './browser-runtime.mjs';
 import { canonicalProfileUrl } from './browser-read.mjs';
 import { createZip } from './zip.mjs';
@@ -96,9 +96,10 @@ const browserWorker = new BrowserWorker({
 function workerInfo() {
   const cfg = bridge.config();
   const runtime = browserRuntimeStatus();
-  const enabled = !!store.readJson(P.settings, {}).backgroundBrowser;
-  return { enabled, available: runtime.available,
-    compatible: cfg?.mode === 'cli' && cfg.browser === 'playwright' && !!cfg.adapter?.playwrightMcp
+  const allowed = workerCollectAllowed();   // 停用时：不管设置里写的什么，都按「没开、不兼容」处理，采集只剩 WorkBuddy 插件这条路
+  const enabled = allowed && !!store.readJson(P.settings, {}).backgroundBrowser;
+  return { enabled, available: runtime.available, disabled: !allowed,
+    compatible: allowed && cfg?.mode === 'cli' && cfg.browser === 'playwright' && !!cfg.adapter?.playwrightMcp
       && (cfg.adapter?.args?.includes('{mcpConfig}') || (cfg.adapter?.id==='codex' && cfg.adapter?.browserTransport==='codex')) && !cfg.adapter?.headless,
     fastModel: cfg?.adapter?.id === 'claude-code' ? store.readJson(P.settings, {}).fastReadModel || '' : '',
     accounts: browserWorker.status(), access: Object.fromEntries(store.listAccounts().map(a=>[a.id,browserAccessStatus(a.id)])) };
@@ -462,6 +463,7 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
   if (taskKind !== undefined) {
     if (!['benchmark.verify', 'browser.prepare', 'benchmark.agent'].includes(taskKind)) throw store.httpError(400, '任务类型不支持');
     const worker = workerInfo();
+    if (['benchmark.verify', 'browser.prepare'].includes(taskKind) && !workerCollectAllowed()) throw store.httpError(409, WORKER_DISABLED);
     if (taskKind === 'benchmark.agent') {
       // WorkBuddy 插件方式下的单个「核实主页」：本质是一次采集会话，和批量采集用同一套闸门和账本
       const c = bridge.config();
@@ -911,6 +913,7 @@ async function handleApi(req, res, url) {
       if (body.enabled !== undefined) {
         if (typeof body.enabled !== 'boolean') throw store.httpError(400, '启停设置不合法');
         if (bridge.activeProfiles.size) throw store.httpError(409, '浏览器任务正在运行，请完成或取消后切换');
+        if (body.enabled && !workerCollectAllowed()) throw store.httpError(409, WORKER_DISABLED);
         if (body.enabled && (!workerInfo().available || !workerInfo().compatible)) throw store.httpError(409, '请先安装后台组件并配置有头 Playwright 浏览器');
         next.backgroundBrowser = body.enabled;
         if (!body.enabled) await bridge.closeBrowsers();

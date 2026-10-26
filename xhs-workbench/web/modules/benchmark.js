@@ -437,7 +437,7 @@ function bind(main) {
         if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
           return ask('只做一件事：在我自己的浏览器里打开 https://www.xiaohongshu.com ，核对当前登录的小红书号，和「当前账号」里填写的号比对，把结果告诉我。不要打开任何对标主页、不要读笔记、不要点开详情、不要发布。', true);
         }
-        return ask('独立核对当前登录账号，不采集对标资料', true, {taskKind:'browser.prepare'});
+        return toast('请先在「连接与设置 → 执行 Agent 与浏览器」里把浏览器方式选成「WorkBuddy 浏览器插件」：登录核对只在你自己的浏览器里做');
       case 'resume-access':
         await api('POST', `/api/browser/access?${acc()}`, {action:'resume'}); await load(); return draw(main);
       case 'lock-restriction':
@@ -448,16 +448,13 @@ function bind(main) {
       case 'recommend':
         return ask(`根据现有本地资料推荐候选，写入 ${accDirRel()}/benchmarks/checkpoints/pending/ 的 candidate 检查点。只登记待办；不要打开浏览器或自动采集，没有资料时说明缺项。`, true);
       case 'verify':
-        if (S.bridge?.browserWorker?.enabled && S.bridge.browserWorker.available && S.bridge.browserWorker.compatible) {
-          return ask(`只读核实对标账号「${b.name}」的主页`, true, { taskKind: 'benchmark.verify', benchmarkId: b.id });
-        }
         if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
           // 浏览器方式是 WorkBuddy 插件（员工自己的 Edge / Chrome）：交给 CodeBuddy 按手册只读核实，逐步写检查点；
           // 走 benchmark.agent：服务端先过采集闸门（总开关 / 冷静期 / 时段 / 每日上限）、记账，并在提示词里补上数字
           return ask(`请按 playbooks/benchmark.md「主页资料与近 5 篇笔记观察」只读核实对标账号「${b.name}」（对标 id：${b.id}，主页：${b.url || '未提供：先用站内搜索找到唯一匹配的主页，找不到或有多个就停下说明'}）。` +
             `用 WorkBuddy 浏览器工具（mcp__browser__*）在用户自己的浏览器里新开标签页操作，按 playbooks/browser.md 先核对登录账号；只读档没有点击工具，看笔记时用 tab_goto 打开页面上卡片链接的原文（带全部参数，不拼接不删参数）；逐步写检查点；不点赞、不评论、不关注、不私信、不发布；遇到验证码或风险提示立即停止并说明。`, true, { taskKind: 'benchmark.agent', benchmarkId: b.id });
         }
-        return toast('只读采集组件不可用，请先在连接设置中配置；不会自动切换采集工具');
+        return toast('采集只走 WorkBuddy 浏览器插件：请先在「连接与设置 → 执行 Agent 与浏览器」里把浏览器方式选成「WorkBuddy 浏览器插件」');
       case 'analyze': {
         const shots = V.detail.screenshots.length;
         if (!b.url && !shots) return toast('先核实主页，或上传主页和笔记截图，再拆解');

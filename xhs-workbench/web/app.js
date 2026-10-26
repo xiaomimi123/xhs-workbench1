@@ -548,26 +548,8 @@ function browserLine(a) {
 
 async function loginAccount(id) {
   if (id !== S.accountId) switchAccount(id);
-  // 浏览器方式是 WorkBuddy 插件：用的就是员工自己的浏览器（已经登录着小红书），不需要工作台再装组件、再开一个浏览器
-  if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
-    return toast('浏览器方式是 WorkBuddy 插件：请先在你自己的浏览器里登录小红书，再到「竞品对标」页点「先核对登录账号」，让 agent 读一下当前登录的号并比对');
-  }
-  // 登录账号由工作台自己打开浏览器、停在登录页等员工本人扫码，不经过 agent（聊天里的 agent 没有浏览器权限，处处被拦）。
-  // 第一次用时先自动安装浏览器组件（只装 playwright-core，浏览器用电脑上的 Edge / Chrome）
-  if (!S.bridge?.browserWorker?.available) {
-    // 先征求同意：员工可能不想在电脑上装东西（XHS-08）。只装 playwright-core，不下载浏览器
-    const ok = await confirmDialog({ title: '第一次登录要先装浏览器组件', message: '工作台要装一个浏览器控制组件（playwright-core，约 1 分钟，装在工作台自己的目录里）。不会下载新的浏览器：用你电脑上已有的 Edge / Chrome 打开小红书登录页，由你本人扫码。不想装可以取消，改用自己的浏览器登录小红书。', confirmLabel: '安装并打开登录页', cancelLabel: '先不装' });
-    if (!ok) return toast('没有安装：要登录时再点「登录账号」');
-    toast('正在安装浏览器组件（约 1 分钟），装好会自动打开浏览器…');
-    try {
-      await api('POST', '/api/browser/runtime');
-      const { status } = await api('GET', '/api/bridge');
-      S.bridge = status;
-    } catch (err) {
-      return toast(`浏览器组件安装失败：${err.message}`);
-    }
-  }
-  return sendMessage('登录账号：打开浏览器，扫码登录', { taskKind: 'browser.prepare' });
+  // 登录和账号核对只在员工自己的浏览器里做，由 agent 通过 WorkBuddy 插件读一页比对；工作台不再替员工开 Playwright 浏览器
+  return toast('请先在你自己的浏览器里登录小红书，再到「竞品对标」页点「先核对登录账号」，让 agent 读一下当前登录的号并比对');
 }
 
 async function saveAccountForm(form) {
@@ -635,6 +617,15 @@ function renderBridge(override) {
 }
 
 function workerSettingsHtml(w = {}) {
+  if (w.disabled === false) return workerSettingsLegacyHtml(w);   // 只有开发 / 自动测试放开时才显示原来的开关
+  return `<div class="card" style="max-width:760px;margin-top:16px">
+    <h3 style="margin-top:0">后台 Playwright 采集：已停用</h3>
+    <p class="muted">采集和登录核对只在你自己的浏览器里进行，由 agent 通过 WorkBuddy 浏览器插件完成。Playwright 直连带自动化特征，所以工作台不再用它读小红书，也不再替你打开独立的浏览器窗口（图片封面渲染不受影响）。</p>
+    <p class="muted">要用采集：在「执行 Agent 与浏览器」里把浏览器方式选成「WorkBuddy 浏览器插件」。</p>
+  </div>`;
+}
+
+function workerSettingsLegacyHtml(w = {}) {
   const PHASE = { idle: '空闲', starting: '启动中', ready: '就绪', 'checking-login': '核对登录中', searching: '搜索中', 'reading-profile': '读取主页中', needsLogin: '等待本人登录', needsReview: '需要人工核对', error: '错误' };
   const current = w.accounts?.[S.accountId] || {};
   const available = w.available && w.compatible;
