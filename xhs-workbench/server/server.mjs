@@ -21,6 +21,7 @@ import { stageDownloadedAvatar, stageVisualEvidence } from './benchmark-observat
 // 小红书运营工作台 · 本地服务（基础功能零依赖；后台只读浏览器按需加载）
 import http from 'node:http';
 import { BenchmarkQueue, collectionRoute, collectionStatus, observationComplete } from './benchmark-queue.mjs';
+import { paceSummary, paceInstructions, paceText, updatePolicy, assertCollectionAllowed, recordSession, recordChat, onPaceViolation } from './pace.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -457,10 +458,23 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
   const account = store.getAccount(accountId);
   if (!account || (accountId && account.id !== accountId)) throw store.httpError(404, '账号不存在');
   let benchmark = null;
+  const agentVerify = taskKind === 'benchmark.agent';  // 插件方式下的核实主页：提示词由网页给，服务端只加闸门、记账、数字
   if (taskKind !== undefined) {
-    if (!['benchmark.verify', 'browser.prepare'].includes(taskKind)) throw store.httpError(400, '任务类型不支持');
+    if (!['benchmark.verify', 'browser.prepare', 'benchmark.agent'].includes(taskKind)) throw store.httpError(400, '任务类型不支持');
     const worker = workerInfo();
-    if (taskKind === 'browser.prepare') {
+    if (taskKind === 'benchmark.agent') {
+      // WorkBuddy 插件方式下的单个「核实主页」：本质是一次采集会话，和批量采集用同一套闸门和账本
+      const c = bridge.config();
+      if (!(c?.mode === 'cli' && c?.browser === 'workbuddy')) throw store.httpError(409, '这个入口只用于浏览器方式是 WorkBuddy 插件的情况');
+      assertBrowserCapability();
+      assertBrowserAccess(account.id);
+      if (!/^b_[\w-]+$/.test(benchmarkId || '')) throw store.httpError(400, '对标 id 不合法');
+      const gate = assertCollectionAllowed(account.id);
+      benchmark = content.benchmarkDetail(account.id, benchmarkId).item;
+      recordSession(account.id, benchmarkId);
+      text = `${String(text || '').trim()}\n${paceInstructions(gate.limits)}`;
+      taskKind = undefined;  // 交给 agent 当普通任务跑，不走后台组件
+    } else if (taskKind === 'browser.prepare') {
       // 登录账号：员工本人扫码，由工作台自己的浏览器完成，只要求浏览器组件已安装（网页会先自动安装），不查 agent 连接、中枢能力和访问锁
       if (!worker.available) throw store.httpError(409, '浏览器组件还没安装，请再点一次「登录账号」（会自动安装，约 1 分钟）');
     } else {
@@ -468,9 +482,11 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
       assertBrowserAccess(account.id);
       if (!worker.enabled || !worker.available || !worker.compatible) throw store.httpError(409, '后台有头读取尚未就绪，请在设置页开启并安装组件，或使用原 agent 路径');
     }
-    if (taskKind === 'benchmark.verify') {
+    if (agentVerify) { /* 上面已处理 */ } else if (taskKind === 'benchmark.verify') {
       if (!/^b_[\w-]+$/.test(benchmarkId || '')) throw store.httpError(400, '对标 id 不合法');
       benchmark = content.benchmarkDetail(account.id, benchmarkId).item;
+      assertCollectionAllowed(account.id);   // 后台组件这条路也算一次采集：同一套总开关 / 冷静期 / 每日上限 / 采集间隔
+      recordSession(account.id, benchmarkId);
       text = `只读核实对标账号「${benchmark.name}」的主页`;
     } else text = `在可见浏览器中检查「${account.name}」的登录账号`;
   }
@@ -505,6 +521,7 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
     session.agentModelKey = null;
   }
 
+  if (cfg.browser && cfg.browser !== 'none') recordChat(account.id);  // 只记不拦：用户自己在聊天里让 agent 看网页，也要在「今天看了多少」里算上
   const now = new Date().toISOString();
   const userMsg = { id: store.newId('m_'), role: 'user', text, createdAt: now };
   session.messages.push(userMsg);
@@ -546,6 +563,7 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
 }
 
 const collectionQueue = new BenchmarkQueue({
+  gate: (account) => { const s = paceSummary(account); return { ok: s.status === 'go', reason: s.reason }; },
   accounts: store.listAccounts,
   detail: content.benchmarkDetail,
   busy: (account) => bridge.activeProfiles.has(account)
@@ -563,7 +581,9 @@ const collectionQueue = new BenchmarkQueue({
     const route = collectionRoute(worker, cfg), useWorker = route === 'worker', viaAgent = route === 'agent';
     if (!route) throw new Error('只读采集组件不可用：请在「连接与设置」开启后台组件，或把浏览器方式设为 WorkBuddy 插件；不会自动改用其它浏览器');
     const timeoutMs = useWorker ? 180_000 : 600_000;  // agent 读页面慢：实测光核对登录就要约 3 分钟
-    const text = `按 playbooks/benchmark.md 自动接续对标资料采集，仅处理 id=${benchmarkId}。读取已登记目标，实时核对当前登录账号与目标身份；同一次浏览器占用内保存头像元素局部 PNG、主页字段、最多五篇可见笔记。先写 verified，再逐篇写独立 observation 检查点并写收尾；不要只回复文字。已有有效笔记保留，仅补缺项。登录/风控立即停止并报告原因。` +
+    const pace = assertCollectionAllowed(accountId);  // 派发前再核一次（队列里等了一阵、或手动点了开始之后状态可能变了）
+    recordSession(accountId, benchmarkId);
+    const text = `按 playbooks/benchmark.md 自动接续对标资料采集，仅处理 id=${benchmarkId}。读取已登记目标，实时核对当前登录账号与目标身份；同一次浏览器占用内保存头像元素局部 PNG、主页字段、最多五篇可见笔记。先写 verified，再逐篇写独立 observation 检查点并写收尾；不要只回复文字。已有有效笔记保留，仅补缺项。登录/风控立即停止并报告原因。` + paceInstructions(pace.limits) +
       (viaAgent ? `用 WorkBuddy 浏览器工具（mcp__browser__*）在用户自己的浏览器里新开标签页操作，按 playbooks/browser.md 先核对登录账号；只读档没有点击工具，看笔记时用 tab_goto 打开页面上卡片链接的原文（带全部参数，不拼接不删参数）；不点赞、不评论、不关注、不私信、不发布；遇到验证码或风险提示立即停止并说明。` : '');
     bridge.submit({ id, accountId, account, benchmark, timeoutMs,
       kind: useWorker ? 'benchmark.verify' : undefined,
@@ -575,6 +595,14 @@ const collectionQueue = new BenchmarkQueue({
   },
 });
 collectionQueue.recover();
+// 两篇笔记的检查点来得太快 = agent 在连发：停手，并把采集总开关关上，要人确认后才能重新开
+onPaceViolation(({ accountId, gapSec, min }) => {
+  const reason = `读得太快：两篇笔记只隔 ${gapSec} 秒（下限 ${min} 秒），已自动停止并关闭采集总开关，请先看一下账号有没有收到平台提示`;
+  try { updatePolicy(accountId, { enabled: false }); } catch { /* 开关写不进去也要先停手 */ }
+  collectionQueue.block(accountId, reason);
+  bridge.cancelAccount(accountId);
+  broadcast({ type: 'content.changed', account: accountId, area: 'benchmarks' });
+});
 setInterval(() => {
   for (const account of store.listAccounts()) flushBenchmarkCheckpoints(account.id);
   collectionQueue.tick();
@@ -955,9 +983,24 @@ async function handleContentApi(route, q, req) {
       const items = content.listBenchmarks(acc);
       return { items, checkpointIssues: content.benchmarkCheckpointIssues(acc), collection: collectionStatus(acc), access: browserAccessStatus(acc) };
     }
+    case 'GET /api/browse/pace':
+      return paceSummary(acc);
+    case 'POST /api/browse/policy': {
+      // 总开关 / 冷静期 / 上限：只能由人在网页里改。放在状态目录，agent 直接改数据目录里的文件没用
+      const b = await body();
+      const patch = {};
+      if (b.action === 'enable') patch.enabled = true;
+      else if (b.action === 'disable') patch.enabled = false;
+      else if (b.action === 'set-cooldown') { patch.cooldownDays = b.days; patch.cooldownReason = b.reason; patch.enabled = false; }
+      else if (b.action === 'clear-cooldown') patch.clearCooldown = true;
+      else if (b.action === 'set-limits') patch.limits = b.limits;
+      else throw store.httpError(400, '策略动作不合法');
+      return updatePolicy(acc, patch);
+    }
     case 'POST /api/benchmarks/collection': {
       const { action } = await body();
       if (!['fill', 'pause', 'resume'].includes(action)) throw store.httpError(400, '采集动作不合法');
+      if (action !== 'pause') assertCollectionAllowed(acc);  // 总开关 / 冷静期 / 时段 / 每日上限 / 采集间隔
       const items = content.listBenchmarks(acc);
       const ids = action === 'fill' ? items.filter(b => !observationComplete(content.benchmarkDetail(acc, b.id).observation)).map(b => b.id) : [];
       const result = collectionQueue.control(acc, action, ids);
@@ -1282,7 +1325,7 @@ function sendZip(res, filename, entries) {
 function serveNoteBundle(res, q) {
   try {
     const { title, entries } = content.noteBundle(q.get('account'), q.get('id'));
-    sendZip(res, `${title.replace(/[\\/:*?"<>|]/g, '_')}-素材.zip`, entries);
+    sendZip(res, `${title.replace(/[\\/:*?"<>|]/g, '_')}-发布包.zip`, entries);
   } catch (err) {
     sendJson(res, err.status || 500, { error: err.message });
   }

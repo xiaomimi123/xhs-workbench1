@@ -5,9 +5,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { useTempWorkspace, server, fakeAdapter, PNG_1PX, SKILL } from './helpers.mjs';
+import { useTempWorkspace, enablePace, server, fakeAdapter, PNG_1PX, SKILL } from './helpers.mjs';
 
 const WS = useTempWorkspace();
+enablePace(WS, 'default', { limits: { profilesPerDay: 10, notesPerDay: 30 } });  // 这个测试要反复真的开始采集：打开总开关、放宽每日上限（节奏闸门另有专门的测试）
 const store = await server('store.mjs');
 store.ensureWorkspace();
 store.saveAccount({ id: 'default', xhsId: 'my-account' });

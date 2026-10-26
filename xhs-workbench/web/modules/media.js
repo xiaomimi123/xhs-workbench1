@@ -47,7 +47,7 @@ function videoHtml(note) {
       <h3 style="margin:0">视频笔记</h3>
       ${typeChips(note, true)}
       <div class="spacer"></div>
-      ${v.file ? `<a class="btn small" href="${bundle}">下载全部素材</a>
+      ${v.file ? `<a class="btn small primary" href="${bundle}" download>下载发布包（文案 + 视频 + 封面）</a>
       <button class="btn small ghost danger" data-video-act="delete-video">删除视频</button>` : ''}
     </div>
     ${v.file
@@ -93,7 +93,7 @@ export function mediaHtml(note, forceVideo = false) {
         </select>
       </label>
       <label class="btn small upload-btn">上传图片 / 实况视频<input type="file" multiple accept="image/*,.heic,.mov,.mp4,video/quicktime,video/mp4" data-media-upload hidden></label>
-      ${note.media.length || note.hasCover ? `<a class="btn small" href="/api/notes/bundle?${acc(`id=${encodeURIComponent(note.id)}`)}&t=${encodeURIComponent(S.token)}">下载全部素材</a>` : ''}
+      ${note.media.length || note.hasCover ? `<a class="btn small primary" href="/api/notes/bundle?${acc(`id=${encodeURIComponent(note.id)}`)}&t=${encodeURIComponent(S.token)}" download>下载发布包（文案 + 封面 + 配图）</a>` : ''}
     </div>
     <div class="media-grid">
       ${offset ? `<div class="media-tile fixed"><div class="media-thumb"><img src="${fileUrl(`notes/${note.id}/cover.png`, note.coverHash)}" alt=""><span class="media-no">1</span><span class="live-badge cover">封面</span></div><div class="media-actions muted">模板封面</div></div>` : ''}

@@ -43,8 +43,9 @@ export function collectionRoute(worker, cfg) {
 }
 
 export class BenchmarkQueue {
-  constructor({ accounts, detail, busy, dispatch, changed }) {
-    Object.assign(this, { accounts, detail, busy, dispatch, changed });
+  /** gate(account) → {ok, reason}：采集节奏闸门（总开关 / 冷静期 / 时段 / 每日上限 / 采集间隔）。不通过就暂停队列，等人再点「开始」，不在后台悄悄等到点自动继续 */
+  constructor({ accounts, detail, busy, dispatch, changed, gate }) {
+    Object.assign(this, { accounts, detail, busy, dispatch, changed, gate });
   }
   save(account, q) { writeJson(file(account), q); this.changed(account); }
   recover() {
@@ -114,6 +115,12 @@ export class BenchmarkQueue {
         }
         if (item.authorized !== true) continue;
         try { assertBrowserCapability(); assertBrowserAccess(account); } catch (err) { q.paused=true; q.reason=err.message; dirty=true; break; }
+        const verdict = this.gate?.(account);
+        if (verdict && !verdict.ok) {
+          q.paused = true; q.reason = String(verdict.reason || '现在不能采集').slice(0, 400);
+          for (const x of q.items) x.authorized = false;
+          dirty = true; break;
+        }
         item.state = 'running'; item.attempts++; item.startedAt = new Date().toISOString();
         item.taskId = `collect_${account}_${item.id}_${Date.now()}`;
         this.save(account, q); // 派发前写意图，崩溃不会无记录重放。

@@ -548,6 +548,10 @@ function browserLine(a) {
 
 async function loginAccount(id) {
   if (id !== S.accountId) switchAccount(id);
+  // 浏览器方式是 WorkBuddy 插件：用的就是员工自己的浏览器（已经登录着小红书），不需要工作台再装组件、再开一个浏览器
+  if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
+    return toast('浏览器方式是 WorkBuddy 插件：请先在你自己的浏览器里登录小红书，再到「竞品对标」页点「先核对登录账号」，让 agent 读一下当前登录的号并比对');
+  }
   // 登录账号由工作台自己打开浏览器、停在登录页等员工本人扫码，不经过 agent（聊天里的 agent 没有浏览器权限，处处被拦）。
   // 第一次用时先自动安装浏览器组件（只装 playwright-core，浏览器用电脑上的 Edge / Chrome）
   if (!S.bridge?.browserWorker?.available) {

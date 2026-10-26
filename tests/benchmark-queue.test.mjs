@@ -108,3 +108,19 @@ test('批量采集选路：后台组件优先；WorkBuddy 插件方式走 agent�
   assert.equal(collectionRoute({ enabled: false }, { mode: 'inbox', browser: 'workbuddy' }), null);
   assert.equal(collectionRoute({ enabled: false }, { mode: 'cli', browser: 'none' }), null);
 });
+
+test('节奏闸门不通过：队列暂停并写明原因、取消授权、不派发；通过后照常派发（采集间隔不在后台悄悄等到点再继续）', () => {
+  const a = store.saveAccount({ name: '闸门' }).id;
+  enqueueCollection(a, ['b_g1', 'b_g2']);
+  const sent = []; let verdict = { ok: false, reason: '距上次访问才 20 分钟，两次采集之间至少隔 180 分钟，还要等约 160 分钟' };
+  const queue = new BenchmarkQueue({ accounts: () => [{ id: a }], busy: () => false, detail: () => ({ observation: null }),
+    dispatch: (_, id) => sent.push(id), changed() {}, gate: () => verdict });
+  queue.control(a, 'resume');
+  queue.tick();
+  let q = collectionStatus(a);
+  assert.equal(sent.length, 0); assert.equal(q.paused, true); assert.match(q.reason, /至少隔 180 分钟/);
+  assert.ok(q.items.every((x) => x.authorized === false && x.state === 'pending'));
+  queue.tick(); assert.equal(sent.length, 0);                      // 暂停着，不会自己再试
+  verdict = { ok: true }; queue.control(a, 'resume'); queue.tick();  // 人再点「开始」才继续
+  assert.deepEqual(sent, ['b_g1']); assert.equal(collectionStatus(a).items[0].state, 'running');
+});

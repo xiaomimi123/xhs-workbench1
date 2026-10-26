@@ -103,6 +103,24 @@ async function health(info) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** 正在运行的实例的版本和是否空闲（问不到一律当作「不空闲」：宁可不换，也不打断任务） */
+async function runningState(info) {
+  try {
+    const base = `http://127.0.0.1:${info.port}`;
+    const { version } = await (await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(2000) })).json();
+    // /api/bridge 所有版本都有：running = 正在跑的 agent 任务（对标采集也是 agent 任务），pending = 排队的
+    const r = await fetch(`${base}/api/bridge`, { headers: { 'X-Workbench-Token': token() }, signal: AbortSignal.timeout(2000) });
+    if (!r.ok) return { version, idle: false, busy: [] };
+    const st = (await r.json()).status || {};
+    const busy = [];
+    if (st.running) busy.push(`${st.running} 个 agent 任务在运行`);
+    if (st.pending) busy.push(`${st.pending} 个任务在排队`);
+    return { version, idle: Number.isFinite(st.running) && Number.isFinite(st.pending) && busy.length === 0, busy };
+  } catch {
+    return { version: '', idle: false, busy: [] };
+  }
+}
+
 /**
  * 调本地服务。值守是长驻场景：服务重启、连接被重置时不能崩出一堆堆栈——
  * 网络层错误带退避重试（1s、2s、4s），每次都重新读 server.json（重启后端口可能变了）；
@@ -307,6 +325,20 @@ const commands = {
     checkNode();
     ensureWorkspace();
     let info = serverInfo();
+    // 已经在跑、但跑的是旧版本（中枢下发了新版本，员工又是直接点图标打开）：空闲就换新版本，不让人去理解「重启」；有任务在跑就不打断
+    if (await health(info)) {
+      const { version, idle, busy } = await runningState(info);
+      if (version && version !== VERSION) {
+        if (idle) {
+          console.log(`正在运行的是旧版本 v${version}，现在没有任务，换成 v${VERSION}…`);
+          await commands.stop();
+          for (let i = 0; i < 30 && (await health(info)); i++) await sleep(200);
+          info = serverInfo();
+        } else {
+          console.log(`注意：正在运行的是旧版本 v${version}（新版本 v${VERSION} 已就位）。现在有任务在跑（${(busy || []).join('、') || '状态未知'}），没有自动重启；任务结束后再打开一次就会升级。`);
+        }
+      }
+    }
     if (!(await health(info))) {
       const logFile = path.join(P.logs, 'server.log');
       const out = fs.openSync(logFile, 'a');

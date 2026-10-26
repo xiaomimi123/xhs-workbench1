@@ -115,12 +115,13 @@ function helperHtml(s) {
   const n = V.notes.find((x) => x.id === s.noteId);
   return `<div class="helper">
     <div class="helper-steps">
-      <div><strong>① 复制内容</strong>
+      <div><strong>① 下载发布包 / 复制内容</strong>
+        <div class="muted" style="font-size:12px;margin:4px 0 0">包里是分段文案（标题 / 正文 / 话题）、封面、按序号命名的配图和发布步骤。上传和点发布都由你本人在官方 App 完成。</div>
         <div class="row" style="margin-top:6px">
+          <a class="btn small primary" href="/api/notes/bundle?${acc(`id=${encodeURIComponent(s.noteId)}`)}&t=${encodeURIComponent(S.token)}" download>下载发布包</a>
           <button class="btn small" data-copy="title" data-note="${esc(s.noteId)}">复制标题</button>
           <button class="btn small" data-copy="body" data-note="${esc(s.noteId)}">复制正文 + 话题</button>
-          <a class="btn small" href="/api/notes/bundle?${acc(`id=${encodeURIComponent(s.noteId)}`)}&t=${encodeURIComponent(S.token)}">下载全部素材（封面 + 配图 + 实况视频）</a>
-          ${n && !n.hasCover ? '<span class="muted">（这篇还没有模板封面）</span>' : ''}
+          ${n && !n.hasCover ? '<span class="muted">（这篇还没有模板封面，包里只有配图）</span>' : ''}
         </div>
       </div>
       <div><strong>② 去发布</strong>
@@ -188,7 +189,7 @@ function draw(main) {
         <td>${s.publishedUrl ? `<a href="${esc(s.publishedUrl)}" target="_blank" rel="noopener">${esc(s.title)}</a>` : esc(s.title)}</td>
         <td>${MODE[s.mode] || esc(s.mode)}</td>
         <td>${badge(s.status)}</td>
-        <td class="row-actions">${s.mode!=='draft'&&!s.nonExecuting&&s.status === 'scheduled' ? `<button class="btn small ghost" data-act="retime" data-id="${esc(s.id)}">改时间</button><button class="btn small ghost" data-act="cancel" data-id="${esc(s.id)}">取消</button>` : ''}
+        <td class="row-actions">${!['published', 'cancelled'].includes(s.status) ? `<a class="btn small ghost" href="/api/notes/bundle?${acc(`id=${encodeURIComponent(s.noteId)}`)}&t=${encodeURIComponent(S.token)}" download>下载发布包</a>` : ''}${s.mode!=='draft'&&!s.nonExecuting&&s.status === 'scheduled' ? `<button class="btn small ghost" data-act="retime" data-id="${esc(s.id)}">改时间</button><button class="btn small ghost" data-act="cancel" data-id="${esc(s.id)}">取消</button>` : ''}
           ${['published', 'cancelled'].includes(s.status) ? `<button class="btn small ghost danger" data-act="delete" data-id="${esc(s.id)}">删除</button>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : '<div class="muted">还没有排期。</div>'}`;
   if(main._draftUpdated)main.removeEventListener('draft-updated',main._draftUpdated);

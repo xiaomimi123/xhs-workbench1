@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import { P, accountDir } from './paths.mjs';
 import { readJson, writeJson, ensureDir, newId, httpError, moveToTrash, trashListItem, safeJoin, listAccounts } from './store.mjs';
 import { mergeObservation, readObservation, benchmarkAvatar, saveManualAvatar, stageCapturedAvatar } from './benchmark-observation.mjs';
+import { recordObservation } from './pace.mjs';
 
 export function accRoot(accountId) {
   if (!listAccounts().some((a) => a.id === accountId)) throw httpError(404, '账号不存在');
@@ -210,6 +211,8 @@ export function reconcileBenchmarkCheckpoints(accountId) {
       } else if (stage === 'observation') {
         if (!item) throw new Error('对标账号不存在，不能写入观察');
         mergeObservation(accountId, item, entry);
+        // 采集账本：按检查点文件的写入时间记（agent 读了几篇、间隔多久），读得太快会通知服务端停手
+        try { recordObservation(accountId, entry, new Date(fs.statSync(source).mtimeMs)); } catch { /* 记账失败不影响合并 */ }
         result.observations++;
       } else {
         if (!item) throw new Error('请先保存候选，再核实账号');
@@ -665,33 +668,80 @@ export function saveNoteFileStream(accountId, id, filename, req) {
   });
 }
 
-/** 笔记素材打包：封面 + 按顺序编号的配图 / 实况视频（或视频笔记的视频）+ 文案，方便手动发布 */
+/**
+ * 发布包：封面 + 按顺序编号的配图 / 实况视频（或视频笔记的视频）+ 文案（标题 / 正文 / 话题分三段）+ 发布步骤。
+ * 发布由本人在小红书官方 App 或创作者中心完成，工作台不代替任何一步，也不向小红书发请求。
+ */
 export function noteBundle(accountId, id) {
   const dir = noteDir(accountId, id);
   const n = noteDetail(accountId, id);
   const entries = [];
   const pad = (i) => String(i).padStart(2, '0');
   let i = 1;
+  let images = 0;   // 图文笔记上限 18 张（封面算 1 张，实况视频不算）
+  let hasCoverFile = false;
   if (n.video) {
     // 封面优先级：用户指定的视频封面（images/ 里）→ 模板封面（笔记根目录的 cover.png）→ 平台默认首帧（不打包）
     let coverPath = n.video.cover ? path.join(dir, 'images', n.video.cover) : n.coverMode !== 'first' ? path.join(dir, 'cover.png') : '';
     if (!coverPath || !fs.existsSync(coverPath)) coverPath = '';
-    else entries.push({ name: `${pad(i++)}-封面${path.extname(coverPath)}`, file: coverPath });
+    else { entries.push({ name: `${pad(i++)}-封面${path.extname(coverPath)}`, file: coverPath }); hasCoverFile = true; }
     entries.push({ name: `${pad(i++)}-视频${path.extname(n.video.file)}`, file: path.join(dir, 'images', n.video.file) });
   } else {
-    if (n.coverMode !== 'first' && fs.existsSync(path.join(dir, 'cover.png'))) entries.push({ name: `${pad(i++)}-封面.png`, file: path.join(dir, 'cover.png') });
+    if (n.coverMode !== 'first' && fs.existsSync(path.join(dir, 'cover.png'))) {
+      entries.push({ name: `${pad(i++)}-封面.png`, file: path.join(dir, 'cover.png') });
+      hasCoverFile = true; images++;
+    }
+    let k = 0;
     for (const m of n.media) {
-      const k = pad(i++);
-      entries.push({ name: `${k}${path.extname(m.file)}`, file: path.join(dir, 'images', m.file) });
-      if (m.video) entries.push({ name: `${k}-实况${path.extname(m.video)}`, file: path.join(dir, 'images', m.video) });
+      const no = pad(i++);
+      k++; images++;
+      entries.push({ name: `${no}-配图${k}${path.extname(m.file)}`, file: path.join(dir, 'images', m.file) });
+      if (m.video) entries.push({ name: `${no}-配图${k}-实况${path.extname(m.video)}`, file: path.join(dir, 'images', m.video) });
     }
   }
-  const text = `${n.title || ''}\n\n${(n.content || '').trim()}\n\n${(n.tags || []).map((t) => `#${t}`).join(' ')}\n`;
+  // 文案：标题 / 正文 / 话题分成三段，每段都能整段选中，不用在混排里找边界
+  const line = '─'.repeat(46);
+  const titleText = n.title || '';
+  const bodyText = (n.content || '').trim();
+  const tags = (n.tags || []).map((t) => `#${t}`).join(' ');
+  const text = [
+    line, `【标题】共 ${[...titleText].length} 字 —— 复制下面这一行`, line, titleText, '',
+    line, `【正文】共 ${[...bodyText].length} 字 —— 整段复制`, line, bodyText, '',
+    line, `【话题】${(n.tags || []).length} 个 —— 粘在正文后面`, line, tags || '（这篇没有填话题）', '',
+    line, '说明：本文件由小红书工作台导出，发布由你本人在官方 App / 创作者中心完成。', line,
+  ].join(String.fromCharCode(10));
+  const steps = [
+    `# 发布包：${titleText || id}`, '',
+    '包里的素材是工作台里这篇笔记现在的版本。**上传、填写、点发布全部由你本人在小红书官方 App 或创作者中心完成**，工作台不会代替你做任何一步，也不会向小红书发请求。', '',
+    '## 包内文件', '',
+    ...entries.map((e) => `- \`${e.name}\``),
+    '- `文案.txt`：标题、正文、话题分成三段，分别整段复制', '',
+    '## 发布步骤', '',
+    `1. 手机 App：首页右下角「+」→ ${n.video ? '视频' : '图文'} → 从相册按文件名里的序号从小到大选${hasCoverFile ? '（封面放第 1 张）' : ''}，手机相册不按文件名排序，选的时候对着序号看`,
+    '2. 从 `文案.txt` 的【标题】段复制标题（小红书标题上限 20 字）',
+    '3. 把【正文】段整段粘进正文框',
+    '4. 把【话题】段追加到正文末尾',
+    '5. 自己看一遍预览：图片顺序、错别字、有没有绝对化用语',
+    '6. **亲自点发布**',
+    '7. 回到工作台「发布排期」→ 填笔记链接 → 点「我已发布」', '',
+    '## 这篇的情况', '',
+    `- 类型：${n.video ? '视频笔记' : '图文笔记'}`,
+    n.video ? '- 视频 1 个' : `- 图片 ${images} 张（图文上限 18 张）${n.hasCover ? '' : '，没有模板封面'}`, '',
+    '## 发布前后', '',
+    '- 直接用包里的原图，不要再压缩或加边框',
+    '- 发布前用工作台的「违禁词与广告法自查」过一遍',
+    '- 平台弹出验证、限流提示就先停下，不要连续重试', '',
+  ].join(String.fromCharCode(10));
   const extra = [];
   if (n.videoScript && n.videoScript.trim()) extra.push({ name: '视频脚本.md', data: Buffer.from(n.videoScript) });
   return {
     title: n.title || id,
-    entries: [...entries.map((e) => ({ name: e.name, data: fs.readFileSync(e.file) })), { name: '文案.txt', data: Buffer.from(text) }, ...extra],
+    entries: [
+      ...entries.map((e) => ({ name: e.name, data: fs.readFileSync(e.file) })),
+      { name: '文案.txt', data: Buffer.from(text) },
+      { name: '发布步骤.md', data: Buffer.from(steps) },
+      ...extra,
+    ],
   };
 }
 

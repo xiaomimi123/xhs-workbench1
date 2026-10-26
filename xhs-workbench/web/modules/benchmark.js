@@ -94,6 +94,7 @@ async function load() {
   V.issues = listing.checkpointIssues;
   V.collection = listing.collection;
   V.access = listing.access;
+  V.pace = await api('GET', `/api/browse/pace?${acc()}`).catch(() => null);
   V.cfg = await api('GET', `/api/automation?${acc()}`);
   if (V.current) {
     V.detail = V.items.some((b) => b.id === V.current) ? await api('GET', `/api/benchmarks/detail?${acc(`id=${V.current}`)}`) : null;
@@ -181,6 +182,45 @@ function draw(main) {
 }
 
 // 资料采集卡片：没有对标账号时不显示；只露出当前状态下用得上的操作，其余收进“遇到验证码或访问受限时”
+/** 队列里存的可能是 agent 的整段回复，界面上只留一句 */
+function clipText(value, max = 100) {
+  const text = String(value || '').replace(/[#*`>]/g, ' ').replace(/\s+/g, ' ').trim();
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+// 采集状态：能不能开始、今天读了多少、上限、冷静期、总开关。判定在服务端（pace.mjs），这里只显示和改设置
+function paceHtml() {
+  const s = V.pace;
+  if (!s) return '';
+  const L = s.limits;
+  const head = s.status === 'go' ? '✅ 现在可以采集' : s.status === 'wait' ? '⏳ 先别开始' : '⛔ 现在不能采集';
+  const cooling = s.cooldown?.active;
+  const num = (key, label, min, max) => `<label style="display:flex;flex-direction:column;font-size:12px;gap:2px">${label}<input type="number" data-pace-limit="${key}" min="${min}" max="${max}" value="${L[key]}" style="width:92px"></label>`;
+  const time = (key, label) => `<label style="display:flex;flex-direction:column;font-size:12px;gap:2px">${label}<input type="time" data-pace-limit="${key}" value="${L[key]}" style="width:110px"></label>`;
+  return `<div style="margin:8px 0;padding:10px 12px;border:1px solid var(--line);border-radius:8px">
+      <div class="row"><strong>${head}</strong><div class="spacer"></div>
+        <label class="muted" style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" data-act="pace-toggle" ${s.enabled ? 'checked' : ''}> 允许自动采集</label></div>
+      <p class="muted" style="margin:6px 0">${esc(clipText(s.reason, 140))}</p>
+      <dl class="kv" style="margin:6px 0">
+        <dt>上次访问</dt><dd>${esc(s.lastAgoText)}</dd>
+        <dt>今天已读</dt><dd>笔记 ${s.today.notes}/${L.notesPerDay} 篇 · 主页 ${s.today.profiles}/${L.profilesPerDay} 个${s.today.chats ? ` · 带浏览器的对话 ${s.today.chats} 次（不一定都访问了网页）` : ''}</dd>
+        <dt>规则</dt><dd>每天 ${L.windowStart}–${L.windowEnd} · 两次采集至少隔 ${L.gapMin} 分钟 · 一次最多笔记 ${L.sessionNotes} 篇、主页 ${L.sessionProfiles} 个</dd>
+        <dt>冷静期</dt><dd>${s.cooldown ? `至 ${esc(s.cooldown.until.slice(0, 10))}${cooling ? '（生效中）' : '（已结束）'}${s.cooldown.reason ? ` · ${esc(s.cooldown.reason)}` : ''}` : '<span class="muted">无</span>'}</dd>
+      </dl>
+      <div class="row" style="flex-wrap:wrap;gap:8px">
+        <button class="btn small" data-act="pace-cooldown">收到平台提示：设 7 天冷静期</button>
+        ${cooling ? '<button class="btn small ghost" data-act="pace-clear">解除冷静期</button>' : ''}
+      </div>
+      <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">调整上限</summary>
+        <div class="row" style="flex-wrap:wrap;gap:10px;margin:8px 0">
+          ${num('notesPerDay', '每天笔记', 1, 30)}${num('profilesPerDay', '每天主页', 1, 10)}${num('gapMin', '采集间隔（分钟）', 30, 1440)}${num('minNoteGapSec', '两篇至少隔（秒）', 10, 600)}${time('windowStart', '开始时间')}${time('windowEnd', '结束时间')}
+        </div>
+        <button class="btn small" data-act="pace-limits">保存上限</button>
+        <p class="muted" style="margin:6px 0;font-size:12px">这些数是控制读取量的上限，不保证不触发平台风控。「两篇至少隔」是检查点到达的间隔：低于它说明 agent 在连发，工作台会自动停止并关掉总开关。</p>
+      </details>
+    </div>`;
+}
+
 function collectionCardHtml() {
   const items = V.collection?.items || [];
   const done = items.filter((x) => x.state === 'complete').length;
@@ -206,7 +246,8 @@ function collectionCardHtml() {
   ].filter(Boolean).join('');
   return `<div class="card" style="margin-bottom:12px">
       <div class="row"><strong>补齐对标资料</strong><span class="muted">已完成 ${done} · 待处理 ${todo}</span></div>
-      ${statusLine ? `<p style="margin:6px 0">${icon('warning')} ${esc(statusLine)}${reason ? `<span class="muted"> · ${esc(reason)}</span>` : ''}</p>` : (reason ? `<p class="muted" style="margin:6px 0">${esc(reason)}</p>` : '<p class="muted" style="margin:6px 0">先核对登录账号，再点“开始采集待办”。采集会随机等待、逐个访问，但不能保证不触发平台风控。</p>')}
+      ${statusLine ? `<p style="margin:6px 0">${icon('warning')} ${esc(statusLine)}${reason ? `<span class="muted"> · ${esc(reason)}</span>` : ''}</p>` : (reason ? `<p class="muted" style="margin:6px 0">${esc(reason)}</p>` : '<p class="muted" style="margin:6px 0">先核对登录账号，再点“开始采集待办”。采集受「采集状态」里的上限和冷静期约束，一次只读一个对标目标，但不能保证不触发平台风控。</p>')}
+      ${paceHtml()}
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px">${main}</div>
       ${kind !== 'restriction' ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">遇到验证码或访问受限时</summary>
         <p class="muted" style="margin:6px 0">如果你在小红书看到验证码、账号异常提示，点下面的按钮立刻停止所有自动访问，避免继续触发风控。</p>
@@ -367,9 +408,35 @@ function bind(main) {
       case 'collect-fill':
       case 'collect-pause':
       case 'collect-resume':
-        await api('POST', `/api/benchmarks/collection?${acc()}`, { action: t.dataset.act.slice(8) });
+        try { await api('POST', `/api/benchmarks/collection?${acc()}`, { action: t.dataset.act.slice(8) }); }
+        catch (err) { toast(err.message); }  // 总开关 / 冷静期 / 时段 / 每日上限 / 采集间隔不满足时，服务端会说明原因
         await load(); return draw(main);
+      case 'pace-toggle':
+        try { await api('POST', `/api/browse/policy?${acc()}`, { action: t.checked ? 'enable' : 'disable' }); toast(t.checked ? '已允许自动采集（仍受上限和冷静期约束）' : '已关闭自动采集'); }
+        catch (err) { toast(err.message); }
+        await load(); return draw(main);
+      case 'pace-cooldown':
+        if (!await confirmDialog({ title: '设 7 天冷静期？', message: '收到平台的提示（例如「浏览行为不太像真人」）后建议停一阵：冷静期内不做任何自动采集，并关闭采集总开关。', confirmLabel: '设冷静期', danger: true })) return;
+        try { await api('POST', `/api/browse/policy?${acc()}`, { action: 'set-cooldown', days: 7, reason: '账号收到平台提示' }); toast('已设 7 天冷静期'); }
+        catch (err) { toast(err.message); }
+        await load(); return draw(main);
+      case 'pace-clear':
+        if (!await confirmDialog({ title: '解除冷静期？', message: '解除后采集仍受每日上限、采集间隔和总开关约束；总开关需要你另外打开。', confirmLabel: '解除', danger: true })) return;
+        try { await api('POST', `/api/browse/policy?${acc()}`, { action: 'clear-cooldown' }); toast('冷静期已解除'); }
+        catch (err) { toast(err.message); }
+        await load(); return draw(main);
+      case 'pace-limits': {
+        const limits = {};
+        for (const el of main.querySelectorAll('[data-pace-limit]')) limits[el.dataset.paceLimit] = el.type === 'number' ? Number(el.value) : el.value;
+        try { await api('POST', `/api/browse/policy?${acc()}`, { action: 'set-limits', limits }); toast('上限已保存'); }
+        catch (err) { toast(err.message); }
+        await load(); return draw(main);
+      }
       case 'prepare-browser':
+        // 浏览器方式是 WorkBuddy 插件：登录核对在员工自己的浏览器里做（工作台不替员工开浏览器），只读一页
+        if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
+          return ask('只做一件事：在我自己的浏览器里打开 https://www.xiaohongshu.com ，核对当前登录的小红书号，和「当前账号」里填写的号比对，把结果告诉我。不要打开任何对标主页、不要读笔记、不要点开详情、不要发布。', true);
+        }
         return ask('独立核对当前登录账号，不采集对标资料', true, {taskKind:'browser.prepare'});
       case 'resume-access':
         await api('POST', `/api/browser/access?${acc()}`, {action:'resume'}); await load(); return draw(main);
@@ -385,9 +452,10 @@ function bind(main) {
           return ask(`只读核实对标账号「${b.name}」的主页`, true, { taskKind: 'benchmark.verify', benchmarkId: b.id });
         }
         if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
-          // 浏览器方式是 WorkBuddy 插件（员工自己的 Edge / Chrome）：交给 CodeBuddy 按手册只读核实，逐步写检查点
+          // 浏览器方式是 WorkBuddy 插件（员工自己的 Edge / Chrome）：交给 CodeBuddy 按手册只读核实，逐步写检查点；
+          // 走 benchmark.agent：服务端先过采集闸门（总开关 / 冷静期 / 时段 / 每日上限）、记账，并在提示词里补上数字
           return ask(`请按 playbooks/benchmark.md「主页资料与近 5 篇笔记观察」只读核实对标账号「${b.name}」（对标 id：${b.id}，主页：${b.url || '未提供：先用站内搜索找到唯一匹配的主页，找不到或有多个就停下说明'}）。` +
-            `用 WorkBuddy 浏览器工具（mcp__browser__*）在用户自己的浏览器里新开标签页操作，按 playbooks/browser.md 先核对登录账号；只读档没有点击工具，看笔记时用 tab_goto 打开页面上卡片链接的原文（带全部参数，不拼接不删参数）；逐步写检查点；不点赞、不评论、不关注、不私信、不发布；遇到验证码或风险提示立即停止并说明。`, true);
+            `用 WorkBuddy 浏览器工具（mcp__browser__*）在用户自己的浏览器里新开标签页操作，按 playbooks/browser.md 先核对登录账号；只读档没有点击工具，看笔记时用 tab_goto 打开页面上卡片链接的原文（带全部参数，不拼接不删参数）；逐步写检查点；不点赞、不评论、不关注、不私信、不发布；遇到验证码或风险提示立即停止并说明。`, true, { taskKind: 'benchmark.agent', benchmarkId: b.id });
         }
         return toast('只读采集组件不可用，请先在连接设置中配置；不会自动切换采集工具');
       case 'analyze': {

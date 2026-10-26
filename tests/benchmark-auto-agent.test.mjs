@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { useTempWorkspace, server, SKILL, PNG_1PX } from './helpers.mjs';
+import { useTempWorkspace, enablePace, server, SKILL, PNG_1PX } from './helpers.mjs';
 const WS = useTempWorkspace();
+enablePace(WS);  // 这个测试要真的开始采集：打开总开关（节奏闸门另有专门的测试）
 const store = await server('store.mjs'); store.ensureWorkspace();
 store.saveAccount({ id: 'default', xhsId: 'test-owner' });
 store.saveBridgeConfig({ mode: 'inbox', browser: 'none' });

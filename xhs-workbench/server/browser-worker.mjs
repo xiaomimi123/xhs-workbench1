@@ -10,6 +10,8 @@ const CREATOR = 'https://creator.xiaohongshu.com/';
 const SEARCH = 'https://www.xiaohongshu.com/search_result?keyword=';
 const NAV_TIMEOUT = 22_000;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** 后台组件读两篇笔记之间的随机间隔（毫秒） */
+export const NOTE_GAP_MS = [20_000, 45_000];
 const interrupted = (signal) => { if (signal?.aborted) throw new Error('已取消'); };
 
 export class BrowserWorker {
@@ -353,7 +355,9 @@ export class BrowserWorker {
         onProgress('读取可见笔记', `${i + 1}/${visible.length} · 只读取页面上的标题和互动字段`);
         let note;
         try {
-          await this.#pace(signal);
+          // 笔记之间的间隔：以前是 0.9–1.8 秒，太密。这是后台组件（默认关）这条路的下限，和 agent 路径的「两篇至少隔 25 秒」同一个量级
+          const gap = process.env.XHS_PACE_RELAX === '1' ? [900, 1800] : NOTE_GAP_MS;  // 开发 / 自动测试用，见 pace.mjs
+          await this.#pace(signal, gap[0], gap[1]);
           const noteId = visible[i].url.split('/').pop();
           const card = page.locator(`a[href*="/explore/${noteId}"]:visible, a[href*="/discovery/item/${noteId}"]:visible, a.cover[href*="/${noteId}"]:visible`).first();
           const warningBefore = pageWarning(await page.locator('body').innerText({ timeout: 5000 }), page.url());

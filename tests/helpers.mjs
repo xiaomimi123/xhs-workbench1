@@ -30,3 +30,11 @@ export function fakeAdapter(parser = 'text', extra = {}) {
 }
 
 export const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
+/** 采集节奏：测试里打开某个账号的采集总开关，并让「时段 / 采集间隔 / 读得太快」三项不拦（见 pace.mjs 的 XHS_PACE_RELAX） */
+export function enablePace(ws, account = 'default', extra = {}) {
+  process.env.XHS_PACE_RELAX = '1';
+  const dir = path.join(ws, 'accounts', account);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'pace-policy.json'), JSON.stringify({ enabled: true, limits: {}, ...extra }));
+}

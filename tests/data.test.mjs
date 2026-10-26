@@ -84,7 +84,7 @@ test('配图：大写扩展名、实况图自动配对、排序、裁剪、删�
   assert.ok(!fs.existsSync(path.join(WS, 'accounts', ACC, 'notes', n.id, 'images', 'IMG_1.mov')));
 
   const { entries } = content.noteBundle(ACC, n.id);
-  assert.deepEqual(entries.map((e) => e.name), ['01.jpg', '02.png', '文案.txt']);
+  assert.deepEqual(entries.map((e) => e.name), ['01-配图1.jpg', '02-配图2.png', '文案.txt', '发布步骤.md']);
 });
 
 test('对标账号：保存、详情、删除连同资料进回收站', () => {
@@ -146,7 +146,7 @@ test('视频笔记：设置视频与封面、配图停用、打包、删除进�
   assert.equal(d.video.cover, '封面.jpg');
 
   const { entries } = content.noteBundle(ACC, n.id);
-  assert.deepEqual(entries.map((e) => e.name), ['01-封面.jpg', '02-视频.mp4', '文案.txt']);
+  assert.deepEqual(entries.map((e) => e.name), ['01-封面.jpg', '02-视频.mp4', '文案.txt', '发布步骤.md']);
 
   d = content.deleteNoteVideoFile(ACC, n.id, '封面.jpg');
   assert.equal(d.video.cover, undefined);
@@ -297,4 +297,21 @@ test('删除一个素材只移走它自己的文件，其它素材的文件还�
 test('safeJoin 多传参数直接报错，不再静默丢掉', () => {
   assert.throws(() => store.safeJoin(WS, 'files', 'x.png'), /两个参数/);
   assert.equal(store.safeJoin(WS, path.join('files', 'x.png')), path.join(WS, 'files', 'x.png'));
+});
+
+test('发布包：配图按序号命名，文案标题 / 正文 / 话题分三段，发布步骤说清楚由本人发布；没有封面也不会写封面', () => {
+  const n = content.saveNote(ACC, { create: true, title: '姜黄拿铁怎么做', content: '第一步先备料\n第二步冲泡', tags: ['姜黄', '拿铁'] });
+  const up = (name) => content.uploadNoteImage(ACC, n.id, name, PNG_1PX.toString('base64'));
+  up('a.png'); up('b.png');
+  const { entries } = content.noteBundle(ACC, n.id);
+  assert.deepEqual(entries.map((e) => e.name), ['01-配图1.png', '02-配图2.png', '文案.txt', '发布步骤.md']);
+  const text = entries.find((e) => e.name === '文案.txt').data.toString('utf8');
+  assert.match(text, /【标题】共 7 字[^\n]*\n─+\n姜黄拿铁怎么做/);
+  assert.match(text, /【正文】共 \d+ 字[^\n]*\n─+\n第一步先备料\n第二步冲泡/);
+  assert.match(text, /【话题】2 个[^\n]*\n─+\n#姜黄 #拿铁/);
+  const steps = entries.find((e) => e.name === '发布步骤.md').data.toString('utf8');
+  assert.match(steps, /# 发布包：姜黄拿铁怎么做/); assert.match(steps, /- `01-配图1\.png`/); assert.match(steps, /亲自点发布/);
+  assert.match(steps, /由你本人在小红书官方 App 或创作者中心完成/); assert.match(steps, /不会向小红书发请求/);
+  assert.match(steps, /图片 2 张（图文上限 18 张），没有模板封面/); assert.doesNotMatch(steps, /封面放第 1 张/);
+  assert.doesNotMatch(steps, /风控|像真人/);   // 不做「让账号更像真人」「降低风控」之类的承诺
 });
