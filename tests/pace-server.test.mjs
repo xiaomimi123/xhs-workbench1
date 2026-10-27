@@ -36,6 +36,9 @@ test('闸门：默认关着；冷静期、总开关、上限都走接口；不�
     // 2) 打开总开关（时段放宽到全天，免得测试随一天里的时间变化）
     assert.equal((await policy({ action: 'set-limits', limits: { windowStart: '00:00', windowEnd: '23:59' } })).status, 200);
     assert.equal((await policy({ action: 'enable' })).body.status, 'go');
+    // 节奏都满足，但浏览器方式不是 WorkBuddy 插件（新机器默认 none）：当场拒绝并说明去哪里改
+    r = await call('POST', '/api/benchmarks/collection?account=default', { action: 'fill' });
+    assert.equal(r.status, 409); assert.match(r.body.error, /WorkBuddy 浏览器插件.*连接与设置 → 执行 Agent 与浏览器/);
     assert.equal((await policy({ action: 'set-limits', limits: { notesPerDay: 999 } })).status, 400);
 
     // 3) 冷静期：设上之后总开关被关、采集被拒；解除冷静期不会替用户把总开关打开

@@ -107,6 +107,15 @@ export class ImageWorkflow {
   }
   return j;
  }
+ /** 后台取回：查这个账号里进行中的远端任务（中枢 / APIMart），超过 30 分钟的不再自动查（仍可在页面上手动查询）。只读，不会重新提交 */
+ async pollActive(a){
+  const now=Date.now();
+  for(const j of this.raw(a)){
+   if(!['submitted','processing'].includes(j.status)||!j.taskId||!['hub','apimart'].includes(j.provider))continue;
+   if(now-new Date(j.createdAt||now).getTime()>30*60*1000)continue;
+   try{await this.refresh(a,j.id);}catch{/* 下一轮再试 */}
+  }
+ }
  async refresh(a,id){
   const existing=this.active.get(id);if(existing){await existing;return this.find(a,id);}
   const pending=this.refreshRemote(a,id).finally(()=>this.active.delete(id));this.active.set(id,pending);return pending;

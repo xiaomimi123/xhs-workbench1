@@ -71,7 +71,7 @@ export class HubGen {
     if (!res.ok) {
       // 参数校验失败（422）时 detail 是列表：[{loc, msg}]
       const detail = Array.isArray(data.detail) ? `参数不对（${data.detail.map((d) => `${(d.loc || []).slice(-1)[0] ?? ''} ${d.msg || ''}`.trim()).join('；')}）` : data.detail;
-      const err = httpError(res.status === 429 ? 429 : res.status >= 500 ? 502 : res.status, `企业中枢：${detail || `HTTP ${res.status}`}`);
+      const err = httpError(res.status === 429 ? 429 : res.status >= 500 ? 502 : res.status, `企业中枢：${res.status === 413 ? '图片太大，中枢没收下（每张参考图要在 10MB 以内；旧版中枢还要求整个请求在 1MB 以内，请管理员升级中枢）' : detail || `HTTP ${res.status}`}`);
       err.upstreamStatus = res.status;
       err.notSubmitted = res.status >= 400 && res.status < 500;  // 4xx：中枢明确拒绝，没有建任务（无权限、额度用完、排队已满、参数不对）
       throw err;

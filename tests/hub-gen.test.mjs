@@ -136,3 +136,23 @@ test('HubGen 带参考图走 /images/with-references，不带走 /images；能�
  assert.equal(await g.submitImage({prompt:'p',aspect:'1:1'}),'p1');
  assert.equal((await g.capabilities()).image_references,true);await g.capabilities();assert.equal(capCalls,1);
 });
+
+test('图片任务页面关着也会取回：后台轮询只查已有任务编号的进行中任务，完成后自动下载入库；不会重新提交',async()=>{
+ const a=account();const gen=fakeGen({status:'queued'}),w=new ImageWorkflow({hubGen:gen});
+ const j=w.start(a,{prompt:'后台取回',provider:'hub',size:'1:1'});await w.active.get(j.id);
+ await w.pollActive(a);assert.equal(w.find(a,j.id).status,'submitted');          // 还在排队
+ Object.assign(gen,fakeGen({images:['http://hub.test/api/files/task-img/1.png']}));
+ await w.pollActive(a);const done=w.find(a,j.id);assert.equal(done.status,'done');assert.equal(done.assets.length,1);
+ assert.equal(gen.submitted.length,0);                                              // 取回过程里没有再提交
+ const stale=w.find(a,j.id);await w.pollActive(a);assert.equal(w.find(a,j.id).finishedAt,stale.finishedAt);   // 已完成的不再动
+ // 没有任务编号的（提交中 / 结果不确定）不碰：refresh 会把它标成「结果不确定」
+ const pending=w.start(a,{prompt:'没编号',provider:'hub',size:'1:1'});await w.active.get(pending.id);
+ const raw=w.find(a,pending.id);raw.taskId='';raw.status='submitting';w.save(raw);await w.pollActive(a);assert.equal(w.find(a,pending.id).status,'submitting');
+});
+
+test('中枢返回 413（旧版中枢的 nginx 只收 1MB）：说清楚是图片太大，不只写 HTTP 413',async()=>{
+ const dir=fs.mkdtempSync(path.join(process.env.XHS_WORKSPACE||'.','hubgen-'));
+ const hub=fakeHub({routes:{'POST /api/v1/images/with-references':()=>new Response('<html>413 Request Entity Too Large</html>',{status:413})}});
+ const g=new HubGen({env:{HUB_MCP_SERVERS_FILE:serversFile(dir)},fetchImpl:hub.fetchImpl,runToken:hub.runToken});
+ await assert.rejects(g.submitImage({prompt:'p',aspect:'1:1',references:[{data:png,filename:'a.png'}]}),e=>e.notSubmitted===true&&/图片太大.*10MB/.test(e.message));
+});

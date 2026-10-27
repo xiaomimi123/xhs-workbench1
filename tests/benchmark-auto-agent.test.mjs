@@ -45,10 +45,11 @@ test('隔离历史检查点逐篇合并；worker 关闭不自动改用 agent', a
     assert.equal((await api('GET', '/api/agent/next')).task, null);
     // 明确启动也不能在组件不可用时自动切换采集工具。
     await api('POST', '/api/benchmarks?account=default', { name: '未采集旧目标' });
-    await api('POST', '/api/benchmarks/collection?account=default', { action: 'fill' });
-    const state = await wait(async()=>{const q=(await api('GET','/api/benchmarks?account=default')).collection;return q.paused?q:null;});
+    // 浏览器方式不是 WorkBuddy 插件：开始采集当场拒绝（409 + 去哪里改），不是点了之后队列悄悄暂停
+    const r = await fetch(`http://127.0.0.1:${info.port}/api/benchmarks/collection?account=default`, { method: 'POST', headers: { 'X-Workbench-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'fill' }) });
+    assert.equal(r.status, 409); assert.match((await r.json()).error, /WorkBuddy 浏览器插件.*连接与设置/);
     assert.equal((await api('GET','/api/agent/next')).task,null);
-    assert.match(state.reason,/只读采集组件不可用/);
+    const state = (await api('GET','/api/benchmarks?account=default')).collection;
     assert.equal(state.items[0].state, 'complete');
     console.log(`隔离演示目录：${WS}；真实页面：未验证`);
   } finally { child.kill(); await new Promise(r => child.once('exit', r)); }

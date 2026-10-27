@@ -342,6 +342,9 @@ videoDescriptions.recover();
 const videoRetrieval = new VideoRetrieval({workflow:videoWorkflow,accounts:store.listAccounts});
 setInterval(()=>videoRetrieval.tick().catch(()=>{}),5000).unref();
 const imageWorkflow = new ImageWorkflow({changed:account=>broadcast({type:'content.changed',account,area:'notes'})});
+// 图片任务的后台取回：中枢 / APIMart 出好图后由工作台下载。以前只有「图片创作」页开着才会查，页面一关任务就一直显示「进行中」，
+// 员工以为没成功、重复提交（白烧额度）。这里每 10 秒查一次进行中的任务（只查已有任务编号的，绝不提交新的生图）
+setInterval(() => { for (const a of store.listAccounts()) imageWorkflow.pollActive(a.id).catch(() => {}); }, 10_000).unref();
 const livePhotoWorkflow = new LivePhotoWorkflow({images:imageWorkflow,changed:account=>broadcast({type:'content.changed',account,area:'live'})});
 livePhotoWorkflow.recover();
 const liveTransfer = new LiveTransferService({live:livePhotoWorkflow});
@@ -564,6 +567,8 @@ function sendChat({ sessionId, accountId, text, taskKind, benchmarkId }) {
   return { session };
 }
 
+/** 采集只走 WorkBuddy 浏览器插件：不满足时告诉员工去哪里改（新机器的浏览器方式默认是 none，最容易漏） */
+const PLUGIN_ONLY = '采集只走 WorkBuddy 浏览器插件，但现在还不满足：请到「连接与设置 → 执行 Agent 与浏览器」，确认对话通道是 CodeBuddy，并把浏览器方式选成「WorkBuddy 浏览器插件」（按钮是灰的就先在 WorkBuddy「设置 → 智能体 → 浏览器操控」里打开「让 WorkBuddy 控制浏览器」）';
 const collectionQueue = new BenchmarkQueue({
   gate: (account) => { const s = paceSummary(account); return { ok: s.status === 'go', reason: s.reason }; },
   accounts: store.listAccounts,
@@ -581,7 +586,7 @@ const collectionQueue = new BenchmarkQueue({
     // 三条路：后台只读组件（Playwright，确定性读取）/ agent 浏览器（浏览器方式是 WorkBuddy 插件时，CodeBuddy 按手册读）/ 拒绝。
     // WorkBuddy 插件方式本来就只能走 agent（单个「核实主页」也是这样），批量队列以前漏了这条路，导致一律失败。
     const route = collectionRoute(worker, cfg), useWorker = route === 'worker', viaAgent = route === 'agent';
-    if (!route) throw new Error('只读采集组件不可用：请在「连接与设置」开启后台组件，或把浏览器方式设为 WorkBuddy 插件；不会自动改用其它浏览器');
+    if (!route) throw new Error(PLUGIN_ONLY);
     const timeoutMs = useWorker ? 180_000 : 600_000;  // agent 读页面慢：实测光核对登录就要约 3 分钟
     const pace = assertCollectionAllowed(accountId);  // 派发前再核一次（队列里等了一阵、或手动点了开始之后状态可能变了）
     recordSession(accountId, benchmarkId);
@@ -1003,7 +1008,10 @@ async function handleContentApi(route, q, req) {
     case 'POST /api/benchmarks/collection': {
       const { action } = await body();
       if (!['fill', 'pause', 'resume'].includes(action)) throw store.httpError(400, '采集动作不合法');
-      if (action !== 'pause') assertCollectionAllowed(acc);  // 总开关 / 冷静期 / 时段 / 每日上限 / 采集间隔
+      if (action !== 'pause') {
+        assertCollectionAllowed(acc);  // 总开关 / 冷静期 / 时段 / 每日上限 / 采集间隔
+        if (!collectionRoute(workerInfo(), bridge.config())) throw store.httpError(409, PLUGIN_ONLY);  // 浏览器方式不对：当场拒绝，不让队列启动后再悄悄暂停
+      }
       const items = content.listBenchmarks(acc);
       const ids = action === 'fill' ? items.filter(b => !observationComplete(content.benchmarkDetail(acc, b.id).observation)).map(b => b.id) : [];
       const result = collectionQueue.control(acc, action, ids);

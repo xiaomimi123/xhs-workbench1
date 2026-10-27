@@ -1,7 +1,7 @@
 // 竞品对标：录入对标账号 → agent 拆解（报告 + 笔记数据）→ 生成选题 / 沉淀知识库
 import { md, esc } from '../md.js';
 import { icon } from '../icons.js';
-import { S, $, api, acc, fileUrl, toast, fmtTime, ask, readFileAsDataURL, accDirRel, confirmDialog } from '../core.js';
+import { S, $, api, acc, fileUrl, toast, fmtTime, ask, readFileAsDataURL, accDirRel, confirmDialog, go } from '../core.js';
 
 const V = { items: [], current: null, detail: null, tab: 'observed', form: null, cfg: null, issues: null, showRadar: false };
 
@@ -229,6 +229,8 @@ function collectionCardHtml() {
   const kind = V.access?.kind || 'open';
   if (!V.items.length && !items.length && kind === 'open') return '';
   const reason = (kind !== 'open' ? V.access?.reason : '') || V.collection?.reason || '';
+  // 采集只走 WorkBuddy 浏览器插件；新机器的浏览器方式默认是 none，最容易漏：直接在卡片里说清楚并给入口
+  const noPlugin = !!S.bridge && !(S.bridge.mode === 'cli' && S.bridge.browser === 'workbuddy');
   const capBlocked = S.info?.hub?.capabilities?.present && S.info.hub.capabilities.browser?.ready === false;
   const capMissing = capBlocked ? (S.info.hub.capabilities.browser.missing.join('、') || '必要的能力') : '';
   const statusLine = capBlocked ? `浏览器自动化不可用：缺少 ${capMissing}（中枢能力检查），装好后刷新本页即可。`
@@ -237,8 +239,8 @@ function collectionCardHtml() {
     : kind === 'paused' ? '自动访问已暂停。'
     : '';
   const main = [
-    todo ? `<button class="btn small primary" data-act="collect-resume" ${kind !== 'open' || capBlocked ? 'disabled' : ''}>开始采集待办（${todo}）</button>` : '',
-    `<button class="btn small" data-act="collect-fill" ${kind !== 'open' || capBlocked ? 'disabled' : ''}>补齐已登记对标的缺失资料</button>`,
+    todo ? `<button class="btn small primary" data-act="collect-resume" ${kind !== 'open' || capBlocked || noPlugin ? 'disabled' : ''}>开始采集待办（${todo}）</button>` : '',
+    `<button class="btn small" data-act="collect-fill" ${kind !== 'open' || capBlocked || noPlugin ? 'disabled' : ''}>补齐已登记对标的缺失资料</button>`,
     `<button class="btn small" data-act="prepare-browser" ${kind === 'restriction' || capBlocked ? 'disabled' : ''}>先核对登录账号</button>`,
     running ? '<button class="btn small" data-act="collect-pause">暂停采集</button>' : '',
     kind === 'paused' ? '<button class="btn small" data-act="resume-access">恢复自动访问</button>' : '',
@@ -247,6 +249,7 @@ function collectionCardHtml() {
   return `<div class="card" style="margin-bottom:12px">
       <div class="row"><strong>补齐对标资料</strong><span class="muted">已完成 ${done} · 待处理 ${todo}</span></div>
       ${statusLine ? `<p style="margin:6px 0">${icon('warning')} ${esc(statusLine)}${reason ? `<span class="muted"> · ${esc(reason)}</span>` : ''}</p>` : (reason ? `<p class="muted" style="margin:6px 0">${esc(reason)}</p>` : '<p class="muted" style="margin:6px 0">先核对登录账号，再点“开始采集待办”。采集受「采集状态」里的上限和冷静期约束，一次只读一个对标目标，但不能保证不触发平台风控。</p>')}
+      ${noPlugin ? `<p class="warn-line" style="margin:8px 0">${icon('warning')} 采集只走 WorkBuddy 浏览器插件，但现在浏览器方式是「${esc({ none: '未选择', playwright: 'Playwright', chrome: 'Chrome' }[S.bridge.browser || 'none'] || S.bridge.browser || '未选择')}」。<button class="btn small" data-act="go-settings">去「连接与设置」选</button></p>` : ''}
       ${paceHtml()}
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px">${main}</div>
       ${kind !== 'restriction' ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">遇到验证码或访问受限时</summary>
@@ -411,6 +414,8 @@ function bind(main) {
         try { await api('POST', `/api/benchmarks/collection?${acc()}`, { action: t.dataset.act.slice(8) }); }
         catch (err) { toast(err.message); }  // 总开关 / 冷静期 / 时段 / 每日上限 / 采集间隔不满足时，服务端会说明原因
         await load(); return draw(main);
+      case 'go-settings':
+        return go('settings');
       case 'pace-toggle':
         try { await api('POST', `/api/browse/policy?${acc()}`, { action: t.checked ? 'enable' : 'disable' }); toast(t.checked ? '已允许自动采集（仍受上限和冷静期约束）' : '已关闭自动采集'); }
         catch (err) { toast(err.message); }

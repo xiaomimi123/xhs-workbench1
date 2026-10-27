@@ -38,6 +38,16 @@ test('状态卡片：判定、今天用量、规则、冷静期都在；开关�
   assert.match(card(ctx, pace({ status: 'wait', reason: '距上次访问才 20 分钟' })), /⏳ 先别开始/);
 });
 
+test('浏览器方式不是 WorkBuddy 插件：卡片里直接提示、开始按钮灰掉、能去设置；是插件时没有这条提示', () => {
+  const none = setup({ bridge: { mode: 'cli', browser: 'none' } });
+  const html = card(none.ctx, pace({ status: 'go', enabled: true }));
+  assert.match(html, /采集只走 WorkBuddy 浏览器插件，但现在浏览器方式是「未选择」/); assert.match(html, /data-act="go-settings"/);
+  assert.match(html, /data-act="collect-resume" disabled/); assert.match(html, /data-act="collect-fill" disabled/);
+  const ok = setup();
+  const good = card(ok.ctx, pace({ status: 'go', enabled: true }));
+  assert.doesNotMatch(good, /go-settings/); assert.doesNotMatch(good, /data-act="collect-resume" disabled/);
+});
+
 test('界面上的值会被转义；太长的原因只留一句', () => {
   const { ctx } = setup();
   const html = card(ctx, pace({ reason: '<img src=x onerror=alert(1)>' + '很长'.repeat(200) }));
