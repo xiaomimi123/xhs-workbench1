@@ -1,5 +1,11 @@
 # 更新日志
 
+## v0.8.13（2026-10-27）CodeBuddy 登录排错提示；浏览器方式的推荐改过来
+
+- **「CodeBuddy 登录完仍显示没登录」的排错步骤直接写在「连接与设置」里**：新装机遇到过——登录凭据和 WorkBuddy 桌面共用一份存储，偶尔读不出 / 写不进（日志里 `missing-key`、`safe-delete … trash … Some operations were aborted`），之后每次都 Authentication required。这是 CodeBuddy / WorkBuddy 自己的问题，工作台改不了，所以只给出能走通的办法：关掉 WorkBuddy 桌面和所有 codebuddy 窗口 → Win+R 开自己的 cmd → `codebuddy` 里 `/login` → 还不行就把 `%LOCALAPPDATA%\CodeBuddyExtension\Data\Publicuth` 改名加 `.bak`（WorkBuddy 也要重新登录一次）
+- **浏览器方式的说明跟上现状**：以前「工作台独立浏览器」写着（推荐），并说登录账号、对标核实都用它——采集和登录核对停用它之后这是误导。现在「我自己的 Edge（WorkBuddy 插件，推荐）」排第一并写明小红书采集只走它；「工作台独立浏览器」改成「不能用于小红书采集」
+- **没验证**：登录失败本身没有在本机复现（本机只是普通未登录），根因是按日志判断的，处理步骤来自员工电脑那份报告，没有在出问题的电脑上试过
+
 ## v0.8.12（2026-10-27）新设备上架验收发现的问题
 
 来源：员工电脑给的新设备上架清单和自检脚本。对照源码在本机复现后修的。

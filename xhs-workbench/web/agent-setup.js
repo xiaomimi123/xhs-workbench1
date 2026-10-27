@@ -5,8 +5,8 @@ import { esc } from './md.js';
 import { icon } from './icons.js';
 
 const ENGINES = [
-  { id: 'playwright', name: '工作台独立浏览器（推荐）', note: '工作台自己开一个 Edge / Chrome，每个工作台账号一份独立登录；登录账号、对标核实都用它。只读档能在代码里屏蔽发布页面。' },
-  { id: 'workbuddy', name: '我自己的 Edge（WorkBuddy 插件）', note: '直接用你日常在用的 Edge，沿用里面的登录；需要 WorkBuddy 的「浏览器操控」和 Edge 扩展。所有工作台账号共用这一个浏览器，先在 Edge 里登录要运营的小红书号。' },
+  { id: 'workbuddy', name: '我自己的 Edge（WorkBuddy 插件，推荐）', note: '小红书采集只走这一种：在你日常用的 Edge 里读页面，沿用里面的登录；需要 WorkBuddy 的「浏览器操控」和 Edge 扩展，先在 Edge 里登录小红书。所有工作台账号共用这一个浏览器。' },
+  { id: 'playwright', name: '工作台独立浏览器（不能用于小红书采集）', note: '工作台自己开一个 Edge / Chrome 给 agent 用。它带自动化特征，所以小红书的采集和登录核对不会用它，只适合不访问小红书的网页任务。' },
   { id: 'none', name: '不用浏览器', note: '只做选题、文案、复盘等不需要打开网页的工作。' },
 ];
 
@@ -20,13 +20,23 @@ export async function mountAgentSetup(root) {
     if (current()) draw();
   };
 
+  // 登录完还是显示没登录：CodeBuddy 的登录凭据和 WorkBuddy 桌面共用一份存储，出过「读不出 / 写不进」的情况（日志里是 missing-key、safe-delete）
+  const loginHelp = () => `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer">登录完还是显示没登录？</summary>
+    <ol class="muted" style="margin:6px 0 0 18px;padding:0;font-size:13px;line-height:1.7">
+      <li>关掉 WorkBuddy 桌面和所有 codebuddy 窗口。</li>
+      <li>按 <b>Win+R</b>，输入 <code>cmd</code> 回车——用自己打开的窗口，不要从 WorkBuddy 或工作台里开。</li>
+      <li>输入 <code>codebuddy</code> 回车，再输入 <code>/login</code>，在浏览器里完成授权，然后输入 <code>/exit</code>。</li>
+      <li>还不行：把文件夹 <code>%LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth</code> 改名（后面加 <code>.bak</code>，不要删），再做第 2、3 步。<b>它和 WorkBuddy 桌面共用，改名后 WorkBuddy 也要重新登录一次。</b></li>
+      <li>回到这里点「重新检查」。</li>
+    </ol></details>`;
+
   function codebuddyRow(c) {
     if (!c) return '';
     if (!c.installed) return `${icon('warning', 'icon-warn')} 本机没有检测到 CodeBuddy CLI。请重新运行中枢的接入命令（询问时选择安装），装好后点「重新检查」。`;
     if (c.checking || state.busy === 'check') return '正在检查 CodeBuddy 能不能用…（最长约 2 分钟）';
     if (c.ok) return `${icon('check', 'icon-ok')} 已登录，可以使用<span class="muted">（${esc(c.command)}）</span>`;
-    if (c.needsLogin) return `${icon('warning', 'icon-warn')} <b>还没登录</b>：点「去登录」，在弹出的窗口里输入 <code>/login</code> 登录你的 CodeBuddy 账号`;
-    if (c.ok === false) return `${icon('warning', 'icon-warn')} 连接测试没通过：<span class="muted">${esc(c.error)}</span>`;
+    if (c.needsLogin) return `${icon('warning', 'icon-warn')} <b>还没登录</b>：点「去登录」，在弹出的窗口里输入 <code>/login</code> 登录你的 CodeBuddy 账号${loginHelp()}`;
+    if (c.ok === false) return `${icon('warning', 'icon-warn')} 连接测试没通过：<span class="muted">${esc(c.error)}</span>${loginHelp()}`;
     return '还没检查过';
   }
 
