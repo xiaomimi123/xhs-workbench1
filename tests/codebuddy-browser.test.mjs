@@ -66,8 +66,8 @@ test('applyBrowser 幂等；关闭浏览器控制后回到基础参数，不留�
   assert.equal(off.playwrightMcp, undefined);
 });
 
-test('CodeBuddy 只支持 Playwright 方式的浏览器控制', () => {
-  assert.throws(() => applyBrowser(base, 'chrome', PKG), /支持 Playwright 或 WorkBuddy/);
+test('CodeBuddy 只支持 Playwright、WorkBuddy 插件、ego lite 三种浏览器控制，别的（如 chrome）会被拒绝', () => {
+  assert.throws(() => applyBrowser(base, 'chrome', PKG), /支持 Playwright、WorkBuddy 浏览器插件或 ego lite/);
 });
 
 test('mcpConfigFor：blockedOrigins 写成分号分隔的 --blocked-origins；没有时不加', () => {

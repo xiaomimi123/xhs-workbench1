@@ -6,7 +6,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { ADAPTERS, findAdapter } from './adapters.mjs';
 import { detectAdapters, pingAdapter } from './bridge.mjs';
-import { applyBrowser, detectRealBrowser, detectWorkbuddyBrowserMcp } from './browser.mjs';
+import { applyBrowser, detectRealBrowser, detectWorkbuddyBrowserMcp, detectEgoBrowser } from './browser.mjs';
 import { sanitizeAgentEnv } from './agent-env.mjs';
 import { getBridgeConfig, saveBridgeConfig, httpError } from './store.mjs';
 import { reportHealth } from './health-outbox.mjs';
@@ -64,7 +64,7 @@ export function openCodebuddyLogin(detect = () => detectAdapters(ADAPTERS), run 
 }
 
 // ---------- 浏览器方式与权限档 ----------
-export const BROWSER_ENGINES = ['none', 'playwright', 'workbuddy'];
+export const BROWSER_ENGINES = ['none', 'playwright', 'workbuddy', 'ego'];
 
 async function latestPlaywrightMcp() {
   // 只在第一次选「工作台独立浏览器」时查一次版本（之后沿用配置里锁定的版本）
@@ -81,13 +81,17 @@ async function latestPlaywrightMcp() {
  * 网页里切换浏览器方式。会先用新配置跑一次连接测试，通过才保存（不通过时原配置不变）。
  * 选员工自己的 Edge（WorkBuddy 插件）时，工作台的后台读取组件用不上，交给调用方关掉。
  */
-export async function setBrowserEngine(engine, { ping = pingAdapter, detectWb = detectWorkbuddyBrowserMcp, playwrightPkg = latestPlaywrightMcp } = {}) {
+export async function setBrowserEngine(engine, { ping = pingAdapter, detectWb = detectWorkbuddyBrowserMcp, detectEgo = detectEgoBrowser, playwrightPkg = latestPlaywrightMcp } = {}) {
   if (!BROWSER_ENGINES.includes(engine)) throw httpError(400, '浏览器方式不支持');
   const cfg = getBridgeConfig();
   if (cfg?.mode !== 'cli' || !cfg.adapter) throw httpError(409, '请先连接 CodeBuddy（命令行模式），再设置浏览器');
   if (engine === 'workbuddy' && cfg.adapter.id !== 'codebuddy') throw httpError(409, '「我的 Edge（WorkBuddy 插件）」目前只能配合 CodeBuddy 使用');
+  if (engine === 'ego' && cfg.adapter.id !== 'codebuddy') throw httpError(409, '「ego lite 浏览器」目前只能配合 CodeBuddy 使用');
   let pkg = null;
-  if (engine === 'workbuddy') {
+  if (engine === 'ego') {
+    pkg = detectEgo();
+    if (!pkg) throw httpError(409, '没有找到 ego lite：请先安装 ego lite（https://lite.ego.app/）并完成首次设置，装好后新开一个终端能运行 ego-browser skill，再回到这里。');
+  } else if (engine === 'workbuddy') {
     pkg = detectWb();
     if (!pkg) throw httpError(409, '没有找到 WorkBuddy 浏览器插件：请在 WorkBuddy「设置 > 智能体 > 浏览器操控」打开「让 WorkBuddy 控制浏览器」，并安装 Edge 或 Chrome 扩展');
   } else if (engine === 'playwright') {
@@ -111,6 +115,7 @@ export function setBrowserMode(mode, confirmed) {
   if (!['readonly', 'test'].includes(mode)) throw httpError(400, '权限档只能是 readonly 或 test');
   if (mode === 'test' && confirmed !== true) throw httpError(400, '切到测试档需要确认：测试档下 agent 能点击和输入，测完请切回只读档');
   const cfg = getBridgeConfig();
+  if (cfg?.browser === 'ego') throw httpError(409, 'ego lite 浏览器只有只读档：它只提供读取工具，没有点击和输入');
   if (cfg?.mode !== 'cli' || cfg.adapter?.id !== 'codebuddy' || !['playwright', 'workbuddy'].includes(cfg.browser)) throw httpError(409, '先在上面选一种浏览器方式');
   const pkg = cfg.browser === 'workbuddy' ? cfg.adapter.workbuddyMcp : cfg.adapter.playwrightMcp;
   const adapter = applyBrowser({ ...cfg.adapter, browserMode: mode }, cfg.browser, pkg);
@@ -127,6 +132,7 @@ export function browserOptions() {
     current: cfg?.mode === 'cli' ? cfg.browser || 'none' : null,
     browserMode: cfg?.adapter?.browserMode || 'readonly',
     workbuddyPlugin: !!wb,
+    egoBrowser: !!detectEgoBrowser(),
     realBrowser: detectRealBrowser(),
   };
 }

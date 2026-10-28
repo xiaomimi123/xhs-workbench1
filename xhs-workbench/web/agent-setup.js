@@ -6,6 +6,7 @@ import { icon } from './icons.js';
 
 const ENGINES = [
   { id: 'workbuddy', name: '我自己的 Edge（WorkBuddy 插件，推荐）', note: '小红书采集只走这一种：在你日常用的 Edge 里读页面，沿用里面的登录；需要 WorkBuddy 的「浏览器操控」和 Edge 扩展，先在 Edge 里登录小红书。所有工作台账号共用这一个浏览器。' },
+  { id: 'ego', name: 'ego lite 浏览器（实验）', note: '专为 AI agent 做的浏览器，沿用你在 ego lite 里的登录；不需要 WorkBuddy。目前只支持账号管理里的「在浏览器登录」核对和主页分析（只读：检查登录、读自己的主页、读信息流和笔记），对标采集暂不支持。需要先安装 ego lite 并完成首次设置，再在 ego lite 里扫码登录小红书。' },
   { id: 'playwright', name: '工作台独立浏览器（不能用于小红书采集）', note: '工作台自己开一个 Edge / Chrome 给 agent 用。它带自动化特征，所以小红书的采集和登录核对不会用它，只适合不访问小红书的网页任务。' },
   { id: 'none', name: '不用浏览器', note: '只做选题、文案、复盘等不需要打开网页的工作。' },
 ];
@@ -59,10 +60,10 @@ export async function mountAgentSetup(root) {
       ${b && b.current === null ? '<p class="muted">先连接 CodeBuddy（命令行模式）后才能选择。</p>' : ''}
       ${b && b.current !== null ? ENGINES.map((e) => {
         const on = b.current === e.id || (e.id === 'none' && !b.current);
-        const unavailable = e.id === 'workbuddy' && !b.workbuddyPlugin;
+        const unavailable = (e.id === 'workbuddy' && !b.workbuddyPlugin) || (e.id === 'ego' && !b.egoBrowser);
         return `<div class="row" style="padding:8px 0;border-top:1px solid var(--line);align-items:flex-start">
           <div style="flex:1"><strong>${esc(e.name)}</strong>${on ? ' <span class="badge brand">当前</span>' : ''}
-            <div class="muted" style="font-size:13px">${esc(e.note)}${unavailable ? '<br>没有找到 WorkBuddy 浏览器插件：在 WorkBuddy「设置 > 智能体 > 浏览器操控」打开「让 WorkBuddy 控制浏览器」并安装 Edge 扩展。' : ''}</div></div>
+            <div class="muted" style="font-size:13px">${esc(e.note)}${e.id === 'workbuddy' && unavailable ? '<br>没有找到 WorkBuddy 浏览器插件：在 WorkBuddy「设置 > 智能体 > 浏览器操控」打开「让 WorkBuddy 控制浏览器」并安装 Edge 扩展。' : ''}${e.id === 'ego' && unavailable ? '<br>没有找到 ego lite：请先从 https://lite.ego.app/ 安装并完成首次设置，装好后新开一个终端能运行 ego-browser skill，再回来刷新本页。' : ''}</div></div>
           ${on ? '' : `<button class="btn small" data-engine="${e.id}" ${busy || unavailable ? 'disabled' : ''}>${state.busy === 'engine:' + e.id ? '切换中…' : '用这个'}</button>`}
         </div>`;
       }).join('') : ''}
@@ -91,7 +92,7 @@ export async function mountAgentSetup(root) {
         const e = t.dataset.engine;
         state.busy = 'engine:' + e; state.message = '正在用新的浏览器方式测试连接（最长约 3 分钟），通过后才会切换…'; draw();
         await api('POST', '/api/bridge/browser', { engine: e });
-        state.message = e === 'workbuddy' ? '已切换到你自己的 Edge。用之前请先在 Edge 里登录要运营的小红书账号。' : '已切换。';
+        state.message = e === 'workbuddy' ? '已切换到你自己的 Edge。用之前请先在 Edge 里登录要运营的小红书账号。' : e === 'ego' ? '已切换到 ego lite 浏览器。请先在 ego lite 里自己扫码登录小红书，再到「账号管理」点「在浏览器登录」。' : '已切换。';
         toast('浏览器方式已切换');
       } else if (t.dataset.mode) {
         const mode = t.dataset.mode;

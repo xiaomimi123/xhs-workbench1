@@ -1,5 +1,18 @@
 # 更新日志
 
+## v0.8.18（2026-10-28）新增浏览器方式「ego lite 浏览器」（实验）
+
+来源：用户想试 ego lite（专为 AI agent 做的浏览器）代替 WorkBuddy 浏览器插件，这样员工不用再装 WorkBuddy。
+
+- **「连接与设置」里多一个浏览器方式「ego lite 浏览器（实验）」**：本机装了 ego lite（找 `ego-browser`：环境变量 `EGO_BROWSER_BIN` → `~/.local/share/ego/active_version_dir/` → `~/.local/bin` → PATH）才可选，没装时说明怎么装；选择时先做连接测试，通过才保存。目前只能配合 CodeBuddy，没有测试档
+- **只读由固定工具保证**：CodeBuddy 通过工作台自带的 MCP 小服务 `ego-reader`（随包：`xhs-workbench/ego-reader/server.mjs`，源头在中枢仓库 `tools/ego-reader`）读小红书，只有 4 个只读工具：`xhs_check_login`、`xhs_read_me`、`xhs_read_feed`、`xhs_read_note`；没有点击 / 输入 / 打开任意网址 / 执行脚本的能力（`ego-browser nodejs` 本身能执行任意 JS，所以不能把 agent 写的脚本交给它）。工作台为账号生成 `config/mcp/<账号>.ego.json`，只放行 `mcp__ego-reader`，不带禁用工具列表。保护：两次读取至少间隔 20 秒、每小时最多 12 次、停止文件 `run/ego-reader.STOP`
+- **登录判断只认页面状态**：`window.__INITIAL_STATE__.user.loggedIn / userInfo.guest`。小红书游客也能看信息流和笔记，**不能**用「找不到登录按钮」判断（我们就因此把游客误判成已登录过）。`xhs_read_me` 未登录时只返回 `loggedIn:false`，已登录才用页面状态里的 userId 和 xsecToken 打开自己的主页，读昵称、小红书号、IP、简介、标签、关注 / 粉丝 / 获赞、可见笔记标题
+- **账号管理「在浏览器登录」按引擎走不同提示词**：ego 方式只调用一次 `xhs_read_me`：未登录就写 `browser.json` 为 `loggedIn:false` 并让员工自己在 ego lite 里扫码，不继续、不替员工登录；已登录才写 `browser.json` 和 `profile-suggestion.json`（0.8.17 起的自动填定位 / 人群 / 风格）。`playbooks/browser.md` 新增「ego lite 浏览器方式」一节
+- **范围**：目前只覆盖账号管理的登录核对和主页分析；竞品对标采集、批量采集仍只支持 WorkBuddy 插件方式（选了 ego 时竞品对标页会说明）
+- **验证**：`ego-engine.test.mjs` 7 项（检测顺序、MCP 配置、CodeBuddy 参数、选择时的各种失败、无测试档、网页选项、ego 提示词）；原来一条按旧报错文字断言的测试已更新（行为不变，仍拒绝 chrome 等未知方式）；全量 460 通过，2 个失败是本机没装 ffmpeg 的已知项；ego-reader 自身 24 项校验 / 保护测试（中枢仓库 `tools/ego-reader/test.mjs`）
+- **没验证**：① **真实的 CodeBuddy → ego-reader → ego lite 整条链**（开发机上的 CodeBuddy 没登录，只在测试里覆盖了 MCP 握手和工具；需要在虚拟机里验证）；② `xhs_read_me` 在**真实已登录**页面上的选择器（昵称、小红书号、简介等用的是常见结构加文字模式兜底，未登录时无法验证，已登录后才能确认）；③ 登录态是否在 ego lite 的不同窗口 / 任务空间之间共享；④ 员工机上 ego lite 的安装、首次设置、PATH
+- 本机之前对 ego lite 的「已登录」判断是错的（实为游客），已在中枢仓库 CHANGELOG 更正
+
 ## v0.8.17（2026-10-28）在浏览器登录时顺带分析账号，自动填好定位 / 人群 / 风格
 
 来源：用户说明正常流程应该是——通过浏览器登录核对的时候，就分析账号并自动填好账号管理里的定位、目标人群、内容风格。否则竞品对标推荐时因为这些都是空的，一个候选也登记不出来。

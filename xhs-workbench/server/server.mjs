@@ -824,6 +824,11 @@ async function handleApi(req, res, url) {
           next = applyBrowser({ ...adapter, browserMode: prev.adapter.browserMode }, 'workbuddy', prev.adapter.workbuddyMcp);
           browser = 'workbuddy'; kept = true;
         } catch { next = adapter; }
+      } else if (prev.browser === 'ego' && prev.adapter?.egoMcp && adapter.id === 'codebuddy') {
+        try {
+          next = applyBrowser(adapter, 'ego', prev.adapter.egoMcp);
+          browser = 'ego'; kept = true;
+        } catch { next = adapter; }
       } else if (prev.browser === 'playwright' && prev.adapter?.playwrightMcp && ['codebuddy', 'codex'].includes(adapter.id)) {
         try {
           next = applyBrowser(adapter, 'playwright', prev.adapter.playwrightMcp);

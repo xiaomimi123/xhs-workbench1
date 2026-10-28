@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { P, WORKSPACE } from './paths.mjs';
 import { readJson, writeJson, ensureDir, getAccounts } from './store.mjs';
 
@@ -120,6 +121,36 @@ export function workbuddyMcpConfigFor(accountId, exe) {
   return file;
 }
 
+// ---------- ego lite 浏览器（专为 AI agent 做的浏览器，沿用用户的登录） ----------
+// CodeBuddy 通过工作台自带的只读 MCP 小服务 ego-reader（xhs-workbench/ego-reader/server.mjs）读小红书：它只有「检查登录 / 读自己主页 / 读信息流 / 读笔记」
+// 几个固定的只读工具，不接受脚本，所以不需要像 WorkBuddy 方式那样靠禁用工具列表来保证只读。
+export function detectEgoBrowser(home = os.homedir(), exists = fs.existsSync, env = process.env) {
+  const exe = process.platform === 'win32' ? 'ego-browser.exe' : 'ego-browser';
+  const cands = [env.EGO_BROWSER_BIN,
+    path.join(home, '.local', 'share', 'ego', 'active_version_dir', exe),
+    path.join(home, '.local', 'bin', exe),
+    ...String(env.PATH || env.Path || '').split(path.delimiter).filter(Boolean).map((d) => path.join(d, exe))];
+  return cands.find((c) => c && exists(c)) || null;
+}
+
+export function egoReaderScript() {
+  return fileURLToPath(new URL('../ego-reader/server.mjs', import.meta.url));
+}
+
+export function egoMcpConfigFor(accountId, exe) {
+  if (!exe) throw new Error('ego lite 配置不完整，请在「连接与设置」里重新选择「ego lite 浏览器」');
+  if (!/^[\w-]+$/.test(accountId || '')) accountId = getAccounts().defaultAccountId || 'default';
+  const file = path.join(P.config, 'mcp', `${accountId}.ego.json`);
+  const want = { mcpServers: { 'ego-reader': { command: process.execPath, args: [egoReaderScript()], env: {
+    EGO_BROWSER_BIN: exe,
+    EGO_READER_STATE: path.join(P.run, 'ego-reader-state.json'),
+    EGO_READER_STOP_FILE: path.join(P.run, 'ego-reader.STOP'),
+  } } } };
+  mergeHubServers(want);
+  if (JSON.stringify(readJson(file, null)) !== JSON.stringify(want)) writeJson(file, want);
+  return file;
+}
+
 /** agent 登录检查后写的 accounts/<id>/browser.json */
 export function browserStatus(accountId) {
   return readJson(path.join(P.accountsDir, accountId, 'browser.json'), null);
@@ -137,7 +168,7 @@ export function applyBrowser(adapter, engine, pkg) {
     return next;
   }
   if (adapter.id === 'codebuddy') {
-    if (engine && engine !== 'playwright' && engine !== 'workbuddy') throw new Error('CodeBuddy 支持 Playwright 或 WorkBuddy 浏览器插件');
+    if (engine && !['playwright', 'workbuddy', 'ego'].includes(engine)) throw new Error('CodeBuddy 支持 Playwright、WorkBuddy 浏览器插件或 ego lite');
     // CodeBuddy 的 --allowedTools / --disallowedTools 是多值参数：每个工具要单独一项（实测把工具名用逗号拼成一项，放行不生效）。
     const args = [...adapter.args];
     const stripMulti = (flag) => {
@@ -151,10 +182,11 @@ export function applyBrowser(adapter, engine, pkg) {
     stripMulti('--disallowedTools');
     const m = args.indexOf('--mcp-config');
     if (m >= 0) args.splice(m, 2);
-    args.push('--allowedTools', ...CODEBUDDY_BASE_TOOLS, ...(engine === 'playwright' ? ['mcp__playwright'] : engine === 'workbuddy' ? ['mcp__browser'] : []));
+    args.push('--allowedTools', ...CODEBUDDY_BASE_TOOLS, ...(engine === 'playwright' ? ['mcp__playwright'] : engine === 'workbuddy' ? ['mcp__browser'] : engine === 'ego' ? ['mcp__ego-reader'] : []));
     const next = { ...adapter };
     delete next.playwrightMcp;
     if (engine !== 'workbuddy') delete next.workbuddyMcp;
+    if (engine !== 'ego') delete next.egoMcp;
     // 两档权限（adapter.browserMode）：
     //  readonly（默认）：点击 / 输入 / 填表 / 上传 / 按键 / 拖放 / 选择 / 执行脚本 / 弹窗处理一律禁用（被禁的工具对 agent 不可见），
     //    只留打开网址、快照、截图、等待、查找、标签页等读取类工具——用于分析数据和学习博主帖子，不允许自动发布。
@@ -168,6 +200,11 @@ export function applyBrowser(adapter, engine, pkg) {
       args.push('--mcp-config', '{mcpConfig}', '--disallowedTools', ...(mode === 'test' ? WORKBUDDY_TEST_DENY : WORKBUDDY_BROWSER_DENY));
       next.workbuddyMcp = pkg;
       next.browserMode = mode;
+    } else if (engine === 'ego') {
+      // 只读由 ego-reader 的固定工具保证（没有点击 / 输入 / 脚本），没有测试档
+      args.push('--mcp-config', '{mcpConfig}');
+      next.egoMcp = pkg;
+      next.browserMode = 'readonly';
     } else if (engine === 'playwright') {
       args.push('--mcp-config', '{mcpConfig}', '--disallowedTools', ...(mode === 'test' ? CODEBUDDY_TEST_DENY : CODEBUDDY_BROWSER_DENY));
       next.playwrightMcp = pkg;
