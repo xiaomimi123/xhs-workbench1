@@ -549,7 +549,9 @@ function browserLine(a) {
 async function loginAccount(id) {
   if (id !== S.accountId) switchAccount(id);
   // 登录和账号核对只在员工自己的浏览器里做，由 agent 通过 WorkBuddy 插件读一页比对；工作台不再替员工开 Playwright 浏览器
-  return toast('请先在你自己的浏览器里登录小红书，再到「竞品对标」页点「先核对登录账号」，让 agent 读一下当前登录的号并比对');
+  // 直接发起核对（agent 在你自己的浏览器里读一页比对）；前提是你已在那个浏览器里登录了小红书。不再让用户跳到别的页面找按钮
+  toast('请确认你已在自己的浏览器里登录了小红书；现在让 agent 读一页，核对当前登录的号');
+  return benchmark.checkLoginAccount();
 }
 
 async function saveAccountForm(form) {

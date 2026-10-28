@@ -177,6 +177,8 @@ function draw(main) {
     ${V.items.length ? `<div class="grid benchmark-grid">${cards}</div>` : V.form ? '' : `<div class="card empty-card">
         <p>还没有对标账号。</p>
         <p class="muted">添加一个你想学习的账号（主页链接或名字都行），或者让 agent 根据你的账号定位推荐。</p>
+        <p class="muted" style="margin-top:10px">还没确认登录的小红书号？先在你自己的浏览器里登录，再点下面的按钮，让 agent 读一页核对当前登录的号。</p>
+        <button class="btn small" data-act="prepare-browser">先核对登录账号</button>
       </div>`}`;
   bind(main);
 }
@@ -257,6 +259,15 @@ function collectionCardHtml() {
         <button class="btn small" data-act="lock-restriction">遇到验证码/受限，立刻暂停自动访问</button></details>` : ''}
       ${items.filter((x) => ['running', 'partial', 'blocked'].includes(x.state)).map((x) => `<div>${esc(V.items.find((b) => b.id === x.id)?.name || x.id)}：${x.state === 'running' ? `采集中${x.route === 'agent' ? '（agent 读页面，每个目标可能要几分钟）' : x.route === 'worker' ? '（后台只读组件）' : ''}` : '未完整采集'} · 尝试 ${x.attempts} 次 ${esc(x.reason || '')}</div>`).join('')}
     </div>`;
+}
+
+/** 核对员工自己浏览器里登录的小红书号（WorkBuddy 插件）：工作台不替员工开浏览器，只让 agent 读一页比对。账号管理页的「在浏览器登录」和这里共用 */
+export async function checkLoginAccount() {
+  // 浏览器方式是 WorkBuddy 插件：登录核对在员工自己的浏览器里做（工作台不替员工开浏览器），只读一页
+  if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
+    return ask('只做一件事：在我自己的浏览器里打开 https://www.xiaohongshu.com ，核对当前登录的小红书号，和「当前账号」里填写的号比对，把结果告诉我。不要打开任何对标主页、不要读笔记、不要点开详情、不要发布。', true);
+  }
+  return toast('请先在「连接与设置 → 执行 Agent 与浏览器」里把浏览器方式选成「WorkBuddy 浏览器插件」：登录核对只在你自己的浏览器里做');
 }
 
 function radarFormHtml() {
@@ -438,11 +449,7 @@ function bind(main) {
         await load(); return draw(main);
       }
       case 'prepare-browser':
-        // 浏览器方式是 WorkBuddy 插件：登录核对在员工自己的浏览器里做（工作台不替员工开浏览器），只读一页
-        if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
-          return ask('只做一件事：在我自己的浏览器里打开 https://www.xiaohongshu.com ，核对当前登录的小红书号，和「当前账号」里填写的号比对，把结果告诉我。不要打开任何对标主页、不要读笔记、不要点开详情、不要发布。', true);
-        }
-        return toast('请先在「连接与设置 → 执行 Agent 与浏览器」里把浏览器方式选成「WorkBuddy 浏览器插件」：登录核对只在你自己的浏览器里做');
+        return checkLoginAccount();
       case 'resume-access':
         await api('POST', `/api/browser/access?${acc()}`, {action:'resume'}); await load(); return draw(main);
       case 'lock-restriction':
