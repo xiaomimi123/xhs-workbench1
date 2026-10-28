@@ -1,5 +1,15 @@
 # 更新日志
 
+## v0.8.14（2026-10-28）启动 CodeBuddy 前把 WorkBuddy 的环境洗干净
+
+来源：员工电脑上 CLI 登录失败的根因复核。同一台机器上，最小环境运行 `codebuddy -p` 连续 5 次以上都成功，在 WorkBuddy 会话环境里连续 5 次以上都是 Authentication required——决定成败的是进程所处的环境，不是凭据。
+
+- **`sanitizeAgentEnv` 补清 WorkBuddy 的 shim 钩子**：沙箱里一律去掉 `NODE_OPTIONS` / `PYTHONPATH` / `PYTHONSTARTUP` / `BASH_ENV` / `ENV` / `EXEPATH` / `ACC_PRODUCT_CONFIG*`；取值指向 workbuddy 目录的其他变量也去掉；`PATH` 只剔除 workbuddy 的目录。以前只清 `WORKBUDDY_*` / `CODEBUDDY_*` 和回环代理，这些钩子仍把 CLI 留在「WorkBuddy 上下文」里
+- **判定「被 WorkBuddy 拉起」更宽**：除了有 `WORKBUDDY_*`，`NODE_OPTIONS` 等钩子变量指向 workbuddy 目录也算；没有任何痕迹时，用户自己的 `NODE_OPTIONS` / `PYTHONPATH` 不动
+- **没有改成完全白名单**：全白名单会误伤员工自己的代理、证书和 `HUB_*` 变量，而且每台电脑的必要变量不同；按「名字固定的钩子 + 取值指向 workbuddy」去掉，范围小，规则可测
+- **验证**：`tests/agent-env.test.mjs` 9 项（新增 4 项）；全量测试 437 通过，2 项失败是本机没装 ffmpeg 的已知项
+- **没验证**：没在会出问题的电脑上试。文档作者自己也说单个变量注入的复现不稳定，所以不能保证这一刀一定修好；需要在干净机器（新机 / Windows 沙盒）上，由 WorkBuddy 会话拉起工作台，再跑 `codebuddy -p "只回复：PONG"` 和 `/api/bridge/test` 各一次。没修好的话下一步是找 CodeBuddy 官方给 CLI 独立的登录存储
+
 ## v0.8.13（2026-10-27）CodeBuddy 登录排错提示；浏览器方式的推荐改过来
 
 - **「CodeBuddy 登录完仍显示没登录」的排错步骤直接写在「连接与设置」里**：新装机遇到过——登录凭据和 WorkBuddy 桌面共用一份存储，偶尔读不出 / 写不进（日志里 `missing-key`、`safe-delete … trash … Some operations were aborted`），之后每次都 Authentication required。这是 CodeBuddy / WorkBuddy 自己的问题，工作台改不了，所以只给出能走通的办法：关掉 WorkBuddy 桌面和所有 codebuddy 窗口 → Win+R 开自己的 cmd → `codebuddy` 里 `/login` → 还不行就把 `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth` 改名加 `.bak`（WorkBuddy 也要重新登录一次）

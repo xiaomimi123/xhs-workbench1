@@ -42,3 +42,32 @@ test('没有沙箱标记时，用户自己的本机代理不动', () => {
   const env = sanitizeAgentEnv({ http_proxy: 'http://127.0.0.1:7890' });
   assert.equal(env.http_proxy, 'http://127.0.0.1:7890');
 });
+
+test('沙箱里 WorkBuddy 的 shim 钩子（NODE_OPTIONS / PYTHONPATH / BASH_ENV / EXEPATH / ACC_PRODUCT_CONFIG_PATH）全部去掉', () => {
+  const env = sanitizeAgentEnv({ PATH: 'C:\Windows', WORKBUDDY_X: '1', NODE_OPTIONS: '--require D:/workbuddy/resources/shim/node-language-shim.cjs',
+    PYTHONPATH: 'D:/workbuddy/resources/shim', BASH_ENV: 'D:/workbuddy/resources/shim/env.sh', EXEPATH: 'D:/workbuddy/x', ACC_PRODUCT_CONFIG_PATH: 'C:/tmp/acc.json', LANG: 'zh_CN' });
+  for (const k of ['NODE_OPTIONS', 'PYTHONPATH', 'BASH_ENV', 'EXEPATH', 'ACC_PRODUCT_CONFIG_PATH']) assert.equal(env[k], undefined, k);
+  assert.equal(env.LANG, 'zh_CN');
+  assert.equal(env.PATH, 'C:\Windows');
+});
+
+test('沙箱里取值指向 workbuddy 目录的变量去掉，PATH 只剔除 workbuddy 的目录', () => {
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const env = sanitizeAgentEnv({ WORKBUDDY_X: '1', SOME_TOOL_HOME: 'D:/workbuddy/tools', MY_VAR: 'keep',
+    PATH: ['C:/Windows', 'D:/WorkBuddy/resources/bin', 'C:/nodejs'].join(sep) });
+  assert.equal(env.SOME_TOOL_HOME, undefined);
+  assert.equal(env.MY_VAR, 'keep');
+  assert.equal(env.PATH, ['C:/Windows', 'C:/nodejs'].join(sep));
+});
+
+test('没有任何 WorkBuddy 痕迹时，NODE_OPTIONS / PYTHONPATH 等用户自己的设置不动', () => {
+  const env = sanitizeAgentEnv({ PATH: 'x', NODE_OPTIONS: '--max-old-space-size=4096', PYTHONPATH: 'C:/mylib' });
+  assert.equal(env.NODE_OPTIONS, '--max-old-space-size=4096');
+  assert.equal(env.PYTHONPATH, 'C:/mylib');
+});
+
+test('只有 NODE_OPTIONS 指向 workbuddy 也算被它拉起（没有 WORKBUDDY_* 时）', () => {
+  const env = sanitizeAgentEnv({ PATH: 'x', NODE_OPTIONS: '--require D:/workbuddy/shim.cjs', CODEBUDDY_SERVICE_PROXY_URL: 'http://127.0.0.1:1/x' });
+  assert.equal(env.NODE_OPTIONS, undefined);
+  assert.equal(env.CODEBUDDY_SERVICE_PROXY_URL, undefined);
+});

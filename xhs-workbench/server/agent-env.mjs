@@ -3,13 +3,19 @@
 // 原样传给 codebuddy / claude 等 CLI，会让它们读到沙箱的配置（读不到自己的登录状态）、端口冲突、请求被转进已不存在的代理。
 const LOOPBACK = /^(https?:\/\/)?(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i;
 const PROXY_KEYS = ['http_proxy', 'https_proxy', 'all_proxy'];
+// WorkBuddy 会话里除 WORKBUDDY_* / CODEBUDDY_* 外，还会把解释器和脚本钩子指向自己的 shim（实测 CLI 带着它们会被判成「WorkBuddy 上下文」，要求托管凭据而登录失败，
+// 而同一台机器的最小环境里连续 5 次以上都能用）。这几个变量的名字固定，沙箱里一律去掉；
+// 其他变量只在取值指向 workbuddy 目录时才去掉（用户自己的同名变量不会指向那里），PATH 只剔除 workbuddy 的目录。
+const HOOK_KEYS = /^(NODE_OPTIONS|PYTHONPATH|PYTHONSTARTUP|BASH_ENV|ENV|EXEPATH|ACC_PRODUCT_CONFIG\w*)$/i;
+const POINTS_TO_WORKBUDDY = /workbuddy/i;
+const isSandboxed = (env) => Object.entries(env).some(([k, v]) => /^WORKBUDDY_/i.test(k) || (HOOK_KEYS.test(k) && POINTS_TO_WORKBUDDY.test(String(v || ''))));
 
 export function sanitizeAgentEnv(src = process.env) {
   const env = { ...src };
   // 从另一个 Claude Code 会话里启动时，需去掉这些变量，否则嵌套调用会被拒绝
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_ENTRYPOINT;
-  const sandboxed = Object.keys(env).some((k) => /^WORKBUDDY_/i.test(k));
+  const sandboxed = isSandboxed(env);
   if (sandboxed) {
     // 只在确认是沙箱拉起时才清理：用户自己常驻的本机代理（Clash 等也是 127.0.0.1）不能误删
     for (const k of Object.keys(env)) {
@@ -21,6 +27,12 @@ export function sanitizeAgentEnv(src = process.env) {
       else if (PROXY_KEYS.includes(k.toLowerCase()) && LOOPBACK.test(String(env[k] || '').trim())) delete env[k];
     }
     delete env.SERVER__PORT;
+    for (const k of Object.keys(env)) {
+      if (/^path$/i.test(k)) {
+        const sep = process.platform === 'win32' ? ';' : ':';
+        env[k] = String(env[k]).split(sep).filter((d) => d && !POINTS_TO_WORKBUDDY.test(d)).join(sep);
+      } else if (HOOK_KEYS.test(k) || POINTS_TO_WORKBUDDY.test(String(env[k] || ''))) delete env[k];
+    }
   }
   return env;
 }
