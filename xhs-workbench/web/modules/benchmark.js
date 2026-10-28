@@ -265,7 +265,10 @@ function collectionCardHtml() {
 export async function checkLoginAccount() {
   // 浏览器方式是 WorkBuddy 插件：登录核对在员工自己的浏览器里做（工作台不替员工开浏览器），只读一页
   if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
-    return ask('只做一件事：在我自己的浏览器里打开 https://www.xiaohongshu.com ，核对当前登录的小红书号，和「当前账号」里填写的号比对，把结果告诉我。不要打开任何对标主页、不要读笔记、不要点开详情、不要发布。', true);
+    // 要点：读到的昵称和小红书号必须按 playbooks/browser.md「登录检查」写进账号数据目录的 browser.json，账号管理页的「上次已登录」就是从它读的；
+    // 只在回复里说一下的话，刷新页面就没了（虚拟机测试里发现的）
+    const file = `${accDirRel()}/browser.json`;
+    return ask(`只做一件事：在我自己的浏览器里打开 https://www.xiaohongshu.com ，核对当前登录的小红书号，和「当前账号」里填写的号比对。按 playbooks/browser.md「登录检查」把结果写入 ${file}（JSON：{"loggedIn": true 或 false, "nickname": "昵称", "xhsId": "小红书号", "checkedAt": "当前时间的 ISO 格式"}；没登录就写 loggedIn 为 false，其余留空）。除这个文件外不要写别的文件；写好后用一两句话告诉我结果。不要打开任何对标主页、不要读笔记、不要点开详情、不要发布。`, true);
   }
   return toast('请先在「连接与设置 → 执行 Agent 与浏览器」里把浏览器方式选成「WorkBuddy 浏览器插件」：登录核对只在你自己的浏览器里做');
 }

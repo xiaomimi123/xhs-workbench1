@@ -543,7 +543,7 @@ function browserLine(a) {
   if (!b) return `<span class="muted">尚未保存登录记录（以实时核对为准）</span>${state}`;
   const who = [b.nickname, b.xhsId && `小红书号 ${b.xhsId}`].filter(Boolean).map(esc).join(' · ');
   const mismatch = a.xhsId && b.xhsId && a.xhsId !== b.xhsId;
-  return `${b.loggedIn ? `${icon("check", "icon-ok")} 上次已登录` : `${icon("warning", "icon-warn")} 上次未登录`}${who ? `：${who}` : ''}${b.checkedAt ? `<span class="muted">（${fmtTime(b.checkedAt)} 检查，以实时页面为准）</span>` : ''}${mismatch ? `<div class="error-line">登录的小红书号和账号信息里填的（${esc(a.xhsId)}）不一致，自动操作会被拦下</div>` : ''}${state}`;
+  return `${b.loggedIn ? `${icon("check", "icon-ok")} 上次已登录` : `${icon("warning", "icon-warn")} 上次未登录`}${who ? `：${who}` : ''}${b.checkedAt ? `<span class="muted">（${fmtTime(b.checkedAt)} 检查，以实时页面为准）</span>` : ''}${mismatch ? `<div class="error-line">登录的小红书号和账号信息里填的（${esc(a.xhsId)}）不一致，自动操作会被拦下</div>` : ''}${b.loggedIn && b.xhsId && !a.xhsId ? `<div style="margin-top:6px"><span class="muted">账号信息里还没填小红书号（填了才能防止用错号）</span> <button class="btn small" data-fill-xhsid="${esc(a.id)}">把 ${esc(b.xhsId)} 填为这个账号的小红书号</button></div>` : ''}${state}`;
 }
 
 async function loginAccount(id) {
@@ -552,6 +552,21 @@ async function loginAccount(id) {
   // 直接发起核对（agent 在你自己的浏览器里读一页比对）；前提是你已在那个浏览器里登录了小红书。不再让用户跳到别的页面找按钮
   toast('请确认你已在自己的浏览器里登录了小红书；现在让 agent 读一页，核对当前登录的号');
   return benchmark.checkLoginAccount();
+}
+
+/** 把最近一次登录核对读到的小红书号填进账号（只在账号还没填号、且上次核对已登录时出现；用户点了才填） */
+async function fillXhsId(id) {
+  const acc = (S.accounts?.accounts || []).find((x) => x.id === id);
+  const xhsId = acc?.browser?.xhsId;
+  if (!acc || !xhsId || !acc.browser.loggedIn || acc.xhsId) return;
+  try {
+    await api('POST', '/api/accounts', { id, xhsId });
+    toast('已填入小红书号');
+    await refreshAccounts();
+    viewAccounts();
+  } catch (err) {
+    toast(err.message);
+  }
 }
 
 async function saveAccountForm(form) {
@@ -872,7 +887,7 @@ function usePrompt(text) {
 function bindEvents() {
   document.addEventListener('click', async (e) => {
     if (e.target.id === 'overlay') return ($('#overlay').hidden = true);
-    const t = e.target.closest('[data-nav],[data-prompt],[data-doc],[data-use-account],[data-login-account],[data-ask-kb],[data-edit-account],[data-default-account],[data-use-adapter],[data-alert],[data-close-overlay],[data-onboard],[data-onboard-skip],button');
+    const t = e.target.closest('[data-nav],[data-prompt],[data-doc],[data-use-account],[data-login-account],[data-fill-xhsid],[data-ask-kb],[data-edit-account],[data-default-account],[data-use-adapter],[data-alert],[data-close-overlay],[data-onboard],[data-onboard-skip],button');
     if (!t) return;
     if (t.dataset.alert) return openAlert(Number(t.dataset.alert));
     if (t.dataset.onboard !== undefined) return onboarding.open();
@@ -889,6 +904,7 @@ function bindEvents() {
     if (t.dataset.doc) return openDoc(t.dataset.doc);
     if (t.dataset.useAccount) return switchAccount(t.dataset.useAccount);
     if (t.dataset.loginAccount) return loginAccount(t.dataset.loginAccount);
+    if (t.dataset.fillXhsid) return fillXhsId(t.dataset.fillXhsid);
     if (t.dataset.editAccount) {
       S.editingAccount = t.dataset.editAccount;
       return viewAccounts();

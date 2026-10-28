@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
+const app = fs.readFileSync(new URL('../xhs-workbench/web/app.js', import.meta.url), 'utf8');
+
 const read = (p) => fs.readFileSync(new URL('../xhs-workbench/web/' + p, import.meta.url), 'utf8');
 const bench = read('modules/benchmark.js');
 
@@ -19,7 +21,7 @@ function loadCheck(ctxExtra) {
 
 test('WorkBuddy 插件模式：直接让 agent 只读核对登录账号，不打开对标主页、不发布', async () => {
   const asked = [];
-  const fn = loadCheck({ S: { bridge: { mode: 'cli', browser: 'workbuddy' } }, ask: (text, flag) => { asked.push([text, flag]); }, toast: () => assert.fail('不应弹提示') });
+  const fn = loadCheck({ S: { accountId: 'acc_1', bridge: { mode: 'cli', browser: 'workbuddy' } }, accDirRel: () => 'accounts/acc_1', ask: (text, flag) => { asked.push([text, flag]); }, toast: () => assert.fail('不应弹提示') });
   await fn();
   assert.equal(asked.length, 1);
   assert.match(asked[0][0], /核对当前登录的小红书号/);
@@ -46,4 +48,46 @@ test('竞品对标没有对标账号时，空状态里也有「先核对登录�
   assert.ok(i > 0);
   const emptyCard = bench.slice(i, bench.indexOf('</div>`}`', i));
   assert.match(emptyCard, /data-act="prepare-browser"[^>]*>先核对登录账号</);
+});
+
+test('核对提示词要求把结果写进 browser.json（否则只在对话里，刷新就没了），且只许写这一个文件', async () => {
+  const asked = [];
+  const fn = loadCheck({ S: { accountId: 'acc_1', bridge: { mode: 'cli', browser: 'workbuddy' } }, accDirRel: () => 'accounts/acc_1', ask: (t) => asked.push(t), toast: () => {} });
+  await fn();
+  assert.match(asked[0], /accounts\/acc_1\/browser\.json/);
+  assert.match(asked[0], /playbooks\/browser\.md/);
+  for (const k of ['loggedIn', 'nickname', 'xhsId', 'checkedAt']) assert.ok(asked[0].includes(k), k);
+  assert.match(asked[0], /除这个文件外不要写别的文件/);
+});
+
+function loadFill(accounts, apiImpl) {
+  const start = app.indexOf('async function fillXhsId(id)');
+  const end = app.indexOf('async function saveAccountForm(form)');
+  const calls = { api: [], toast: [], refreshed: 0, viewed: 0 };
+  const ctx = vm.createContext({ S: { accounts: { accounts } }, api: async (...a) => { calls.api.push(a); return apiImpl?.(...a); }, toast: (m) => calls.toast.push(m),
+    refreshAccounts: async () => { calls.refreshed++; }, viewAccounts: () => { calls.viewed++; } });
+  const fn = vm.runInContext(app.slice(start, end) + '\nfillXhsId', ctx);
+  return { fn, calls };
+}
+
+test('一键填入：账号没填号且上次核对已登录 → 只提交 id 和读到的小红书号', async () => {
+  const { fn, calls } = loadFill([{ id: 'a1', xhsId: '', browser: { loggedIn: true, xhsId: 'become5858' } }]);
+  await fn('a1');
+  assert.equal(JSON.stringify(calls.api), JSON.stringify([['POST', '/api/accounts', { id: 'a1', xhsId: 'become5858' }]]));
+  assert.equal(calls.refreshed, 1);
+});
+
+test('一键填入：已经填了号、或上次未登录、或没读到号，都不提交（不覆盖用户填的号）', async () => {
+  for (const acc of [{ id: 'a1', xhsId: 'mine', browser: { loggedIn: true, xhsId: 'other' } }, { id: 'a1', xhsId: '', browser: { loggedIn: false, xhsId: 'x' } }, { id: 'a1', xhsId: '', browser: { loggedIn: true, xhsId: '' } }, { id: 'a1', xhsId: '' }]) {
+    const { fn, calls } = loadFill([acc]);
+    await fn('a1');
+    assert.equal(calls.api.length, 0, JSON.stringify(acc));
+  }
+});
+
+test('账号页只在「已登录、读到号、账号没填号」时显示一键填入按钮', () => {
+  const line = app.slice(app.indexOf('function browserLine(a)'), app.indexOf('async function loginAccount'));
+  assert.match(line, /b\.loggedIn && b\.xhsId && !a\.xhsId/);
+  assert.match(line, /data-fill-xhsid=/);
+  assert.match(app, /if \(t\.dataset\.fillXhsid\) return fillXhsId/);
 });
