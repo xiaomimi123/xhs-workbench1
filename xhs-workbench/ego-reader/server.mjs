@@ -96,15 +96,17 @@ else {
     const me = await page.evaluate(() => {
       const t = (sel) => { const e = document.querySelector(sel); return e ? e.innerText.trim() : ""; };
       const body = document.body.innerText;
+      // 注意：这段在模板字符串里，正则里的反斜杠必须写成两个，写成一个会被吃成普通字母（test.mjs 有检查）
       const pick = (re) => { const m = body.match(re); return m ? m[1].trim() : ""; };
-      const redText = t(".user-redId") || pick(/小红书号[:：]\s*([^\s]+)/);
+      const redText = t(".user-redId") || pick(/小红书号[:：]\\s*([^\\s]{1,40})/);
       return {
         nickname: t(".user-name").slice(0, 40),
-        xhsId: (redText.match(/小红书号[:：]?\s*([^\s]+)/) || [null, redText])[1] || "",
-        ip: pick(/IP属地[:：]\s*([^\s]+)/),
+        xhsId: ((redText.match(/小红书号[:：]?\\s*([^\\s]{1,40})/) || [null, redText])[1] || "").slice(0, 40),
+        // 直接读 .user-IP（形如「IP属地：xx」）；整页文字里还嵌着脚本文本，不能拿整页去匹配
+        ip: t(".user-IP").replace(/^IP属地[:：]?\\s*/, "").slice(0, 20) || pick(/IP属地[:：]\\s*([^\\s]{1,20})/),
         bio: t(".user-desc").slice(0, 300),
         tags: Array.from(document.querySelectorAll(".user-tags > *")).map((e) => e.innerText.trim()).filter(Boolean).slice(0, 10),
-        counts: t(".user-interactions").replace(/\s+/g, " ").slice(0, 80),
+        counts: t(".user-interactions").replace(/\\s+/g, " ").slice(0, 80),
         noteTitles: Array.from(document.querySelectorAll("section.note-item .title, section.note-item [class*='title']")).map((e) => e.innerText.trim()).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).slice(0, 12),
         gone: /页面不见了|无法浏览/.test(body.slice(0, 300)),
       };
