@@ -2,6 +2,7 @@ import * as video from './modules/video-creation.js';
 import {mountVideoSettings} from './video-service-settings.js';
 import {mountImageServiceSettings} from './image-service-settings.js';
 import {mountAgentSetup} from './agent-setup.js';
+import { initTheme, appearanceCardHtml, mountAppearance } from './theme.js';
 import { md, esc, stripFrontmatter } from './md.js';
 import { S, $, api, acc, toast, showOverlay, fmtTime, currentAccount, withBusy, setHooks, confirmDialog, confirmLeave } from './core.js';
 import * as benchmark from './modules/benchmark.js';
@@ -669,6 +670,7 @@ function viewSettings() {
   $('#main').innerHTML = `
     <h1 class="page-title">${icon("plug")} 连接与设置</h1>
     <p class="page-sub">网页里的对话和任务由 CodeBuddy CLI 执行；登录、浏览器方式和权限档都在这里设置，不用再去终端里运行命令。</p>
+    ${appearanceCardHtml()}
     <div class="card" id="agent-setup-card" style="max-width:760px;margin-bottom:16px">执行 Agent 与浏览器：加载中…</div>
     <div class="card" id="curator-card" style="max-width:760px;margin-bottom:16px">${icon("book")} 知识库管家：加载中…</div>
     <div class="card" style="max-width:760px">
@@ -717,6 +719,7 @@ function viewSettings() {
         ${info.upgrade?.startup && info.upgrade.startup.ok === false ? `<dt>升级状态</dt><dd>${icon('dot', 'icon-warn')} ${esc(info.upgrade.startup.error || '')}</dd>` : ''}
       </dl>
     </div>`;
+  mountAppearance($('#main'));
   renderSystem($('#system-panels'));
   mountAgentSetup($('#agent-setup-card'));
   mountImageServiceSettings($('#image-service-settings'));
@@ -1056,6 +1059,7 @@ function switchAccount(id) {
 async function boot() {
   S.token = initToken();
   setHooks({ send: sendMessage, fill: usePrompt, go });
+  initTheme();
   initConnect({ onChanged: refreshBridge, send: sendMessage });
   bindEvents();
   if (!S.token) {
