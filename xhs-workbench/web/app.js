@@ -636,11 +636,7 @@ function renderBridge(override) {
 
 function workerSettingsHtml(w = {}) {
   if (w.disabled === false) return workerSettingsLegacyHtml(w);   // 只有开发 / 自动测试放开时才显示原来的开关
-  return `<div class="card" style="max-width:760px;margin-top:16px">
-    <h3 style="margin-top:0">后台 Playwright 采集：已停用</h3>
-    <p class="muted">采集和登录核对只在你自己的浏览器里进行，由 agent 通过 WorkBuddy 浏览器插件完成。Playwright 直连带自动化特征，所以工作台不再用它读小红书，也不再替你打开独立的浏览器窗口（图片封面渲染不受影响）。</p>
-    <p class="muted">要用采集：在「执行 Agent 与浏览器」里把浏览器方式选成「WorkBuddy 浏览器插件」。</p>
-  </div>`;
+  return '';   // 后台 Playwright 采集已停用：不再给员工显示「已停用」的卡片（只有开发 / 自动测试放开时才出现开关）
 }
 
 function workerSettingsLegacyHtml(w = {}) {

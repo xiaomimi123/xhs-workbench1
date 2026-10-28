@@ -5,6 +5,18 @@ import { md, esc } from '../md.js';
 import { icon } from '../icons.js';
 import { S, $, api, acc, toast, fmtTime, ask, opt, readFileAsDataURL, accDirRel } from '../core.js';
 
+/**
+ * 数据复盘要在创作者中心读数据：浏览器方式是 WorkBuddy 插件时，提示词必须明确让 agent 在聊天里直接用 mcp__browser__* 工具（虚拟机测试里 agent 把
+ * browser.md 里「别在聊天里自己开 Bash」读成了「聊天里不能开浏览器」，一次都没采）；并要求它自己实时核对登录，不因为 browser.json 过期就停下。
+ */
+export function browserFetchHint() {
+  if (!(S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy')) return '';
+  return ' 浏览器方式是 WorkBuddy 插件：请直接用 WorkBuddy 浏览器工具（mcp__browser__*）在我自己的浏览器里新开标签页读取——这是在聊天里用浏览器读取工具，不属于「自己开 Bash」，不需要另外启动受控任务。'
+    + '先按 playbooks/browser.md 实时核对登录账号（browser.json 只是上一次的记录，超过 30 分钟也由你自己重新核对，不要因此停下）；只读档没有点击工具，进入页面用 tab_goto 打开页面上链接的原文，或常见入口（可能随改版变化，打不开就从页面里的菜单链接找）：'
+    + '创作者中心首页 https://creator.xiaohongshu.com/new/home （账号概览）、笔记管理 https://creator.xiaohongshu.com/new/note-manager 、数据分析 https://creator.xiaohongshu.com/statistics/data-analysis 。'
+    + '读取节奏：动作之间停 3–8 秒，不要短时间打开大量页面。账号还没有已发布的笔记时，也要更新账号概览（粉丝数等），笔记数据留空，并如实告诉我；拿不到的数据留空，不要估算。';
+}
+
 const METRICS = [
   ['views', '阅读'],
   ['likes', '点赞'],
@@ -284,9 +296,9 @@ function bind(main) {
         V.showSettings = !V.showSettings;
         return draw(main);
       case 'fetch':
-        return ask(`请按 playbooks/analytics.md 抓取当前账号最新的笔记数据和账号数据，更新 ${dir}notes.json 和 account.json。`, true);
+        return ask(`请按 playbooks/analytics.md 抓取当前账号最新的笔记数据和账号数据，更新 ${dir}notes.json 和 account.json。${browserFetchHint()}`, true);
       case 'import-notes':
-        return ask(`请按 playbooks/analytics.md 的「首次导入历史笔记」，把我账号里已发布的笔记导入 ${dir}notes.json：按 url 跳过已有条目，新条目写当前累计数据和 imported: true。`, true);
+        return ask(`请按 playbooks/analytics.md 的「首次导入历史笔记」，把我账号里已发布的笔记导入 ${dir}notes.json：按 url 跳过已有条目，新条目写当前累计数据和 imported: true。${browserFetchHint()}`, true);
       case 'report':
         return ask(`请按 playbooks/analytics.md 写一份最近一周的复盘报告，保存到 ${dir}reports/，并把可执行的结论沉淀到知识库「复盘结论/」。`, true);
       case 'parse-imports':

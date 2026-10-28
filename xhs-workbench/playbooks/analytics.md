@@ -58,10 +58,10 @@ analytics/
 
 ## 抓取数据
 
-1. 用浏览器控制工具打开创作者中心的数据中心 / 笔记管理页面（未登录时请用户登录，规则同 `publish.md`）。只读取，不做任何修改操作。
+1. 用浏览器控制工具打开创作者中心的数据中心 / 笔记管理页面（未登录时请用户登录，规则同 `publish.md`）。只读取，不做任何修改操作。浏览器方式是 WorkBuddy 插件时，用 `mcp__browser__*` 在用户自己的浏览器里新开标签页（先按 `browser.md` 实时核对登录，不凭 `browser.json`）；只读档没有点击工具，用 `tab_goto` 打开页面上链接的原文或这几个常见入口（可能随改版变化）：创作者中心首页 `https://creator.xiaohongshu.com/new/home`（账号概览）、笔记管理 `https://creator.xiaohongshu.com/new/note-manager`、数据分析 `https://creator.xiaohongshu.com/statistics/data-analysis`。
 2. 读取近 30 天发布的笔记数据和账号总览数据，更新 `notes.json`、`account.json`。
 3. 没有浏览器能力时：读取 `imports/` 里用户上传的导出表格（CSV / Excel）或截图来整理；都没有就告诉用户如何从创作者中心导出数据并上传。
-4. 拿不到的数据留空，不要估算或编造。
+4. 拿不到的数据留空，不要估算或编造。**账号还没有已发布的笔记也要更新 `account.json`**（粉丝数等账号概览），`notes.json` 的 `items` 留空，并在回复里如实说明；不要因为笔记是草稿就什么都不采。
 5. 回复用户：更新了多少篇、数据最好和最差的笔记各是什么。
 
 ## 首次导入历史笔记
