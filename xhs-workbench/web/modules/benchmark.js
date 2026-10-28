@@ -265,10 +265,13 @@ function collectionCardHtml() {
 export async function checkLoginAccount() {
   // 浏览器方式是 WorkBuddy 插件：登录核对在员工自己的浏览器里做（工作台不替员工开浏览器），只读一页
   if (S.bridge?.mode === 'cli' && S.bridge?.browser === 'workbuddy') {
-    // 要点：读到的昵称和小红书号必须按 playbooks/browser.md「登录检查」写进账号数据目录的 browser.json，账号管理页的「上次已登录」就是从它读的；
-    // 只在回复里说一下的话，刷新页面就没了（虚拟机测试里发现的）
-    const file = `${accDirRel()}/browser.json`;
-    return ask(`只做一件事：在我自己的浏览器里打开 https://www.xiaohongshu.com ，核对当前登录的小红书号，和「当前账号」里填写的号比对。按 playbooks/browser.md「登录检查」把结果写入 ${file}（JSON：{"loggedIn": true 或 false, "nickname": "昵称", "xhsId": "小红书号", "checkedAt": "当前时间的 ISO 格式"}；没登录就写 loggedIn 为 false，其余留空）。除这个文件外不要写别的文件；写好后用一两句话告诉我结果。不要打开任何对标主页、不要读笔记、不要点开详情、不要发布。`, true);
+    // 要点：① 读到的昵称和小红书号必须写进 browser.json（账号管理页的「上次已登录」读它；只在回复里说，刷新就没了）；
+    // ② 已登录时顺带只读自己的主页，写 profile-suggestion.json，由服务端校验后填进账号里还是空的「定位 / 人群 / 风格」（见 server/profile-suggestion.mjs）
+    const dir = accDirRel();
+    return ask(`分两步，都只读：
+一、在我自己的浏览器里打开 https://www.xiaohongshu.com ，核对当前登录的小红书号，和「当前账号」里填写的号比对。按 playbooks/browser.md「登录检查」把结果写入 ${dir}/browser.json（JSON：{"loggedIn": true 或 false, "nickname": "昵称", "xhsId": "小红书号", "checkedAt": "当前时间的 ISO 格式"}；没登录就写 loggedIn 为 false，其余留空）。
+二、如果已登录：按 playbooks/browser.md「登录后分析自己的账号」，在页面里找到「我」的入口链接，用打开链接原文的方式只读打开我自己的主页（只看这一页：不点开任何笔记详情、不翻页、不关注 / 点赞 / 收藏 / 评论 / 私信），根据主页上实际看到的简介、标签和可见的笔记标题，分析这个账号的「定位」「目标人群」「内容风格」，各写一句话（纯文字、不超过 60 字）；看不出来的就留空字符串，不要编造。写入 ${dir}/profile-suggestion.json（JSON：{"positioning": "", "audience": "", "style": "", "evidence": ["依据：简介或笔记标题，最多 8 条"], "analyzedAt": "当前时间的 ISO 格式"}）。没登录就跳过这一步。
+除这两个文件外不要写别的文件；做完后用两三句话告诉我核对结果和分析出的定位。不要打开任何对标主页、不要读别人的笔记、不要发布。`, true);
   }
   return toast('请先在「连接与设置 → 执行 Agent 与浏览器」里把浏览器方式选成「WorkBuddy 浏览器插件」：登录核对只在你自己的浏览器里做');
 }

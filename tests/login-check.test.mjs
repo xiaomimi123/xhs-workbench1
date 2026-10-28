@@ -50,14 +50,21 @@ test('竞品对标没有对标账号时，空状态里也有「先核对登录�
   assert.match(emptyCard, /data-act="prepare-browser"[^>]*>先核对登录账号</);
 });
 
-test('核对提示词要求把结果写进 browser.json（否则只在对话里，刷新就没了），且只许写这一个文件', async () => {
+test('核对提示词：结果写进 browser.json，已登录时再只读自己的主页写 profile-suggestion.json，且只许写这两个文件', async () => {
   const asked = [];
   const fn = loadCheck({ S: { accountId: 'acc_1', bridge: { mode: 'cli', browser: 'workbuddy' } }, accDirRel: () => 'accounts/acc_1', ask: (t) => asked.push(t), toast: () => {} });
   await fn();
   assert.match(asked[0], /accounts\/acc_1\/browser\.json/);
   assert.match(asked[0], /playbooks\/browser\.md/);
   for (const k of ['loggedIn', 'nickname', 'xhsId', 'checkedAt']) assert.ok(asked[0].includes(k), k);
-  assert.match(asked[0], /除这个文件外不要写别的文件/);
+  assert.match(asked[0], /除这两个文件外不要写别的文件/);
+  // 第二步：已登录时只读自己的主页，写 profile-suggestion.json（定位 / 人群 / 风格）
+  assert.match(asked[0], /accounts\/acc_1\/profile-suggestion\.json/);
+  assert.match(asked[0], /登录后分析自己的账号/);
+  for (const k of ['positioning', 'audience', 'style']) assert.ok(asked[0].includes(k), k);
+  assert.match(asked[0], /不点开任何笔记详情、不翻页/);
+  assert.match(asked[0], /不要编造/);
+  assert.match(asked[0], /没登录就跳过这一步/);
 });
 
 function loadFill(accounts, apiImpl) {

@@ -45,6 +45,7 @@ import * as materials from './materials.mjs';
 
 import { VERSION } from './version.mjs';
 import { runStartupUpgrade, upgradeSummary } from './upgrade.mjs';
+import { applyProfileSuggestion, suggestionSummary, SUGGESTION_FILE } from './profile-suggestion.mjs';
 
 // 不是由中枢接入器启动时（agent 直接跑技能包副本、开机自启），自动接上本机接入器的配置；所有用到这些变量的地方都是用时才读
 applyHubDefaults();
@@ -222,6 +223,21 @@ const flushContent = debounced(() => {
   contentChanges.clear();
 });
 
+// agent 登录核对后写的主页分析建议：校验后填进账号里还是空的字段（文件可能被写多次，防抖后再处理）
+const suggestionTimers = new Map();
+function scheduleProfileSuggestion(accountId) {
+  clearTimeout(suggestionTimers.get(accountId));
+  suggestionTimers.set(accountId, setTimeout(() => {
+    suggestionTimers.delete(accountId);
+    try {
+      const r = applyProfileSuggestion(accountId);
+      if (r.applied.length || r.skipped.length) broadcast({ type: 'content.changed', account: accountId, area: 'accounts' });
+    } catch (err) {
+      console.error(`主页分析建议套用失败（${accountId}）：${err.message}`);
+    }
+  }, 600));
+}
+
 function startWatchers() {
   for (const w of watchers) w.close();
   watchers = [];
@@ -233,6 +249,7 @@ function startWatchers() {
     const [account, rawArea] = String(filename).split(/[\\/]/);
     const area = rawArea && rawArea.replace(/\.json$/, '');
     if (!account || !area) return;
+    if (rawArea === SUGGESTION_FILE) scheduleProfileSuggestion(account);
     contentChanges.set(`${account}/${area}`, { account, area });
     flushContent();
   });
@@ -825,7 +842,7 @@ async function handleApi(req, res, url) {
     case 'GET /api/accounts': {
       // 附带每个账号的浏览器登录状态（agent 登录检查后写入）
       const data = store.getAccounts();
-      data.accounts = data.accounts.map((a) => ({ ...a, browser: browserStatus(a.id) }));
+      data.accounts = data.accounts.map((a) => ({ ...a, browser: browserStatus(a.id), profileSuggestion: suggestionSummary(a.id) }));
       return sendJson(res, 200, data);
     }
     case 'POST /api/accounts': {

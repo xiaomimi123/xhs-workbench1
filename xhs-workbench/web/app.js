@@ -92,7 +92,7 @@ function connectEvents() {
         break;
       case 'content.changed':
         if (['schedule', 'engage', 'benchmarks'].includes(ev.area)) refreshAlerts();
-        if (ev.area === 'browser') refreshAccounts();
+        if (ev.area === 'browser' || ev.area === 'accounts' || ev.area === 'profile-suggestion') refreshAccounts();
         if (ev.account !== S.accountId) break;
         cover.autoRender(ev);
         for (const m of MODULES) if (m.module && m.id === S.view && m.module.onContent) m.module.onContent(ev);
@@ -505,6 +505,7 @@ function viewAccounts() {
         <dt>内容风格</dt><dd>${esc(a.style) || '<span class="muted">未填写</span>'}</dd>
         <dt>浏览器登录</dt><dd>${browserLine(a)}</dd>
       </dl>
+      ${a.profileSuggestion && a.profileSuggestion.applied.length ? `<div class="muted" style="margin-top:6px">${a.profileSuggestion.applied.map((k) => ({ positioning: '定位', audience: '目标人群', style: '内容风格' }[k])).join('、')}由 agent 根据你的主页分析填入（${fmtTime(a.profileSuggestion.appliedAt)}），不准可以点「编辑」修改。</div>` : ''}
       <div class="row" style="margin-top:10px"><button class="btn small" data-login-account="${esc(a.id)}">${a.browser && a.browser.loggedIn ? '检查登录状态' : '在浏览器里登录这个账号'}</button></div>
     </div>`).join('');
 
