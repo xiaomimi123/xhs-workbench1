@@ -12,6 +12,7 @@ import path from 'node:path';
 import { P, SKILL_DIR, WORKSPACE } from './paths.mjs';
 import { getBridgeConfig, readJson, writeJson } from './store.mjs';
 import { mcpConfigFor, codexBrowserArgs, workbuddyMcpConfigFor, egoMcpConfigFor } from './browser.mjs';
+import { withHubModel } from './hub-model.mjs';
 import { readHubServers, withHubMcp, writeHubConfig } from './hub-mcp.mjs';
 import { sanitizeAgentEnv } from './agent-env.mjs';
 
@@ -68,6 +69,7 @@ export function runCli(adapter, prompt, opts = {}) {
   // 每个账号用自己的浏览器资料（登录状态隔离）
   if ((adapter.args || []).includes('{mcpConfig}')) vars.mcpConfig = adapter.egoMcp ? egoMcpConfigFor(opts.accountId, adapter.egoMcp) : adapter.workbuddyMcp ? workbuddyMcpConfigFor(opts.accountId, adapter.workbuddyMcp) : mcpConfigFor(opts.accountId, adapter.playwrightMcp, { headless: !!adapter.headless, browser: adapter.browserChannel, blockedOrigins: adapter.blockedOrigins });
   let args = (adapter.args || []).map((a) => fill(a, vars));
+  args = withHubModel(adapter, args);   // 岗位包用中枢模型时，显式让 CodeBuddy 走中枢模型（见 hub-model.mjs）
   if(adapter.id==='codex' && adapter.browserTransport==='codex')args=[...codexBrowserArgs(adapter,opts.accountId),...args];
   // 企业中枢：普通对话任务（没有 kind 的浏览器专用任务不加）让底层 agent 能用中枢的知识库、技能和 GPU 工具
   if (opts.useHub) { const hub = readHubServers(); if (Object.keys(hub.servers).length) args = withHubMcp(args, { adapterId: adapter.id, useHub: true, servers: hub.servers, hubFile: writeHubConfig(path.join(P.config, 'mcp'), hub.servers) }); }
