@@ -4,6 +4,7 @@ import {mountImageServiceSettings} from './image-service-settings.js';
 import {mountAgentSetup} from './agent-setup.js';
 import { initTheme, appearanceCardHtml, mountAppearance } from './theme.js';
 import { initUpdateBar } from './update-bar.js';
+import { workingHtml, humanTool, refreshTiming, startProgressTicker } from './progress.js';
 import { md, esc, stripFrontmatter } from './md.js';
 import { S, $, api, acc, toast, showOverlay, fmtTime, currentAccount, withBusy, setHooks, confirmDialog, confirmLeave } from './core.js';
 import * as benchmark from './modules/benchmark.js';
@@ -117,6 +118,7 @@ function connectEvents() {
         break;
       case 'chat.delta':
       case 'chat.tool':
+      case 'chat.phase':
       case 'chat.status':
       case 'chat.done':
         onChatEvent(ev);
@@ -787,20 +789,45 @@ function isBusy() {
 
 function msgHtml(m) {
   if (m.role === 'user') return `<div class="msg user" data-msg="${m.id}"><div class="bubble">${esc(m.text)}</div></div>`;
-  const tools = (m.tools || []).slice(-6).map((t) => `<div class="tool" title="${esc(t.detail)}">${t.name === '进度' ? icon('clock') : icon('wrench')} ${esc(t.name)} ${esc(t.detail)}</div>`).join('');
+  const tools = (m.tools || []).slice(-6).map((t) => `<div class="tool" title="${esc(t.detail)}">${t.name === '进度' ? icon('clock') : icon('wrench')} ${esc(humanTool(t.name))} ${esc(t.detail)}</div>`).join('');
   const more = (m.tools || []).length > 6 ? `<div class="tool">… 共使用工具 ${m.tools.length} 次</div>` : '';
   const working = m.status === 'pending' || m.status === 'running';
   let status = '';
   if (m.status === 'pending') {
     status = S.bridge && S.bridge.mode === 'cli' ? '排队中：这个账号的上一个任务完成后开始' : S.bridge && !S.bridge.inboxOnline ? '等待 agent 领取任务…' : '已发送，等待 agent 领取…';
   }
-  else if (m.status === 'running' && !m.text) status = 'agent 正在处理…';
   return `<div class="msg assistant" data-msg="${m.id}"><div class="bubble">
       ${tools || more ? `<div class="tools">${more}${tools}</div>` : ''}
       <div class="md${working ? ' typing' : ''}">${md(m.text)}</div>
       ${status ? `<div class="status">${status}</div>` : ''}
-      ${m.status === 'error' ? `<div class="error">${icon("warning")} ${esc(m.error || '出错了')}</div>` : ''}
+      ${working ? workingHtml(m, 'chat') : ''}
+      ${m.status === 'error' ? `<div class="error">${icon("warning")} ${esc(m.error || '出错了')}</div>${lockFixHtml(m.error)}` : ''}
     </div></div>`;
+}
+
+// 「自动访问已锁定」的报错下面直接给解锁入口：用户不用去翻页面找按钮（员工曾经因为提示只说「关浏览器控制」而一直聊不了天）
+function lockFixHtml(error) {
+  const e = String(error || '');
+  if (!/自动访问已锁定/.test(e)) return '';
+  if (/平台处罚|平台限制|验证码|受限|访问限制|文件损坏/.test(e)) return '<div class="row" style="margin-top:6px"><button class="btn small" data-chat-fix="collect">去「竞品对标」处理平台限制</button></div>';
+  if (/登录|扫码/.test(e)) return '<div class="row" style="margin-top:6px"><button class="btn small" data-chat-fix="collect">去「竞品对标」核对登录账号</button></div>';
+  return '<div class="row" style="margin-top:6px"><button class="btn small primary" data-chat-fix="resume">恢复自动访问</button></div>';
+}
+
+async function handleChatFix(kind) {
+  if (kind !== 'resume') return go('benchmark');
+  try {
+    await api('POST', `/api/browser/access?${acc()}`, { action: 'resume' });
+  } catch (err) {
+    toast(err.message);
+    return go('benchmark');  // 解不开（比如是平台限制）就带用户去处理的地方
+  }
+  // 把刚才没发出去的话放回输入框，用户点发送就行
+  const lastUser = [...(S.session?.messages || [])].reverse().find((x) => x.role === 'user');
+  const input = $('#chat-input');
+  if (lastUser && input && !input.value.trim()) input.value = lastUser.text;
+  toast('已恢复自动访问，点发送重新发出刚才的消息');
+  await refreshBridge();
 }
 
 function renderMessages() {
@@ -855,19 +882,29 @@ function onChatEvent(ev) {
     if (i >= 0) s.messages[i] = ev.msg;
     updateMessage(ev.msg);
     refreshSessions();
+    refreshTiming();  // 刚完成的这次也算进「通常要多久」
     return;
   }
   const m = s.messages.find((x) => x.id === ev.msgId);
   if (!m) return;
+  const now = new Date().toISOString();
   if (ev.type === 'chat.delta') {
     m.text += ev.text;
     m.status = 'running';
+    m.lastActivityAt = now;
   } else if (ev.type === 'chat.tool') {
     m.tools = m.tools || [];
     m.tools.push({ name: ev.name, detail: ev.detail });
     m.status = 'running';
+    m.lastActivityAt = now;
+    m.phase = { kind: 'tool', name: ev.name, detail: String(ev.detail || '').slice(0, 120), at: now };
+  } else if (ev.type === 'chat.phase') {
+    m.status = 'running';
+    m.phase = ev.phase;
+    m.lastActivityAt = ev.phase?.at || now;
   } else if (ev.type === 'chat.status') {
     m.status = ev.status;
+    if (ev.startedAt) m.startedAt = ev.startedAt;
   }
   updateMessage(m);
 }
@@ -918,6 +955,7 @@ function bindEvents() {
     }
     if (t.dataset.closeOverlay !== undefined) return ($('#overlay').hidden = true);
     if (t.dataset.nav) return go(t.dataset.nav);
+    if (t.dataset.chatFix) return handleChatFix(t.dataset.chatFix);
     if (t.dataset.prompt) return usePrompt(t.dataset.prompt);
     if (t.dataset.doc) return openDoc(t.dataset.doc);
     if (t.dataset.useAccount) return switchAccount(t.dataset.useAccount);
@@ -1113,6 +1151,8 @@ async function boot() {
   setInterval(refreshAlerts, 60_000);
   onboarding.maybeAutoShow();
   initUpdateBar();
+  startProgressTicker();
+  refreshTiming();
 }
 
 boot();

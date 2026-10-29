@@ -66,8 +66,19 @@ test('锁由工作台写入时带 source 标记；外部直接写的锁，提示
   const {accountDir} = await server('paths.mjs');
   const mine = policy.lockBrowserAccess('default','paused','用户暂停自动访问');
   assert.equal(mine.source,'workbench');
-  assert.throws(()=>policy.assertBrowserAccess('default'),(e)=>/自动访问已锁定：用户暂停自动访问/.test(e.message)&&!/来源标记/.test(e.message)&&/关掉/.test(e.message));
+  assert.throws(()=>policy.assertBrowserAccess('default'),(e)=>/自动访问已锁定：用户暂停自动访问/.test(e.message)&&!/来源标记/.test(e.message)&&/恢复自动访问/.test(e.message));
   fs.writeFileSync(path.join(accountDir('default'),'browser-access.json'),JSON.stringify({kind:'restriction',reason:'用户提供平台处罚截图'}));
-  assert.throws(()=>policy.assertBrowserAccess('default'),(e)=>/来源标记/.test(e.message)&&/关掉/.test(e.message));
+  assert.throws(()=>policy.assertBrowserAccess('default'),(e)=>/来源标记/.test(e.message)&&/浏览器方式设为「无」/.test(e.message));
   fs.rmSync(path.join(accountDir('default'),'browser-access.json'),{force:true});
+});
+
+test('锁住时的提示先说怎么解开，并按锁的类型给不同办法；错误带 lockKind', () => {
+  policy.lockBrowserAccess('hint','paused','用户暂停自动访问');
+  assert.throws(()=>policy.assertBrowserAccess('hint'),(e)=>e.lockKind==='paused'&&e.status===409&&/竞品对标 → 采集状态」点「恢复自动访问」/.test(e.message)&&/收件箱模式下这样做没用/.test(e.message));
+  policy.resumeBrowserAccess('hint');
+  policy.lockBrowserAccess('hint','login','需要先确认登录账号');
+  assert.throws(()=>policy.assertBrowserAccess('hint'),(e)=>e.lockKind==='login'&&/先核对登录账号/.test(e.message));
+  policy.resumeBrowserAccess('hint');
+  policy.lockBrowserAccess('hint','restriction','用户报告平台处罚，等待人工确认解除');
+  assert.throws(()=>policy.assertBrowserAccess('hint'),(e)=>e.lockKind==='restriction'&&/人工确认解除/.test(e.message)&&!/恢复自动访问」/.test(e.message));
 });

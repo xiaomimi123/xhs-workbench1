@@ -7,6 +7,7 @@ import {VideoRetrieval} from './video-retrieval.mjs';
 import { hubGen } from './hub-gen.mjs';
 import { HubHeartbeat } from './hub-heartbeat.mjs';
 import { UpdateChecker, restartBlocker, spawnRestartHelper } from './self-update.mjs';
+import { recordDuration, typicalDurations } from './task-timing.mjs';
 import {videoService} from './video-service.mjs';
 import {VideoWorkflow} from './video-workflow.mjs';
 import { getImageServiceSettings, saveImageServiceSettings, testImageServiceConnection } from './image-service.mjs';
@@ -328,23 +329,33 @@ function lookupTask(taskId) {
   return { session, msg, ref };
 }
 
+// 任务用时：开始处理的时间、任务类别（对话任务没有登记，按 chat 算），完成时记一笔，页面据此显示「通常要多久」
+const taskStart = new Map();
+const taskClass = new Map();
+function finishTiming(taskId, ok, hasChatMsg) {
+  const t0 = taskStart.get(taskId);
+  const cls = taskClass.get(taskId) || (hasChatMsg ? 'chat' : null);
+  taskStart.delete(taskId); taskClass.delete(taskId);
+  if (ok && t0) recordDuration(cls, Date.now() - t0);
+}
+
 const topicWorkflow = new TopicWorkflow({
   changed: account => { broadcast({type:'content.changed',account,area:'topics'}); broadcast({type:'content.changed',account,area:'notes'}); },
   submit: task => {
     const account=store.getAccount(task.accountId);
     if(!account)throw new Error('账号不存在');
-    bridge.submit({...task, prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
+    taskClass.set(task.id, 'topic'); bridge.submit({...task, prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
   },
 });
 topicWorkflow.recover();
 const analyticsWorkflow=new AnalyticsWorkflow({
  changed:account=>broadcast({type:'content.changed',account,area:'analytics'}),
- submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});},
+ submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');taskClass.set(task.id, 'analytics'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});},
 });
 analyticsWorkflow.recover();
 const engageWorkflow=new EngageWorkflow({
  changed:account=>broadcast({type:'content.changed',account,area:'engage'}),
- submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});},
+ submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');taskClass.set(task.id, 'engage'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});},
 });
 engageWorkflow.recover();
 
@@ -353,7 +364,7 @@ const copyWorkflow = new CopyWorkflow({
   submit: task => {
     const account=store.getAccount(task.accountId);
     if(!account)throw new Error('账号不存在');
-    bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
+    taskClass.set(task.id, 'copy'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
   },
 });
 copyWorkflow.recover();
@@ -376,7 +387,7 @@ const coverWorkflow = new CoverWorkflow({
   submit: task => {
     const account=store.getAccount(task.accountId);
     if(!account)throw new Error('账号不存在');
-    bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
+    taskClass.set(task.id, 'cover'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
   },
 });
 coverWorkflow.recover();
@@ -388,6 +399,7 @@ for (const t of bridge.restored) {
 }
 
 bridge.on('claimed', ({ taskId }) => {
+  taskStart.set(taskId, Date.now());
   topicWorkflow.progress(taskId, 'agent 正在处理');
   engageWorkflow.progress(taskId);
   analyticsWorkflow.progress(taskId);
@@ -397,8 +409,10 @@ bridge.on('claimed', ({ taskId }) => {
   const { session, msg } = lookupTask(taskId);
   if (!msg) return;
   msg.status = 'running';
+  msg.startedAt = new Date().toISOString();
+  msg.lastActivityAt = msg.startedAt;
   saveSoon(session);
-  broadcast({ type: 'chat.status', sessionId: session.id, msgId: msg.id, status: 'running' });
+  broadcast({ type: 'chat.status', sessionId: session.id, msgId: msg.id, status: 'running', startedAt: msg.startedAt });
 });
 
 bridge.on('delta', ({ taskId, text }) => {
@@ -406,6 +420,7 @@ bridge.on('delta', ({ taskId, text }) => {
   if (!msg) return;
   msg.status = 'running';
   msg.text += text;
+  msg.lastActivityAt = new Date().toISOString();
   saveSoon(session);
   broadcast({ type: 'chat.delta', sessionId: session.id, msgId: msg.id, text });
 });
@@ -421,8 +436,19 @@ bridge.on('tool', ({ taskId, name, detail }) => {
   if (!msg) return;
   msg.status = 'running';
   msg.tools.push({ name, detail });
+  msg.lastActivityAt = new Date().toISOString();
+  msg.phase = { kind: 'tool', name, detail: String(detail || '').slice(0, 120), at: msg.lastActivityAt };
   saveSoon(session);
   broadcast({ type: 'chat.tool', sessionId: session.id, msgId: msg.id, name, detail });
+});
+
+bridge.on('phase', ({ taskId, kind, detail }) => {
+  const { session, msg } = lookupTask(taskId);
+  if (!msg) return;
+  msg.status = 'running';
+  msg.lastActivityAt = new Date().toISOString();
+  msg.phase = { kind, detail: String(detail || '').slice(0, 160), at: msg.lastActivityAt };
+  broadcast({ type: 'chat.phase', sessionId: session.id, msgId: msg.id, phase: msg.phase });
 });
 
 bridge.on('session', ({ taskId, agentSessionId }) => {
@@ -447,6 +473,7 @@ bridge.on('done', ({ taskId, text, agentSessionId }) => {
   collectionQueue.finish(taskId, text);
   const { session, msg } = lookupTask(taskId);
   taskIndex.delete(taskId);
+  finishTiming(taskId, true, !!msg);
   if (!msg) return;
   flushBenchmarkCheckpoints(session.accountId);
   if (text) msg.text = text;
@@ -471,6 +498,7 @@ bridge.on('error', ({ taskId, message }) => {
   collectionQueue.finish(taskId, message);
   const { session, msg } = lookupTask(taskId);
   taskIndex.delete(taskId);
+  finishTiming(taskId, false, !!msg);
   if (!msg) return;
   flushBenchmarkCheckpoints(session.accountId);
   collectionQueue.block(session.accountId, message);
@@ -783,6 +811,9 @@ async function handleApi(req, res, url) {
         bridge: { ...bridge.status(), browserWorker: workerInfo() },
         accounts: store.getAccounts(),
       });
+
+    case 'GET /api/timing':
+      return sendJson(res, 200, typicalDurations());
 
     // ----- 新版本提示与重启升级 -----
     case 'GET /api/update': {

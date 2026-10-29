@@ -1,4 +1,4 @@
-import {assertBrowserAccess, lockBrowserAccess, resumeBrowserAccess} from './access-policy.mjs';
+import {assertBrowserAccess, resumeBrowserAccess} from './access-policy.mjs';
 import {assertBrowserCapability} from './hub-capabilities.mjs';
 // 持久化采集意图。只登记检查点关联目标或用户批量选中的缺项，不扫描触发全部旧账号。
 import fs from 'node:fs';
@@ -64,7 +64,8 @@ export class BenchmarkQueue {
     enqueueCollection(account, ids);
     const q = collectionStatus(account);
     if (q.reason.includes('队列损坏')) throw new Error(q.reason);
-    if (action === 'pause') { lockBrowserAccess(account, 'paused', '用户暂停自动访问'); q.paused = true; q.reason = '用户暂停自动访问'; for(const item of q.items)item.authorized=false; }
+    // 暂停采集只暂停采集队列，不再给账号上「自动访问锁」：那把锁会把整个账号的对话都拦住（员工点了暂停就聊不了天）。平台限制 / 需要登录仍然会上锁
+    if (action === 'pause') { q.paused = true; q.reason = '用户暂停自动访问'; for(const item of q.items)item.authorized=false; }
     else {
       resumeBrowserAccess(account);
       q.paused = false; q.reason = '';

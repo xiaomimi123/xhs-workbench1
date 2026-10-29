@@ -59,12 +59,19 @@ function winQuote(arg) {
   return /[\s"&|<>^]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
 }
 
+/** 思考内容只取最后一段的前 120 字，给页面显示「正在想：……」，不是完整推理 */
+export function thinkingExcerpt(text) {
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.replace(/^[#>*\-\s]+/, '').trim()).filter(Boolean);
+  const last = lines[lines.length - 1] || '';
+  return last.length > 120 ? last.slice(0, 120) + '…' : last;
+}
+
 /**
  * 运行一次 agent，返回 { promise, cancel }。
  * promise 结果：{ text, agentSessionId }
  */
 export function runCli(adapter, prompt, opts = {}) {
-  const { agentSessionId, timeoutMs = 30 * 60_000, onText = () => {}, onTool = () => {}, onSession = () => {} } = opts;
+  const { agentSessionId, timeoutMs = 30 * 60_000, onText = () => {}, onTool = () => {}, onSession = () => {}, onThinking = () => {} } = opts;
   const vars = { prompt, workspace: WORKSPACE, skillDir: SKILL_DIR, agentSessionId: agentSessionId || '' };
   // 每个账号用自己的浏览器资料（登录状态隔离）
   if ((adapter.args || []).includes('{mcpConfig}')) vars.mcpConfig = adapter.egoMcp ? egoMcpConfigFor(opts.accountId, adapter.egoMcp) : adapter.workbuddyMcp ? workbuddyMcpConfigFor(opts.accountId, adapter.workbuddyMcp) : mcpConfigFor(opts.accountId, adapter.playwrightMcp, { headless: !!adapter.headless, browser: adapter.browserChannel, blockedOrigins: adapter.blockedOrigins });
@@ -119,6 +126,7 @@ export function runCli(adapter, prompt, opts = {}) {
       for (const block of ev.message.content) {
         if (block.type === 'text' && block.text) emitText((text ? '\n\n' : '') + block.text);
         if (block.type === 'tool_use') onTool(block.name, summarizeToolInput(block.input));
+        if (block.type === 'thinking' && block.thinking) { const t = thinkingExcerpt(block.thinking); if (t) onThinking(t); }
       }
     }
     if (ev.type === 'result') {
@@ -463,6 +471,7 @@ export class Bridge extends EventEmitter {
             timeoutMs: task.timeoutMs ?? cfg.timeoutMs,
             onText: (text) => this.emit('delta', { taskId: task.id, text }),
             onTool: (name, detail) => this.emit('tool', { taskId: task.id, name, detail }),
+            onThinking: (detail) => this.emit('phase', { taskId: task.id, kind: 'thinking', detail }),
             onSession: (agentSessionId) => this.emit('session', { taskId: task.id, agentSessionId }),
           });
           const res = await child.promise;

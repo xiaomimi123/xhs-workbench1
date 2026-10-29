@@ -124,3 +124,20 @@ test('节奏闸门不通过：队列暂停并写明原因、取消授权、不�
   verdict = { ok: true }; queue.control(a, 'resume'); queue.tick();  // 人再点「开始」才继续
   assert.deepEqual(sent, ['b_g1']); assert.equal(collectionStatus(a).items[0].state, 'running');
 });
+
+test('暂停采集只暂停队列，不给账号上自动访问锁（否则整个账号聊不了天）；平台限制的锁不受影响', async () => {
+  const policy = await server('access-policy.mjs');
+  const a = 'pause-only';
+  enqueueCollection(a, ['b_x']);
+  const queue = new BenchmarkQueue({ accounts: () => [{ id: a }], detail: () => ({}), busy: () => false, dispatch() {}, changed() {} });
+  queue.control(a, 'pause');
+  assert.equal(collectionStatus(a).paused, true);
+  assert.equal(collectionStatus(a).items.every((x) => !x.authorized), true);
+  assert.equal(policy.browserAccessStatus(a).kind, 'open');           // 没上锁
+  assert.doesNotThrow(() => policy.assertBrowserAccess(a));           // 对话不受影响
+  // 已经有平台限制时，暂停不会改动它，恢复也不会越过它
+  policy.lockBrowserAccess(a, 'restriction', '用户报告平台处罚');
+  queue.control(a, 'pause');
+  assert.equal(policy.browserAccessStatus(a).kind, 'restriction');
+  assert.throws(() => queue.control(a, 'resume'), /平台限制尚未解除/);
+});

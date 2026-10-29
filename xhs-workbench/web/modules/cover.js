@@ -5,6 +5,7 @@ import { esc } from '../md.js';
 import { icon } from '../icons.js';
 import { S, $, api, acc, fileUrl, toast, ask, go, opt, readFileAsDataURL, accDirRel, confirmLeave } from '../core.js';
 import { mediaHtml, bindMedia } from './media.js';
+import { jobTimingHtml } from '../progress.js';
 import { TEMPLATES, PALETTES, normalizeSpec, drawCover } from '../covers.js';
 
 const V = { notes: [], note: null, spec: null, dirty: false, revision: 0, jobs: [], state: null, editCard: null };
@@ -103,7 +104,7 @@ export async function onContent(ev) {
 }
 function jobsHtml(){
  return V.jobs.slice(0,8).map(j=>`<div class="card" style="margin-top:12px"><strong>${j.kind==='cards'?'内容卡片':'封面方案'} · ${{queued:'排队中',running:'设计中',ready:'待渲染',done:j.kind==='cards'?'PNG已保存':'方案已生成',error:'生成失败',render_error:'渲染失败'}[j.status]}</strong>
- <p class="muted">${esc(j.error||j.progress||'等待 agent')}${j.stale?' · 文案已修改，方案过期':''}</p>
+ <p class="muted">${esc(j.error||j.progress||'等待 agent')}${j.stale?' · 文案已修改，方案过期':''}${jobTimingHtml(j,'cover')}</p>
  ${['error','render_error','ready'].includes(j.status)&&!j.stale?`<button class="btn small" data-retry="${esc(j.id)}">${j.status==='error'?'重试生成':'继续渲染'}</button>`:''}
  ${j.kind==='cards'&&j.specs?`<div class="option-grid">${j.specs.map((s,i)=>`<button class="option" data-card="${esc(j.id)}" data-index="${i}" ${j.stale?'disabled':''}>${j.files[i]?`<img style="width:100%" src="${fileUrl(`notes/${j.noteId}/images/${j.files[i]}`,j.specHashes[i])}" alt="${esc(s.title)}">`:''}<span>${i+1}. ${esc(s.title)} · 点击编辑</span></button>`).join('')}</div>`:''}</div>`).join('');
 }

@@ -678,3 +678,11 @@ mark { background: var(--mark-bg); color: inherit; border-radius: 2px; padding: 
   padding: 8px 16px; background: var(--brand-soft); border-bottom: 1px solid var(--line); font-size: 13px;
 }
 .update-actions { display: flex; gap: 8px; flex: none; }
+
+/* ---------- 任务进度（用时 / 通常多久 / 当前在做什么） ---------- */
+.progress { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--hover); font-size: 12.5px; display: grid; gap: 4px; }
+.progress-line { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.progress-line b { font-variant-numeric: tabular-nums; }
+.progress-phase { color: var(--muted); overflow-wrap: anywhere; }
+.progress-phase .icon, .progress-line .icon { width: 14px; height: 14px; vertical-align: -2px; }
+.progress-slow { color: var(--warn); }

@@ -5,6 +5,7 @@ import { icon } from '../icons.js';
 import { S, $, api, acc, fileUrl, toast, fmtTime, ask, go, opt, accDirRel, confirmDialog, confirmLeave } from '../core.js';
 import { lint, LIMITS } from '../lint.js';
 import { mediaHtml, bindMedia } from './media.js';
+import { jobTimingHtml } from '../progress.js';
 
 export const NOTE_STATUSES = [
   ['draft', '草稿'],
@@ -131,7 +132,7 @@ function jobsHtml() {
   const names={rewrite:'改写正文',titles:'标题优化',check:'内容检查'};
   return V.jobs.slice(0,8).map(j=>`<div class="card" style="margin-top:10px">
     <strong>${names[j.kind] || esc(j.kind)} · ${{queued:'排队中',running:'处理中',done:'已完成',error:'失败'}[j.status] || esc(j.status)}</strong>
-    <div class="muted">${esc(j.error || j.progress || '等待 agent')} · ${fmtTime(j.createdAt)}</div>
+    <div class="muted">${esc(j.error || j.progress || '等待 agent')} · ${fmtTime(j.createdAt)}${jobTimingHtml(j,'copy')}</div>
     ${j.status==='error'?`<button class="btn small" data-copy-retry="${esc(j.id)}">重试</button>`:''}
     ${j.kind==='titles'&&j.status==='done'?`<ul>${j.result.titles.map(t=>`<li>${esc(t.title)}：${esc(t.reason)}</li>`).join('')}</ul>`:''}
     ${j.kind==='check'&&j.status==='done'?`<p>${j.stale||V.dirty?'<strong class="bad">报告已过期，请重新检查当前稿件。</strong>':''}${esc(j.result.summary)}</p>

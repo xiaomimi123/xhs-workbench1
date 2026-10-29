@@ -2,6 +2,7 @@
 import { esc } from '../md.js';
 import { icon } from '../icons.js';
 import { S, $, api, acc, toast, ask, go, opt, accDirRel, confirmDialog } from '../core.js';
+import { jobTimingHtml } from '../progress.js';
 
 const STATUSES = [
   ['idea', '候选'],
@@ -99,7 +100,7 @@ function draw(main) {
       <button class="btn primary" data-act="generate" ${V.sources.length?'':'disabled'}>生成 3 个有来源的选题</button>
       <span class="muted">${V.sources.length?'复用本地资料，不重复抓取。未核实热度不打分。':'先采集至少一个对标账号的笔记。'}</span>
     </div>
-    ${V.jobs.length ? `<div class="card" style="margin-bottom:16px"><h3>生成任务</h3>${V.jobs.slice(0,6).map(j=>`<div class="row" style="margin:10px 0"><span>${j.kind==='generate'?'生成选题':'写成笔记'} · ${{queued:'排队中',running:'处理中',done:'已完成',error:'未完成'}[j.status]||j.status}</span><span class="muted">${esc(j.error||j.progress||'等待 agent')}</span>${j.status==='error'?`<button class="btn small" data-retry="${esc(j.id)}">重试</button>`:''}${j.noteId?`<button class="btn small" data-open-note="${esc(j.noteId)}">打开草稿</button>`:''}</div>`).join('')}</div>`:''}
+    ${V.jobs.length ? `<div class="card" style="margin-bottom:16px"><h3>生成任务</h3>${V.jobs.slice(0,6).map(j=>`<div class="row" style="margin:10px 0"><span>${j.kind==='generate'?'生成选题':'写成笔记'} · ${{queued:'排队中',running:'处理中',done:'已完成',error:'未完成'}[j.status]||j.status}</span><span class="muted">${esc(j.error||j.progress||'等待 agent')}${jobTimingHtml(j,'topic')}</span>${j.status==='error'?`<button class="btn small" data-retry="${esc(j.id)}">重试</button>`:''}${j.noteId?`<button class="btn small" data-open-note="${esc(j.noteId)}">打开草稿</button>`:''}</div>`).join('')}</div>`:''}
     ${V.form ? formHtml(V.form) : ''}
     <div class="chips">
       ${filters.map(([id, name]) => `<button class="chip${V.filter === id ? ' active' : ''}" data-filter="${id}">${name}${counts[id] !== undefined ? ` ${counts[id]}` : ''}</button>`).join('')}

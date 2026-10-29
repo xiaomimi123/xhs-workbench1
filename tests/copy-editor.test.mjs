@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';
 const source=fs.readFileSync(new URL('../xhs-workbench/web/modules/copywriting.js',import.meta.url),'utf8').replace(/^import .*;$/gm,'').replace(/export /g,'');
-function setup(api){const panel={innerHTML:''};const ctx=vm.createContext({api,S:{accountId:'a'},acc:s=>s||'',esc:s=>String(s),fmtTime:s=>s,toast(){},$:s=>s==='#copy-jobs'?panel:null,setTimeout,clearTimeout});vm.runInContext(source,ctx);vm.runInContext("V.current='n';V.note={id:'n',title:'旧标题',content:'原稿',tags:[]};V.jobs=[];",ctx);return {ctx,panel,run:s=>vm.runInContext(s,ctx)};}
+function setup(api){const panel={innerHTML:''};const ctx=vm.createContext({api,S:{accountId:'a'},acc:s=>s||'',esc:s=>String(s),fmtTime:s=>s,jobTimingHtml:()=>'',toast(){},$:s=>s==='#copy-jobs'?panel:null,setTimeout,clearTimeout});vm.runInContext(source,ctx);vm.runInContext("V.current='n';V.note={id:'n',title:'旧标题',content:'原稿',tags:[]};V.jobs=[];",ctx);return {ctx,panel,run:s=>vm.runInContext(s,ctx)};}
 test('异步读取期间输入的新修改不会被刷新覆盖',async()=>{
  let resolve;const pending=new Promise(r=>resolve=r);const {run}=setup(async url=>pending);
  const operation=run("loadNote('n',{guard:true})");run("V.revision++;V.dirty=true;V.note.title='用户新标题'");resolve({id:'n',title:'服务端旧标题',items:[]});

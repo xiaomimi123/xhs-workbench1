@@ -33,9 +33,15 @@ export function assertBrowserAccess(id){
  if(s.kind==='open')return;
  // 没有 source 标记：旧版本写的，或某个 agent 直接改了文件（Codex 就发生过），要让用户知道并核对
  const external=s.source!=='workbench'&&!s.manuallyResolvedAt;
- throw httpError(409,`自动访问已锁定：${s.reason}`
+ // 先说「怎么解开」：只有这一条能让对话继续；关浏览器控制只对 CLI 模式有用（收件箱模式下不管浏览器开没开都会查这把锁）
+ const fix=s.kind==='paused'?'解开办法：到「竞品对标 → 采集状态」点「恢复自动访问」。'
+  :s.kind==='login'?'解开办法：到「竞品对标」点「先核对登录账号」，确认登录后会自动解开。'
+  :'这是平台限制，要人工确认解除：到「竞品对标 → 采集状态 → 遇到验证码或访问受限时」处理。';
+ const err=httpError(409,`自动访问已锁定：${s.reason}。${fix}`
   +(external?'（这个锁没有工作台的来源标记：可能是旧版本写的，也可能是某个 agent 直接改了文件。请先核对账号是否真的被限制；确认没有，可在网页里人工解除）':'')
-  +'。只想聊天、不用浏览器的话，到「连接与设置」把浏览器控制关掉就能继续对话。');
+  +'只想聊天、不用浏览器的话，也可以到「连接与设置」把浏览器方式设为「无」（收件箱模式下这样做没用，请按上面的办法解开）。');
+ err.lockKind=s.kind;
+ throw err;
 }
 function disarmCollection(id, reason) {
  const p=path.join(accountDir(id),'benchmarks','collection.json');const q=readJson(p,null);
