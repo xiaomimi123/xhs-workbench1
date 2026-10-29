@@ -1492,6 +1492,7 @@ const info = {
   skillDir: SKILL_DIR,
 };
 store.writeJson(P.serverInfo, info);
+try { if (system.refreshAutostart()) log(`开机自启指向的不是当前版本目录，已改写为 v${VERSION}`); } catch (err) { log(`刷新开机自启失败：${err.message}`); }
 log(`工作台已启动 ${info.url}（pid ${process.pid}，父进程 pid ${process.ppid}${previousInstance ? `，上一个实例 pid ${previousInstance.pid} ${previousInstance.alive ? '仍在运行' : '已不在'}` : ''}${restoredFromDisk ? `，从磁盘恢复 ${restoredFromDisk} 个收件箱任务` : ''}）`);
 process.on('exit', (code) => { try { log(`工作台进程退出（pid ${process.pid}，退出码 ${code}）`); } catch { /* 日志目录不可写时忽略 */ } });
 process.on('uncaughtException', (err) => { try { log(`未捕获的异常，进程退出：${err && err.stack ? err.stack.split('\n').slice(0, 4).join(' | ') : err}`); } catch { /* 忽略 */ } process.exit(1); });

@@ -11,7 +11,7 @@
 //   node scripts/workbench.mjs start [--open]                启动工作台（已运行则复用）
 //   node scripts/workbench.mjs open                          在浏览器打开工作台
 //   node scripts/workbench.mjs status                        查看运行与连接状态
-//   node scripts/workbench.mjs stop                          停止工作台
+//   node scripts/workbench.mjs stop [--for-upgrade]          停止工作台；--for-upgrade：只在运行中的版本比本包旧、且没有任务在跑时才停（中枢接入器每次打开应用前调用；有任务在跑退出码 3）
 //   node scripts/workbench.mjs browser-setup [--engine playwright|chrome] [--headless] [--yes]
 //                                                            为 CLI agent 配置浏览器控制
 //   node scripts/workbench.mjs browser-mode readonly|test   切换 CodeBuddy 的浏览器权限档（readonly 只读 / test 测试档）
@@ -43,6 +43,7 @@ import { decodeText, writeTaskFile } from '../server/inbox-files.mjs';
 import { applyBrowser, migrateLegacyProfile } from '../server/browser.mjs';
 import { applyHubDefaults } from '../server/hub-env.mjs';
 import { reportHealth } from '../server/health-outbox.mjs';
+import { compareVersions, restartBlocker } from '../server/self-update.mjs';
 
 applyHubDefaults();  // 由 agent 直接运行命令时也接上本机中枢接入器（start 启动的服务会继承这些变量）
 
@@ -397,10 +398,25 @@ const commands = {
   async stop() {
     const info = serverInfo();
     if (!(await health(info))) return console.log('工作台未运行。');
+    if (flags['for-upgrade']) {
+      // 中枢接入器每次打开应用前调用：运行中的版本不比本包旧就什么都不做；比本包旧但还有任务在跑也不停（退出码 3），免得打断员工的工作
+      if (compareVersions(info.version, VERSION) >= 0) return console.log(`运行中的是 v${info.version}，不比 v${VERSION} 旧，不用升级。`);
+      const { status } = await api('GET', '/api/bridge');
+      const blocker = restartBlocker(status);
+      if (!blocker.ok) {
+        console.log(`BUSY：运行中的 v${info.version} 比 v${VERSION} 旧，但${blocker.reason}`);
+        process.exitCode = 3;
+        return;
+      }
+      console.log(`运行中的 v${info.version} 比 v${VERSION} 旧，没有任务在跑，停止它以便升级。`);
+    }
     try {
       // Windows 上 SIGTERM 等于直接结束进程，服务自己来不及写日志，所以由命令行记一笔：以后能分清是谁停的
-      try { fs.appendFileSync(path.join(P.logs, 'server.log'), `[${new Date().toISOString()}] 收到 stop 命令（命令行 pid ${process.pid}，父进程 pid ${process.ppid}），停止工作台 pid ${info.pid}\n`); } catch { /* 日志写不了不影响停止 */ }
+      try { fs.appendFileSync(path.join(P.logs, 'server.log'), `[${new Date().toISOString()}] 收到 stop 命令${flags['for-upgrade'] ? '（升级）' : ''}（命令行 pid ${process.pid}，父进程 pid ${process.ppid}），停止工作台 pid ${info.pid}
+`); } catch { /* 日志写不了不影响停止 */ }
       process.kill(info.pid, 'SIGTERM');
+      // 等端口释放，调用方（升级）紧接着要启动新版本
+      for (let i = 0; i < 40 && (await health(info)); i++) await sleep(200);
       console.log('工作台已停止。');
     } catch (err) {
       fail(`停止失败：${err.message}`);

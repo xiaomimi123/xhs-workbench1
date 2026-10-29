@@ -61,6 +61,22 @@ function initToken() {
 
 // ---------- 实时事件 ----------
 
+// 工作台被升级重启（员工双击桌面图标、或点了「重启升级」）后，这个页面还是旧版本的界面：服务回来且版本变了就自动刷新
+let upgradeWatch = null;
+function reloadWhenUpgraded() {
+  if (upgradeWatch) return;
+  const from = S.info?.version;
+  const started = Date.now();
+  upgradeWatch = setInterval(async () => {
+    if (Date.now() - started > 3 * 60_000) { clearInterval(upgradeWatch); upgradeWatch = null; return; }
+    try {
+      const st = await api('GET', '/api/state');
+      if (st.version && from && st.version !== from) location.reload();
+      else { clearInterval(upgradeWatch); upgradeWatch = null; }  // 服务回来了但版本没变：只是网络抖动，事件流会自己重连
+    } catch { /* 服务还没起来，下一轮再看 */ }
+  }, 3000);
+}
+
 function connectEvents() {
   const es = new EventSource(`/api/events?t=${encodeURIComponent(S.token)}`);
   es.onmessage = (e) => {
@@ -110,6 +126,7 @@ function connectEvents() {
   es.onerror = () => {
     S.bridge = null;
     renderBridge('工作台已断开');
+    reloadWhenUpgraded();
   };
 }
 

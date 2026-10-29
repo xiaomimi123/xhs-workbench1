@@ -78,6 +78,28 @@ export function autostartStatus() {
   return { platform: PLATFORM, enabled: fs.existsSync(file), file };
 }
 
+/** 自启脚本是否还指向别的版本目录（升级后旧版本目录会被清理，指着它的自启就失效了，或每次开机都拉起旧版本）。只比较内容，不碰 launchctl / systemctl */
+export function autostartDrift(read = (f) => fs.readFileSync(f)) {
+  const file = autostartFile();
+  if (!fs.existsSync(file)) return false;
+  let cur;
+  try {
+    const buf = read(file);
+    cur = file.endsWith('.vbs') ? buf.toString('utf16le').replace(/^﻿/, '') : buf.toString('utf8');
+  } catch { return false; }
+  return cur !== autostartContent();
+}
+
+/** 已开启自启但内容过期时重写（工作台每次启动调用一次）。macOS / Linux 下次登录生效，不立即重新注册。返回是否改写了 */
+export function refreshAutostart() {
+  if (!autostartDrift()) return false;
+  const file = autostartFile();
+  const content = autostartContent();
+  if (file.endsWith('.vbs')) fs.writeFileSync(file, '﻿' + content, 'utf16le');
+  else fs.writeFileSync(file, content);
+  return true;
+}
+
 /** 开启 / 关闭开机自启。关闭只删除启动项，不会停掉正在运行的工作台 */
 export function setAutostart(on) {
   const file = autostartFile();
