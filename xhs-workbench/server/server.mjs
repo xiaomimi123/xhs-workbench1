@@ -5,6 +5,7 @@ import { readHubCapabilities, assertBrowserCapability } from './hub-capabilities
 import {VideoDescriptionWorkflow} from './video-description-workflow.mjs';
 import {VideoRetrieval} from './video-retrieval.mjs';
 import { hubGen } from './hub-gen.mjs';
+import { UpdateChecker, restartBlocker, spawnRestartHelper } from './self-update.mjs';
 import {videoService} from './video-service.mjs';
 import {VideoWorkflow} from './video-workflow.mjs';
 import { getImageServiceSettings, saveImageServiceSettings, testImageServiceConnection } from './image-service.mjs';
@@ -162,6 +163,7 @@ function writeObservationCheckpoint(task, result) {
   return { warning };
 }
 
+const updateChecker = new UpdateChecker({ hubGen, current: VERSION });
 const bridge = new Bridge({ inboxFile: path.join(P.run, 'inbox-tasks.json'), browserWorker, onBenchmarkVerified: writeVerifiedCheckpoint, onBenchmarkObservation: writeObservationCheckpoint,
   onBrowserPrepared: (task, result) => {
     const acc = store.getAccount(task.accountId);
@@ -777,6 +779,24 @@ async function handleApi(req, res, url) {
         bridge: { ...bridge.status(), browserWorker: workerInfo() },
         accounts: store.getAccounts(),
       });
+
+    // ----- 新版本提示与重启升级 -----
+    case 'GET /api/update': {
+      const u = await updateChecker.check({ force: q.get('refresh') === '1' });
+      return sendJson(res, 200, { ...u, busy: restartBlocker(bridge.status()) });
+    }
+    case 'POST /api/update/restart': {
+      const u = await updateChecker.check({ force: true });
+      if (!u.available) throw store.httpError(409, '中枢上没有比当前更新的版本');
+      const blocker = restartBlocker(bridge.status());
+      if (!blocker.ok) throw store.httpError(409, blocker.reason);
+      const r = spawnRestartHelper({ pid: process.pid, logFile: path.join(P.logs, 'server.log') });
+      if (!r.ok) throw store.httpError(409, r.error);
+      log(`员工在网页点了重启升级：v${VERSION} → v${u.latest}，停止本进程（pid ${process.pid}），由辅助进程调接入器启动新版本`);
+      sendJson(res, 200, { ok: true, from: VERSION, to: u.latest });
+      setTimeout(() => process.exit(0), 400);  // 响应发完再退，辅助进程等到这个 pid 消失才启动新版本
+      return;
+    }
 
     // ----- 连接 -----
     case 'GET /api/bridge':

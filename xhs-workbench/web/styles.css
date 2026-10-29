@@ -671,3 +671,10 @@ mark { background: var(--mark-bg); color: inherit; border-radius: 2px; padding: 
 .theme-seg button + button { border-left: 1px solid var(--line); }
 .theme-seg button:hover { background: var(--hover); }
 .theme-seg button.active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+
+/* ---------- 新版本提示条 ---------- */
+.update-bar {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 8px 16px; background: var(--brand-soft); border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.update-actions { display: flex; gap: 8px; flex: none; }

@@ -3,6 +3,7 @@ import {mountVideoSettings} from './video-service-settings.js';
 import {mountImageServiceSettings} from './image-service-settings.js';
 import {mountAgentSetup} from './agent-setup.js';
 import { initTheme, appearanceCardHtml, mountAppearance } from './theme.js';
+import { initUpdateBar } from './update-bar.js';
 import { md, esc, stripFrontmatter } from './md.js';
 import { S, $, api, acc, toast, showOverlay, fmtTime, currentAccount, withBusy, setHooks, confirmDialog, confirmLeave } from './core.js';
 import * as benchmark from './modules/benchmark.js';
@@ -1094,6 +1095,7 @@ async function boot() {
   refreshAlerts();
   setInterval(refreshAlerts, 60_000);
   onboarding.maybeAutoShow();
+  initUpdateBar();
 }
 
 boot();

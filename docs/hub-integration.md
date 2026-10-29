@@ -49,7 +49,7 @@ node xhs-workbench/scripts/workbench.mjs start --open
 | 运行要求 | Node.js ≥ 18。缺 Node 时接入器给出安装指引；**ffmpeg 不是必需**（只有参考视频和视频创作需要），缺失不影响启动，`node …/workbench.mjs doctor` 会列出缺什么、怎么装 |
 | 数据位置 | `~/XHS-Workbench`（`XHS_WORKSPACE` 可改），在包目录之外：换版本、清理旧版本目录都不影响账号、笔记、登录资料、排期 |
 | 升级 | 每次启动时检查数据版本：版本变化先自动备份（`backups/upgrade-*.zip`）再迁移；迁移失败不推进版本、保留备份、网页显示原因；数据来自更新版本（被换成了旧包）时拒绝启动且不改任何数据 |
-| 不被打断 | 工作台里有定时发布、定时检查评论，**接入器不要在它运行时强制重启**；有新版本时返回现有地址并提示“关闭后再打开即可升级”（与中枢设计一致）。要手动升级：`workbench.mjs upgrade --package <zip> --yes`（先备份，旧版保留为 `.bak-<版本>` 可回退） |
+| 不被打断 | 工作台里有定时发布、定时检查评论，**接入器不要在它运行时强制重启**；有新版本时接入器返回现有地址并提示“关闭后再打开即可升级”（与中枢设计一致）。**但员工不会自己去关**，所以 0.8.22 起工作台网页自己带「新版本提示 + 重启升级」：查中枢 `GET /api/v1/apps`，没有任务在跑才允许点，停掉自己后由 `scripts/restart-self.mjs` 调接入器 `open-app` 启动新版（见 `server/self-update.mjs`）。要手动升级：`workbench.mjs upgrade --package <zip> --yes`（先备份，旧版保留为 `.bak-<版本>` 可回退） |
 | 停止 | `workbench.mjs stop`（由员工对 agent 说“关闭小红书工作台”触发） |
 | 首次连接 agent | 接入器只跑 `setup` 和 `start --open`，不跑连接自检。工作台打开后，**网页里会直接出现“连接你的 agent”卡片**，列出本机检测到的 agent（含 WorkBuddy 等桌面类），员工点一下就连好，不需要回到 agent 里说命令 |
 
