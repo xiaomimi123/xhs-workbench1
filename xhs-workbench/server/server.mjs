@@ -5,6 +5,7 @@ import { readHubCapabilities, assertBrowserCapability } from './hub-capabilities
 import {VideoDescriptionWorkflow} from './video-description-workflow.mjs';
 import {VideoRetrieval} from './video-retrieval.mjs';
 import { hubGen } from './hub-gen.mjs';
+import { HubHeartbeat } from './hub-heartbeat.mjs';
 import { UpdateChecker, restartBlocker, spawnRestartHelper } from './self-update.mjs';
 import {videoService} from './video-service.mjs';
 import {VideoWorkflow} from './video-workflow.mjs';
@@ -200,6 +201,9 @@ function broadcast(event) {
 setInterval(() => {
   for (const res of sseClients) res.write(': ping\n\n');
 }, 25_000).unref();
+
+// 网页开着（有实时连接）就每分钟向中枢报到，控制台「在线」据此显示；没接中枢的工作台什么都不做
+new HubHeartbeat({ hubGen, isActive: () => sseClients.size > 0 }).start();
 
 // 数据目录被 agent 改动时通知前端刷新。恢复备份会整体替换目录，之后需重新建立监听
 let watchers = [];
