@@ -7,11 +7,13 @@ import {P} from './paths.mjs';
 import {readJson,writeJson,newId,listAccounts,httpError} from './store.mjs';
 import {canonicalNoteUrl} from './browser-read.mjs';
 import {lint} from '../web/lint.js';
+import {readHubServers} from './hub-mcp.mjs';
 const hash=v=>crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const active=j=>['queued','running'].includes(j.status);
 const now=()=>new Date().toISOString();
 const text=(v,max,empty=false)=>{if(typeof v!=='string'||[...v].length>max||(!empty&&!v.trim()))throw httpError(400,'回复文字为空或超出长度');return v.trim();};
-function sharedGuidance(){const dir=path.join(P.knowledge,'品牌口径');if(!fs.existsSync(dir))return [];return fs.readdirSync(dir).filter(n=>n.endsWith('.md')).slice(0,10).flatMap(name=>{const f=path.join(dir,name);if(!fs.lstatSync(f).isFile()||fs.statSync(f).size>40000)return [];return [{name,content:fs.readFileSync(f,'utf8').slice(0,6000)}];});}
+// 接入了中枢时，公司口径（品牌调性、售后话术）以中枢知识库为准，agent 用 search_knowledge 查（提示词里的「公司口径」一节会告诉它）；本地 品牌口径/ 只在没接中枢时当后备，避免两边口径对不上
+function sharedGuidance(){if(Object.keys(readHubServers().servers).length)return [];const dir=path.join(P.knowledge,'品牌口径');if(!fs.existsSync(dir))return [];return fs.readdirSync(dir).filter(n=>n.endsWith('.md')).slice(0,10).flatMap(name=>{const f=path.join(dir,name);if(!fs.lstatSync(f).isFile()||fs.statSync(f).size>40000)return [];return [{name,content:fs.readFileSync(f,'utf8').slice(0,6000)}];});}
 export class EngageWorkflow{
  constructor({submit,changed=()=>{},guidance=sharedGuidance}){Object.assign(this,{submit,changed,guidance});this.index=new Map();}
  items(a){return readJson(path.join(accRoot(a),'engage','items.json'),{items:[]}).items||[];}

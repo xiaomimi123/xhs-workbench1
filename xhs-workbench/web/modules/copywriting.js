@@ -96,7 +96,7 @@ function lintHtml(data) {
   const list = issues.length
     ? `<ul class="issues">${issues.map((i) => `<li class="${i.level}"><strong>${esc(i.where)}</strong> ${i.word ? `出现「${esc(i.word)}」（${esc(i.category)}）：` : ''}${esc(i.tip)}</li>`).join('')}</ul>`
     : `${icon("check", "icon-ok")} 没有发现字数超限或常见违禁词`;
-  return counter + list;
+  return counter + list + '<div class="muted" style="font-size:12px;margin-top:6px">这里的词表只含常见风险词；最终以中枢《违禁词与广告法》为准，发布前请点「深度检查」。</div>';
 }
 
 function previewHtml(data) {

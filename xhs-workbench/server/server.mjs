@@ -344,18 +344,18 @@ const topicWorkflow = new TopicWorkflow({
   submit: task => {
     const account=store.getAccount(task.accountId);
     if(!account)throw new Error('账号不存在');
-    taskClass.set(task.id, 'topic'); bridge.submit({...task, prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
+    taskClass.set(task.id, 'topic'); bridge.submit({...task, prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false,hubBrief:true})});
   },
 });
 topicWorkflow.recover();
 const analyticsWorkflow=new AnalyticsWorkflow({
  changed:account=>broadcast({type:'content.changed',account,area:'analytics'}),
- submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');taskClass.set(task.id, 'analytics'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});},
+ submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');taskClass.set(task.id, 'analytics'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false,hubBrief:true})});},
 });
 analyticsWorkflow.recover();
 const engageWorkflow=new EngageWorkflow({
  changed:account=>broadcast({type:'content.changed',account,area:'engage'}),
- submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');taskClass.set(task.id, 'engage'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});},
+ submit:task=>{const account=store.getAccount(task.accountId);if(!account)throw new Error('账号不存在');taskClass.set(task.id, 'engage'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false,hubBrief:true})});},
 });
 engageWorkflow.recover();
 
@@ -364,7 +364,7 @@ const copyWorkflow = new CopyWorkflow({
   submit: task => {
     const account=store.getAccount(task.accountId);
     if(!account)throw new Error('账号不存在');
-    taskClass.set(task.id, 'copy'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
+    taskClass.set(task.id, 'copy'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false,hubBrief:true})});
   },
 });
 copyWorkflow.recover();
@@ -387,7 +387,7 @@ const coverWorkflow = new CoverWorkflow({
   submit: task => {
     const account=store.getAccount(task.accountId);
     if(!account)throw new Error('账号不存在');
-    taskClass.set(task.id, 'cover'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false})});
+    taskClass.set(task.id, 'cover'); bridge.submit({...task,prompt:buildPrompt({session:{messages:[]},account,text:task.prompt,includeHistory:false,hubBrief:true})});
   },
 });
 coverWorkflow.recover();
@@ -645,7 +645,7 @@ const collectionQueue = new BenchmarkQueue({
       (viaAgent ? `用 WorkBuddy 浏览器工具（mcp__browser__*）在用户自己的浏览器里新开标签页操作，按 playbooks/browser.md 先核对登录账号；只读档没有点击工具，看笔记时用 tab_goto 打开页面上卡片链接的原文（带全部参数，不拼接不删参数）；不点赞、不评论、不关注、不私信、不发布；遇到验证码或风险提示立即停止并说明。` : '');
     bridge.submit({ id, accountId, account, benchmark, timeoutMs,
       kind: useWorker ? 'benchmark.verify' : undefined,
-      prompt: buildPrompt({ session: { messages: [] }, account, text, includeHistory: false }) });
+      prompt: buildPrompt({ session: { messages: [] }, account, text, includeHistory: false, hubBrief: true }) });
     if (cfg?.mode === 'inbox') setTimeout(() => {
       if (bridge.tasks.has(id)) bridge.cancel(id);
     }, timeoutMs).unref();

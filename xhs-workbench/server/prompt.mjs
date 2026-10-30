@@ -15,11 +15,33 @@ export function hubGuidance() {
     '- 优先级：文件格式、存放位置、检查点、浏览器与账号安全、不自动发布，以操作手册为准；业务标准以公司技能为准。两者直接冲突时先停下来说明，不要自己挑一个。',
     '- 没有这些工具、没有权限或读取失败时，直接按操作手册做，不要重试，也不要因此中断。',
     '- 读了公司技能或知识库后，如果发现内容有错误、过时或缺步骤，用 propose_improvement 提交改进建议（只是建议，不要自己改；有把握才提，不是每次都提）。',
-    '- 做完数据复盘后，按数据复盘手册「沉淀到公司知识库」一节：先向用户列出值得沉淀的结论并询问，用户明确确认后才用 propose_improvement 提交到「复盘总结」知识库；自动任务里不提交。',
+    '- 做完数据复盘后，按数据复盘手册「沉淀到公司知识库」一节：先向用户列出值得沉淀的结论并询问，用户明确确认后才用 propose_improvement 提交到「复盘总结」知识库（中枢没有这个库时如实告诉用户，不要硬提交）；自动任务里不提交。',
+    ...knowledgeBoundary(),
   ];
 }
 
-export function buildPrompt({ session, account, text, includeHistory, allowHub = false }) {
+/** 知识来源的分工：公司口径在中枢（权威），本地 knowledge/ 只放本账号的笔记。两处写法不一致时 agent 会来回矛盾，所以所有带中枢工具的任务都带这几条。 */
+export function knowledgeBoundary() {
+  return [
+    '- **公司口径以中枢为准**：品牌调性与人设、产品卖点、违禁词与广告法、爆款规律、售后话术这类「公司说了算」的内容，用 search_knowledge 查中枢知识库（《品牌调性与人设》《产品资料库》《违禁词与广告法》《历史爆款笔记》《售后 FAQ》等），不要拿本地文件当公司口径。',
+    '- 本地 `knowledge/` 只放**本账号的笔记**（账号定位、对标拆解、复盘结论、账号经验、素材库）。本地笔记和中枢冲突时以中枢为准，并告诉用户有出入。',
+    '- 热点、平台趋势这类公司资料里没有的**外部信息**可以联网查（工作台允许时）；公司自己的事不要用联网搜索代替中枢。',
+    '- 不要把公司口径类内容写进本地知识库当成公司标准；值得全公司共享的内容用 propose_improvement 提给中枢（由主管审核），不要自己改。',
+  ];
+}
+
+/** 受控任务（文案 / 封面 / 选题 / 评论回复 / 数据复盘）带的简版：只读查阅公司口径，不改变这些任务自己的输出范围和格式。 */
+export function hubBrief() {
+  return [
+    '## 公司口径（中枢为准，只读查阅）',
+    '- 有中枢工具时，先用 search_knowledge / read_skill 查公司口径再做本任务；这只是查阅，**不改变本任务的输出范围、文件位置和格式要求**，也不要因此去改其他文件或提交建议。',
+    // 受控任务自己的提示词写明了能不能联网、能不能提建议，这里只说知识来源，避免和任务本身的限制矛盾
+    ...knowledgeBoundary().filter((l) => !l.includes('propose_improvement') && !l.includes('联网')),
+    '- 没有中枢工具、没有权限或读取失败时，不要重试，直接按本任务给的资料做。',
+  ];
+}
+
+export function buildPrompt({ session, account, text, includeHistory, allowHub = false, hubBrief: brief = false }) {
   const accDir = path.relative(WORKSPACE, accountDir(account.id)) || '.';
   const accountLines = [
     `名称：${account.name}（id: ${account.id}）`,
@@ -54,6 +76,7 @@ export function buildPrompt({ session, account, text, includeHistory, allowHub =
 
   // 只有会带中枢工具的任务（普通对话）且确实接入了中枢时才加；受控任务和只读采集任务没有中枢工具，不加
   if (allowHub && Object.keys(readHubServers().servers).length) parts.push('', ...hubGuidance());
+  else if (brief && Object.keys(readHubServers().servers).length) parts.push('', ...hubBrief());
 
   const library = materialsSummary();
   if (library) {

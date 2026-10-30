@@ -333,7 +333,8 @@ function viewKnowledge() {
     <div class="row" style="margin-bottom:12px">
       <div>
         <h1 class="page-title">${icon("book")} 知识库</h1>
-        <div class="muted" style="font-size:13px">品牌口径、爆款方法、对标拆解、复盘结论都沉淀在这里，agent 写稿时会参考。</div>
+        <div class="muted" style="font-size:13px">这里放<b>本账号的笔记</b>：账号定位、对标拆解、复盘结论、账号经验。agent 写稿时会参考。</div>
+        <div class="muted" style="font-size:12px;margin-top:2px">${S.info?.hub?.connected ? '公司统一口径（品牌调性、违禁词、爆款规律、售后话术）在企业中枢知识库，agent 会自动查；两边不一致以中枢为准。' : '还没接入企业中枢：现在只用这里的笔记；接入后公司统一口径以中枢知识库为准。'}</div>
       </div>
       <div class="spacer"></div>
       <button class="btn" id="kb-new">新建文档</button>

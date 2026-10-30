@@ -15,7 +15,9 @@ const mats = await server('materials.mjs');
 test('初始化：知识库模板按 manifest 复制成中文路径', () => {
   const { docs, folders } = store.listKnowledge();
   assert.ok(docs.some((d) => d.path === '账号定位/账号定位模板.md'));
-  assert.ok(folders.includes('爆款方法论'));
+  assert.ok(folders.includes('对标拆解') && folders.includes('复盘结论') && folders.includes('素材库'));
+  // 公司口径在中枢：新装的本地知识库不再放「品牌口径」「爆款方法论」
+  assert.ok(!folders.includes('品牌口径') && !folders.includes('爆款方法论'));
   assert.ok(fs.existsSync(path.join(WS, 'accounts', ACC, 'notes')));
   assert.ok(fs.existsSync(path.join(WS, 'accounts', ACC, 'benchmarks', 'checkpoints', 'pending')));
 });

@@ -14,7 +14,7 @@ const list=(v,max,fn)=>{if(!Array.isArray(v)||v.length>max)throw new Error('结�
 const contracts={
  rewrite:'改写正文并优化标签，保留原意，不改变原标题。若正文为空则写正文。结果 JSON：{"content":"1000字以内正文","tags":["不带#的标签，最多8个"]}。',
  titles:'根据正文生成5个不同角度的标题备选，每个不超过20字；不改正文或正式标题。结果 JSON：{"titles":[{"title":"标题","reason":"对应正文的推荐理由"}]}。',
- check:'检查标题正文标签的表达、事实依据、品牌语气、开头结尾和风险用语。结果 JSON：{"summary":"检查摘要","issues":[{"severity":"warning或error或info","quote":"对应原文","suggestion":"修改建议"}],"unverified":["尚需核实的事实"]}。无问题可用空数组。不得声称平台审核保证通过。'
+ check:'检查标题正文标签的表达、事实依据、品牌语气、开头结尾和风险用语。有中枢工具时，先用 search_knowledge 查中枢《违禁词与广告法》和《品牌调性与人设》，风险用语和品牌语气以它们为准（本地词表只是常见词）。结果 JSON：{"summary":"检查摘要","issues":[{"severity":"warning或error或info","quote":"对应原文","suggestion":"修改建议"}],"unverified":["尚需核实的事实"]}。无问题可用空数组。不得声称平台审核保证通过。'
 };
 export class CopyWorkflow {
  constructor({submit,changed=()=>{},sources=topicSources}){Object.assign(this,{submit,changed,sources});this.index=new Map();}

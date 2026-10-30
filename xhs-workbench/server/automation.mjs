@@ -254,8 +254,9 @@ const PROMPTS = {
     (cfg.autoSend ? `，然后直接发送回复（本次最多 ${cfg.maxPerRun} 条，用户已开启自动发送）。` : '，只起草、不要发送（等用户在工作台确认）。'),
   analytics: (acc) => `【自动任务 · 数据抓取】请按 playbooks/analytics.md 抓取最新的笔记数据和账号数据，更新 accounts/${acc}/analytics/ 下的 notes.json 和 account.json。`,
   curator: (acc) =>
-    `【自动任务 · 知识库管家】请按 playbooks/knowledge.md 的「知识库管家」整理知识库：把最近新增的拆解 / 复盘材料归档到位、` +
-    `合并重复内容、补全 frontmatter、维护「知识库地图.md」索引，完成后汇报改动清单。`,
+    `【自动任务 · 知识库管家】请按 playbooks/knowledge.md 的「知识库管家」整理**本账号笔记**（账号定位 / 对标拆解 / 复盘结论 / 账号经验 / 素材库）：把最近新增的拆解 / 复盘材料归档到位、` +
+    `合并重复内容、补全 frontmatter、维护「知识库地图.md」索引，完成后汇报改动清单。` +
+    `不要整理、合并或改写公司口径类内容（品牌口径、爆款方法论等历史目录只读，公司口径以中枢为准）；发现值得全公司共享的结论，只在汇报里列出，不要自己写进公司库。`,
 };
 
 export class Scheduler {

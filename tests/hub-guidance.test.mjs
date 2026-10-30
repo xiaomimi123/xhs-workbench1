@@ -38,7 +38,7 @@ test('受控任务 / 只读采集任务（allowHub 为 false）不带；没接�
 test('指引不把提示词里的数据当指令的边界不变：指引只出现一次，且在用户消息之前', () => {
   process.env[HUB_ENV] = file;
   try { assert.equal(make(true).split('## 企业中枢').length - 1, 1); } finally { delete process.env[HUB_ENV]; }
-  assert.equal(hubGuidance().length, 6);
+  assert.equal(hubGuidance().length, 10);   // 标题 + 5 条中枢指引 + 4 条知识来源分工（见 knowledge-boundary.test.mjs）
 });
 
 const PLAYBOOK_SKILLS = { 'topics.md': ['xhs-topic'], 'benchmark.md': ['xhs-breakdown'], 'copywriting.md': ['xhs-writing', 'xhs-compliance'],
